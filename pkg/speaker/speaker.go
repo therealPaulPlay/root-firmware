@@ -40,7 +40,7 @@ func (s *Speaker) PlayFile(filePath string) error {
 		return fmt.Errorf("audio file not found: %s", filePath)
 	}
 
-	cmd := exec.Command("aplay", "-D", "plughw:0,0", filePath)
+	cmd := exec.Command("aplay", "-D", "default", filePath)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to play audio: %w", err)
 	}
@@ -48,10 +48,10 @@ func (s *Speaker) PlayFile(filePath string) error {
 	return nil
 }
 
-// StartStreaming starts audio streaming for babyphone mode
+// StartStream starts audio streaming for 2-way-audio mode
 // Returns a writer - write PCM audio data (16-bit, 44.1kHz, mono)
 // Call Close() on the writer to stop streaming
-func (s *Speaker) StartStreaming() (io.WriteCloser, error) {
+func (s *Speaker) StartStream() (io.WriteCloser, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -59,7 +59,7 @@ func (s *Speaker) StartStreaming() (io.WriteCloser, error) {
 		return nil, fmt.Errorf("already streaming")
 	}
 
-	cmd := exec.Command("aplay", "-D", "plughw:0,0", "-f", "S16_LE", "-r", "44100", "-c", "1")
+	cmd := exec.Command("aplay", "-D", "default", "-f", "S16_LE", "-r", "44100", "-c", "1")
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
