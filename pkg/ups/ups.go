@@ -2,9 +2,7 @@ package ups
 
 import (
 	"fmt"
-	"os/exec"
 	"sync"
-	"time"
 
 	"periph.io/x/conn/v3/i2c"
 	"periph.io/x/conn/v3/i2c/i2creg"
@@ -12,21 +10,17 @@ import (
 )
 
 const (
-	ina219Addr            = 0x43
-	regBusVoltage         = 0x02
-	regCurrent            = 0x04
-	regCalibration        = 0x05
-	calValue              = 26868
-	currentLSB            = 0.1524
-	lowPowerLevel         = 10
-	upgradesEnabledLevel  = 80
-	upgradesDisabledLevel = 50
-	checkInterval         = 30 * time.Second
+	ina219Addr     = 0x43
+	regBusVoltage  = 0x02
+	regCurrent     = 0x04
+	regCalibration = 0x05
+	calValue       = 26868
+	currentLSB     = 0.1524
+	lowPowerLevel  = 10
 )
 
 type UPS struct {
-	dev      i2c.Dev
-	stopChan chan struct{}
+	dev i2c.Dev
 }
 
 var instance *UPS
@@ -54,12 +48,10 @@ func Init() {
 		}
 
 		instance = &UPS{
-			dev:      dev,
-			stopChan: make(chan struct{}),
+			dev: dev,
 		}
 
-		go instance.monitor()
-		fmt.Println("UPS monitoring started")
+		fmt.Println("UPS initialized")
 	})
 }
 
@@ -67,45 +59,6 @@ func Get() *UPS {
 	return instance
 }
 
-func (u *UPS) monitor() {
-	ticker := time.NewTicker(checkInterval)
-	defer ticker.Stop()
-
-	lastUpgradeState := false // Track current unattended-upgrades state
-
-	for {
-		select {
-		case <-ticker.C:
-			percent := u.GetBatteryPercent()
-			onACPower := u.OnACPower()
-
-			shouldRunUpgrades := lastUpgradeState
-
-			if lastUpgradeState {
-				if percent < upgradesDisabledLevel {
-					shouldRunUpgrades = false // Disable if battery is below 50%
-				}
-			} else {
-				if onACPower && percent >= upgradesEnabledLevel {
-					shouldRunUpgrades = true // Enable if battery is above 80% and on AC power
-				}
-			}
-
-			if shouldRunUpgrades != lastUpgradeState {
-				if shouldRunUpgrades {
-					exec.Command("systemctl", "unmask", "unattended-upgrades").Run()
-					exec.Command("systemctl", "start", "unattended-upgrades").Run()
-				} else {
-					exec.Command("systemctl", "mask", "unattended-upgrades").Run()
-				}
-				lastUpgradeState = shouldRunUpgrades
-			}
-
-		case <-u.stopChan:
-			return
-		}
-	}
-}
 
 func (u *UPS) readRegister(reg byte) int {
 	write := []byte{byte(regCalibration), byte(calValue >> 8), byte(calValue & 0xFF)}

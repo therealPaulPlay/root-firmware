@@ -9,7 +9,7 @@ import (
 	"github.com/gofrs/uuid"
 )
 
-const configPath = "/home/pi/.firmware-data/config.json"
+const configPath = "/data/.firmware-data/config.json"
 
 type Config struct {
 	mu   sync.RWMutex
