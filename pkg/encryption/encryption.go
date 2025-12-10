@@ -11,22 +11,23 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/hkdf"
 )
 
-// EncryptionSession caches cipher objects for performance
-type EncryptionSession struct {
-	key []byte
+// Session handles AES-256-GCM encryption
+type Session struct {
 	gcm cipher.AEAD
 	mu  sync.Mutex
 }
 
-type KeyPair struct {
+// Keypair holds public and private keys for key exchange
+type Keypair struct {
 	PublicKey  []byte
 	PrivateKey []byte
 }
 
-// GenerateKeyPair creates a new Curve25519 key pair
-func GenerateKeyPair() (*KeyPair, error) {
+// GenerateKeypair creates new Curve25519 keypair for key exchange
+func GenerateKeypair() (*Keypair, error) {
 	privateKey := make([]byte, 32)
 	if _, err := rand.Read(privateKey); err != nil {
 		return nil, err
@@ -37,27 +38,49 @@ func GenerateKeyPair() (*KeyPair, error) {
 		return nil, err
 	}
 
-	return &KeyPair{PublicKey: publicKey, PrivateKey: privateKey}, nil
+	return &Keypair{PublicKey: publicKey, PrivateKey: privateKey}, nil
 }
 
-// DeriveSharedSecret computes shared secret from your private key and their public key
-func DeriveSharedSecret(privateKey, theirPublicKey []byte) ([]byte, error) {
-	sharedSecret, err := curve25519.X25519(privateKey, theirPublicKey)
+// DeriveSharedSecret computes shared secret from keypair exchange using HKDF
+func DeriveSharedSecret(yourPrivateKey, theirPublicKey []byte) ([]byte, error) {
+	if len(yourPrivateKey) != 32 || len(theirPublicKey) != 32 {
+		return nil, fmt.Errorf("keys must be 32 bytes")
+	}
+
+	secret, err := curve25519.X25519(yourPrivateKey, theirPublicKey)
 	if err != nil {
 		return nil, err
 	}
 
-	hash := sha256.Sum256(sharedSecret)
-	return hash[:], nil
-}
-
-// New creates an encryption session with cached cipher objects
-func New(key []byte) (*EncryptionSession, error) {
-	if len(key) != 32 {
-		return nil, fmt.Errorf("key must be 32 bytes")
+	// Check for all-zero shared secret (weak key)
+	allZero := true
+	for _, b := range secret {
+		if b != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		return nil, fmt.Errorf("weak shared secret detected")
 	}
 
-	block, err := aes.NewCipher(key)
+	// Use HKDF to derive key material
+	hkdfReader := hkdf.New(sha256.New, secret, nil, []byte("root-camera-encryption"))
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(hkdfReader, key); err != nil {
+		return nil, err
+	}
+
+	return key, nil
+}
+
+// FromSharedSecret creates session from shared secret
+func FromSharedSecret(sharedSecret []byte) (*Session, error) {
+	if len(sharedSecret) != 32 {
+		return nil, fmt.Errorf("shared secret must be 32 bytes")
+	}
+
+	block, err := aes.NewCipher(sharedSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -67,13 +90,13 @@ func New(key []byte) (*EncryptionSession, error) {
 		return nil, err
 	}
 
-	return &EncryptionSession{key: key, gcm: gcm}, nil
+	return &Session{gcm: gcm}, nil
 }
 
 // Encrypt encrypts plaintext using AES-256-GCM
-// Format: [nonce][ciphertext] (nonce is prepended for decryption)
+// Format: [nonce][ciphertext] (nonce prepended)
 // Returns base64-encoded result
-func (s *EncryptionSession) Encrypt(plaintext []byte) (string, error) {
+func (s *Session) Encrypt(plaintext []byte) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -87,8 +110,7 @@ func (s *EncryptionSession) Encrypt(plaintext []byte) (string, error) {
 }
 
 // Decrypt decrypts base64-encoded ciphertext
-// Extracts prepended nonce and decrypts
-func (s *EncryptionSession) Decrypt(ciphertextB64 string) ([]byte, error) {
+func (s *Session) Decrypt(ciphertextB64 string) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
