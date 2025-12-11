@@ -3,9 +3,11 @@ package relaycomm
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"time"
 
+	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/record"
@@ -16,14 +18,44 @@ import (
 
 // EncryptedRequest wraps encrypted payloads from devices
 type EncryptedRequest struct {
-	DeviceID         string `json:"deviceId"`
+	CameraID         string `json:"cameraId"`         // Target camera ID
+	DeviceID         string `json:"deviceId"`         // Source device ID
 	EncryptedPayload string `json:"encryptedPayload"` // Base64 encrypted JSON
 }
+
+// HandlerContext provides encryption context to handlers
+type HandlerContext struct {
+	DeviceID          string
+	SharedSecret      []byte
+	EncryptionSession *encryption.Session
+}
+
+/* Flow example:
+Device → Relay Server → Camera:
+	{
+		"type": "wifiScan",
+		"payload": {
+			"cameraId": "camera-uuid-123",    // ← Which camera should handle this
+			"deviceId": "device-uuid-456",     // ← Which device sent this
+			"encryptedPayload": "base64..."
+		}
+	}
+
+Camera → Relay Server → Device:
+	{
+		"type": "wifiScanResult",
+		"payload": {
+			"cameraId": "camera-uuid-123",    // ← Which camera sent this
+			"deviceId": "device-uuid-456",     // ← Which device should receive this
+			"encryptedPayload": "base64..."
+		}
+	}
+*/
 
 const keyRotationInterval = 1 * time.Hour
 
 // Middleware for e2e encryption
-func useEncryption(messageType string, handler func(json.RawMessage)) func(json.RawMessage) {
+func useEncryption(messageType string, handler func(*HandlerContext, json.RawMessage)) func(json.RawMessage) {
 	return func(payload json.RawMessage) {
 		var req EncryptedRequest
 		if err := json.Unmarshal(payload, &req); err != nil {
@@ -44,25 +76,28 @@ func useEncryption(messageType string, handler func(json.RawMessage)) func(json.
 			return
 		}
 
+		// Get camera's private key (single key for all devices)
+		cameraPrivateKey, ok := config.Get().GetKey("cameraPrivateKey")
+		if !ok {
+			Get().Send(messageType+"Result", map[string]interface{}{
+				"success": false,
+				"error":   "Camera not initialized",
+			})
+			return
+		}
+
 		// Check if key rotation is needed (keys older than 1 hour)
 		if time.Since(device.LastKeyRotation) > keyRotationInterval {
-			// Generate new keypair
-			newKeypair, err := encryption.GenerateKeypair()
-			if err == nil {
-				devices.Get().RotateKeys(req.DeviceID, device.PublicKey, newKeypair.PrivateKey)
-
-				// Notify device of new camera public key
-				Get().Send("keyRotation", map[string]interface{}{
-					"cameraPublicKey": newKeypair.PublicKey,
-				})
-
-				// Update device reference with new keys
-				device.CameraPrivateKey = newKeypair.PrivateKey
-			}
+			// Request device to rotate its keys
+			Get().Send("keyRotation", map[string]interface{}{
+				"deviceId": req.DeviceID,
+			})
+			// Device will generate new keypair and send new public key
+			// We'll update it when we receive the rotated key
 		}
 
 		// Derive shared secret using camera's private key and device's public key
-		sharedSecret, err := encryption.DeriveSharedSecret(device.CameraPrivateKey, device.PublicKey)
+		sharedSecret, err := encryption.DeriveSharedSecret(cameraPrivateKey.([]byte), device.PublicKey)
 		if err != nil {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
@@ -91,9 +126,44 @@ func useEncryption(messageType string, handler func(json.RawMessage)) func(json.
 			return
 		}
 
-		// Call the actual handler with decrypted payload
-		handler(json.RawMessage(decrypted))
+		// Create handler context with encryption info
+		ctx := &HandlerContext{
+			DeviceID:          req.DeviceID,
+			SharedSecret:      sharedSecret,
+			EncryptionSession: session,
+		}
+
+		// Call the actual handler with context and decrypted payload
+		handler(ctx, json.RawMessage(decrypted))
 	}
+}
+
+// SendEncrypted sends an encrypted response to a specific device
+func SendEncrypted(ctx *HandlerContext, messageType string, payload interface{}) error {
+	// Marshal payload to JSON
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	// Encrypt the payload
+	encryptedPayload, err := ctx.EncryptionSession.Encrypt(payloadJSON)
+	if err != nil {
+		return err
+	}
+
+	// Get camera ID
+	cameraID, ok := config.Get().GetKey("id")
+	if !ok {
+		return fmt.Errorf("camera ID not found (trying to send encrypted WS message)")
+	}
+
+	// Send encrypted response
+	return Get().Send(messageType, map[string]interface{}{
+		"cameraId":         cameraID,     // Source camera ID
+		"deviceId":         ctx.DeviceID, // Target device ID
+		"encryptedPayload": encryptedPayload,
+	})
 }
 
 // RegisterHandlers registers all relay message handlers with E2E encryption
@@ -128,12 +198,12 @@ func RegisterHandlers() {
 	relay.On("restart", useEncryption("restart", handleRestart))
 }
 
-func handleGetDevices(payload json.RawMessage) {
+func handleGetDevices(ctx *HandlerContext, payload json.RawMessage) {
 	allDevices := devices.Get().GetAll()
-	Get().Send("devicesResult", allDevices)
+	SendEncrypted(ctx, "devicesResult", allDevices)
 }
 
-func handleRemoveDevice(payload json.RawMessage) {
+func handleRemoveDevice(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		DeviceID string `json:"deviceId"`
 	}
@@ -143,12 +213,12 @@ func handleRemoveDevice(payload json.RawMessage) {
 	}
 
 	err := devices.Get().Remove(req.DeviceID)
-	Get().Send("removeDeviceResult", map[string]interface{}{
+	SendEncrypted(ctx, "removeDeviceResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
 
-func handleKickDevice(payload json.RawMessage) {
+func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		DeviceID string `json:"deviceId"`
 	}
@@ -158,20 +228,20 @@ func handleKickDevice(payload json.RawMessage) {
 	}
 
 	err := devices.Get().ScheduleKick(req.DeviceID)
-	Get().Send("kickDeviceResult", map[string]interface{}{
+	SendEncrypted(ctx, "kickDeviceResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
 
-func handleWiFiScan(payload json.RawMessage) {
+func handleWiFiScan(ctx *HandlerContext, payload json.RawMessage) {
 	networks, err := wifi.Get().Scan()
-	Get().Send("wifiScanResult", map[string]interface{}{
+	SendEncrypted(ctx, "wifiScanResult", map[string]interface{}{
 		"success":  err == nil,
 		"networks": networks,
 	})
 }
 
-func handleWiFiConnect(payload json.RawMessage) {
+func handleWiFiConnect(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		SSID     string `json:"ssid"`
 		Password string `json:"password"`
@@ -183,20 +253,20 @@ func handleWiFiConnect(payload json.RawMessage) {
 
 	// Connect method verifies internet connectivity, otherwise rejects wifi
 	err := wifi.Get().Connect(req.SSID, req.Password)
-	Get().Send("wifiConnectResult", map[string]interface{}{
+	SendEncrypted(ctx, "wifiConnectResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
 
-func handleGetEvents(payload json.RawMessage) {
+func handleGetEvents(ctx *HandlerContext, payload json.RawMessage) {
 	events, err := storage.Get().GetEventLog()
-	Get().Send("eventsResult", map[string]interface{}{
+	SendEncrypted(ctx, "eventsResult", map[string]interface{}{
 		"success": err == nil,
 		"events":  events,
 	})
 }
 
-func handleGetRecording(payload json.RawMessage) {
+func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -207,7 +277,7 @@ func handleGetRecording(payload json.RawMessage) {
 
 	filePath, err := storage.Get().GetRecordingPath(req.ID)
 	if err != nil {
-		Get().Send("recordingResult", map[string]interface{}{
+		SendEncrypted(ctx, "recordingResult", map[string]interface{}{
 			"success": false,
 		})
 		return
@@ -215,21 +285,21 @@ func handleGetRecording(payload json.RawMessage) {
 
 	// TODO: Stream file contents to relay server in chunks
 	_ = filePath
-	Get().Send("recordingResult", map[string]interface{}{
+	SendEncrypted(ctx, "recordingResult", map[string]interface{}{
 		"success": true,
 	})
 }
 
-func handleStartStream(payload json.RawMessage) {
+func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 	stream, err := record.Get().StartStream()
 	if err != nil {
-		Get().Send("streamResult", map[string]interface{}{
+		SendEncrypted(ctx, "streamResult", map[string]interface{}{
 			"success": false,
 		})
 		return
 	}
 
-	Get().Send("streamResult", map[string]interface{}{
+	SendEncrypted(ctx, "streamResult", map[string]interface{}{
 		"success": true,
 	})
 
@@ -238,14 +308,14 @@ func handleStartStream(payload json.RawMessage) {
 	_ = stream
 }
 
-func handleStopStream(payload json.RawMessage) {
+func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
 	err := record.Get().StopStream()
-	Get().Send("stopStreamResult", map[string]interface{}{
+	SendEncrypted(ctx, "stopStreamResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
 
-func handleToggleBabyphone(payload json.RawMessage) {
+func handleToggleBabyphone(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -256,13 +326,13 @@ func handleToggleBabyphone(payload json.RawMessage) {
 
 	// TODO: Implement babyphone mode (2-way audio)
 	// This would start audio streaming from device to camera
-	Get().Send("babyphoneResult", map[string]interface{}{
+	SendEncrypted(ctx, "babyphoneResult", map[string]interface{}{
 		"success": true,
 		"enabled": req.Enabled,
 	})
 }
 
-func handleSetMicrophone(payload json.RawMessage) {
+func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -272,13 +342,13 @@ func handleSetMicrophone(payload json.RawMessage) {
 	}
 
 	err := record.Get().SetMicrophoneEnabled(req.Enabled)
-	Get().Send("microphoneResult", map[string]interface{}{
+	SendEncrypted(ctx, "microphoneResult", map[string]interface{}{
 		"success": err == nil,
 		"enabled": req.Enabled,
 	})
 }
 
-func handleSetRecordingSound(payload json.RawMessage) {
+func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		PlayOnRecord bool `json:"playOnRecord"`
 		PlayOnLive   bool `json:"playOnLive"`
@@ -289,12 +359,12 @@ func handleSetRecordingSound(payload json.RawMessage) {
 	}
 
 	// TODO: Store in config and implement sound playback
-	Get().Send("recordingSoundResult", map[string]interface{}{
+	SendEncrypted(ctx, "recordingSoundResult", map[string]interface{}{
 		"success": true,
 	})
 }
 
-func handleGetHealth(payload json.RawMessage) {
+func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 	u := ups.Get()
 
 	// TODO: Get error log from somewhere
@@ -327,27 +397,27 @@ func handleGetHealth(payload json.RawMessage) {
 		}
 	}
 
-	Get().Send("healthResult", health)
+	SendEncrypted(ctx, "healthResult", health)
 }
 
-func handleGetPreview(payload json.RawMessage) {
+func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
 	frameData, err := record.Get().CapturePreview()
 	if err != nil {
-		Get().Send("previewResult", map[string]interface{}{
+		SendEncrypted(ctx, "previewResult", map[string]interface{}{
 			"success": false,
 		})
 		return
 	}
 
-	Get().Send("previewResult", map[string]interface{}{
+	SendEncrypted(ctx, "previewResult", map[string]interface{}{
 		"success": true,
 		"image":   base64.StdEncoding.EncodeToString(frameData),
 	})
 }
 
-func handleRestart(payload json.RawMessage) {
+func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
 	// Send success response before rebooting
-	Get().Send("restartResult", map[string]interface{}{
+	SendEncrypted(ctx, "restartResult", map[string]interface{}{
 		"success": true,
 	})
 

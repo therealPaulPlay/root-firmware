@@ -9,12 +9,11 @@ import (
 )
 
 type Device struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name"`
-	PublicKey        []byte    `json:"publicKey"`
-	CameraPrivateKey []byte    `json:"cameraPrivateKey"` // Camera's private key for this device
-	ConnectedAt      time.Time `json:"connectedAt"`
-	LastKeyRotation  time.Time `json:"lastKeyRotation"` // Last time keys were rotated
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	PublicKey       []byte    `json:"publicKey"` // Device's public key
+	ConnectedAt     time.Time `json:"connectedAt"`
+	LastKeyRotation time.Time `json:"lastKeyRotation"` // Last time keys were rotated
 }
 
 type Devices struct {
@@ -63,7 +62,7 @@ func (d *Devices) GetByID(id string) (*Device, bool) {
 }
 
 // Add adds a new device or updates existing one
-func (d *Devices) Add(id, name string, publicKey, cameraPrivateKey []byte) error {
+func (d *Devices) Add(id, name string, publicKey []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -80,12 +79,11 @@ func (d *Devices) Add(id, name string, publicKey, cameraPrivateKey []byte) error
 	// Add new device
 	now := time.Now()
 	filtered = append(filtered, Device{
-		ID:               id,
-		Name:             name,
-		PublicKey:        publicKey,
-		CameraPrivateKey: cameraPrivateKey,
-		ConnectedAt:      now,
-		LastKeyRotation:  now,
+		ID:              id,
+		Name:            name,
+		PublicKey:       publicKey,
+		ConnectedAt:     now,
+		LastKeyRotation: now,
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
@@ -143,8 +141,8 @@ func (d *Devices) ScheduleKick(deviceID string) error {
 	return nil
 }
 
-// RotateKeys updates the encryption keys for a device
-func (d *Devices) RotateKeys(deviceID string, newPublicKey, newCameraPrivateKey []byte) error {
+// RotateKeys updates the device's public key after key rotation
+func (d *Devices) RotateKeys(deviceID string, newDevicePublicKey []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -154,8 +152,7 @@ func (d *Devices) RotateKeys(deviceID string, newPublicKey, newCameraPrivateKey 
 
 	for _, dev := range devices {
 		if dev.ID == deviceID {
-			dev.PublicKey = newPublicKey
-			dev.CameraPrivateKey = newCameraPrivateKey
+			dev.PublicKey = newDevicePublicKey
 			dev.LastKeyRotation = time.Now()
 			found = true
 		}

@@ -69,20 +69,6 @@ func (r *RelayComm) Start() error {
 	return nil
 }
 
-// Stop disconnects from relay server
-func (r *RelayComm) Stop() {
-	if !r.running {
-		return
-	}
-
-	close(r.stopChan)
-	r.running = false
-
-	if r.conn != nil {
-		r.conn.Close()
-	}
-}
-
 // Send sends a message to the relay server
 func (r *RelayComm) Send(messageType string, payload interface{}) error {
 	if r.conn == nil {

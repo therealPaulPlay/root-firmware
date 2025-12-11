@@ -73,14 +73,21 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 		return nil, fmt.Errorf("invalid or expired code")
 	}
 
-	// Generate keypair for key exchange
-	keypair, err := encryption.GenerateKeypair()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate keys: %w", err)
+	// Get or generate camera keypair (single keypair for all devices)
+	cameraPublicKey, ok := config.Get().GetKey("cameraPublicKey")
+	if !ok {
+		// First time pairing - generate camera keypair
+		keypair, err := encryption.GenerateKeypair()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate keys: %w", err)
+		}
+		config.Get().SetKey("cameraPrivateKey", keypair.PrivateKey)
+		config.Get().SetKey("cameraPublicKey", keypair.PublicKey)
+		cameraPublicKey = keypair.PublicKey
 	}
 
-	// Add device with camera's private key for decrypting device messages
-	if err := devices.Get().Add(deviceID, deviceName, devicePublicKey, keypair.PrivateKey); err != nil {
+	// Add device with its public key
+	if err := devices.Get().Add(deviceID, deviceName, devicePublicKey); err != nil {
 		return nil, fmt.Errorf("failed to add device: %w", err)
 	}
 
@@ -93,8 +100,11 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 	// Scan for WiFi networks
 	networks, _ := wifi.Get().Scan()
 
+	// Encode camera public key to base64 for JSON transmission
+	cameraPublicKeyEncoded := encryption.EncodePublicKey(cameraPublicKey.([]byte))
+
 	return map[string]interface{}{
-		"cameraPublicKey":   keypair.PublicKey,
+		"cameraPublicKey":   cameraPublicKeyEncoded,
 		"wifiConnected":     wifi.Get().IsConnected(),
 		"relayUrl":          relayURL,
 		"availableNetworks": networks,
