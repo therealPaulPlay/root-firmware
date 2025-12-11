@@ -33,7 +33,6 @@ func InitHelper(onCodeSpeak func(string)) {
 		helperInstance = &Pairing{
 			onCodeSpeak: onCodeSpeak,
 		}
-		helperInstance.generateCode()
 	})
 }
 
@@ -44,24 +43,23 @@ func GetHelper() *Pairing {
 	return helperInstance
 }
 
-func (b *Pairing) generateCode() {
-	code := fmt.Sprintf("%06d", randomInt(0, 999999))
-	b.code = &PairingCode{
-		Code:      code,
-		ExpiresAt: time.Now().Add(codeExpiry),
-	}
-
-	if b.onCodeSpeak != nil {
-		go b.onCodeSpeak(code)
-	}
-}
-
-// RefreshCode generates and returns a new pairing code
-func (b *Pairing) RefreshCode() string {
+// GetCode returns the current pairing code, generating a new one if needed
+func (b *Pairing) GetCode() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.generateCode()
+	// Generate new code if expired or not set
+	if b.code == nil || time.Now().After(b.code.ExpiresAt) {
+		code := fmt.Sprintf("%06d", randomInt(0, 999999))
+		b.code = &PairingCode{
+			Code:      code,
+			ExpiresAt: time.Now().Add(codeExpiry),
+		}
+		if b.onCodeSpeak != nil {
+			go b.onCodeSpeak(code)
+		}
+	}
+
 	return b.code.Code
 }
 
@@ -81,22 +79,16 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 		return nil, fmt.Errorf("failed to generate keys: %w", err)
 	}
 
-	// Add device
-	if err := devices.Get().Add(deviceID, deviceName, devicePublicKey); err != nil {
+	// Add device with camera's private key for decrypting device messages
+	if err := devices.Get().Add(deviceID, deviceName, devicePublicKey, keypair.PrivateKey); err != nil {
 		return nil, fmt.Errorf("failed to add device: %w", err)
 	}
 
-	// Store keypair for this device (for key rotation)
-	// TODO: Store keypair.PrivateKey associated with deviceID
+	// Invalidate code after successful pairing
+	b.code = nil
 
-	// Generate new code for next pairing
-	b.generateCode()
-
-	// Get relay URL (nil if not configured)
-	var relayURL interface{} = nil
-	if val, ok := config.Get().GetKey("relayUrl"); ok {
-		relayURL = val
-	}
+	// Get relay URL
+	relayURL, _ := config.Get().GetKey("relayUrl")
 
 	// Scan for WiFi networks
 	networks, _ := wifi.Get().Scan()

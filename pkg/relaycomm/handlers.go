@@ -1,7 +1,9 @@
 package relaycomm
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"os/exec"
 
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/record"
@@ -96,8 +98,7 @@ func handleWiFiConnect(payload json.RawMessage) {
 		return
 	}
 
-	// TODO: Safely change WiFi - verify internet connection after switch
-	// If new network doesn't work, revert to previous network
+	// Connect method verifies internet connectivity, otherwise rejects wifi
 	err := wifi.Get().Connect(req.SSID, req.Password)
 	Get().Send("wifiConnectResult", map[string]interface{}{
 		"success": err == nil,
@@ -149,7 +150,7 @@ func handleStartStream(payload json.RawMessage) {
 		"success": true,
 	})
 
-	// TODO: Stream video/audio data to relay server
+	// TODO: Stream video/audio data to relay server (see record package)
 	// Read from stream.Video and stream.Audio, send chunks via WebSocket
 	_ = stream
 }
@@ -255,19 +256,20 @@ func handleGetPreview(payload json.RawMessage) {
 		return
 	}
 
-	// TODO: Send JPEG data - encode as base64 or send as binary
-	_ = frameData
 	Get().Send("previewResult", map[string]interface{}{
 		"success": true,
-		// "image": base64.StdEncoding.EncodeToString(frameData),
+		"image":   base64.StdEncoding.EncodeToString(frameData),
 	})
 }
 
 func handleRestart(payload json.RawMessage) {
-	// TODO: Safely restart the camera
-	// exec.Command("sudo", "reboot").Run()
-
+	// Send success response before rebooting
 	Get().Send("restartResult", map[string]interface{}{
 		"success": true,
 	})
+
+	// Reboot the system
+	go func() {
+		exec.Command("sudo", "reboot").Run()
+	}()
 }

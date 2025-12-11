@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"root-firmware/pkg/config"
+	"root-firmware/pkg/devices"
+	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/wifi"
 )
 
@@ -37,10 +39,19 @@ func GetServer() *Server {
 func (s *Server) start(port string) error {
 	mux := http.NewServeMux()
 
+	// Get pairing code endpoint
+	mux.HandleFunc("/get-code", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		code := GetHelper().GetCode()
+		json.NewEncoder(w).Encode(map[string]interface{}{"code": code})
+	})
+
 	// Pairing endpoint
 	mux.HandleFunc("/pair", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
 			return
 		}
 
@@ -52,78 +63,159 @@ func (s *Server) start(port string) error {
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
 
-		result, err := GetHelper().PairDevice(
-			req.DeviceID,
-			req.DeviceName,
-			req.Code,
-			[]byte(req.DevicePublicKey),
-		)
-
+		result, err := GetHelper().PairDevice(req.DeviceID, req.DeviceName, req.Code, []byte(req.DevicePublicKey))
 		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"error":   err.Error(),
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"data":    result,
-		})
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": result})
 	})
 
-	// WiFi connection endpoint
+	// WiFi connection endpoint (requires paired device with encrypted payload)
 	mux.HandleFunc("/set-wifi", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
 			return
 		}
 
 		var req struct {
+			DeviceID         string `json:"deviceId"`
+			EncryptedPayload string `json:"encryptedPayload"` // Base64 encrypted JSON
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+
+		// Get device to verify it's paired
+		device, ok := devices.Get().GetByID(req.DeviceID)
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Device not paired"})
+			return
+		}
+
+		// Derive shared secret using camera's private key and device's public key
+		sharedSecret, err := encryption.DeriveSharedSecret(device.CameraPrivateKey, device.PublicKey)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to derive key"})
+			return
+		}
+
+		// Create session for decryption
+		session, err := encryption.FromSharedSecret(sharedSecret)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to create session"})
+			return
+		}
+
+		// Decrypt payload
+		decrypted, err := session.Decrypt(req.EncryptedPayload)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to decrypt payload"})
+			return
+		}
+
+		// Parse decrypted WiFi credentials
+		var wifiReq struct {
 			SSID     string `json:"ssid"`
 			Password string `json:"password"`
 		}
-
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if err := json.Unmarshal(decrypted, &wifiReq); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload"})
 			return
 		}
 
-		err := wifi.Get().Connect(req.SSID, req.Password)
+		if err := wifi.Get().Connect(wifiReq.SSID, wifiReq.Password); err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": err == nil,
-			"error":   err,
-		})
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 	})
 
-	// Relay server setup endpoint
+	// Relay server setup endpoint (requires paired device with encrypted payload)
 	mux.HandleFunc("/set-relay", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
 			return
 		}
 
 		var req struct {
-			RelayURL string `json:"relayUrl"`
+			DeviceID         string `json:"deviceId"`
+			EncryptedPayload string `json:"encryptedPayload"` // Base64 encrypted JSON
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
 
-		err := config.Get().SetKey("relayUrl", req.RelayURL)
+		// Get device to verify it's paired
+		device, ok := devices.Get().GetByID(req.DeviceID)
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Device not paired"})
+			return
+		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": err == nil,
-			"error":   err,
-		})
+		// Derive shared secret using camera's private key and device's public key
+		sharedSecret, err := encryption.DeriveSharedSecret(device.CameraPrivateKey, device.PublicKey)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to derive key"})
+			return
+		}
+
+		// Create session for decryption
+		session, err := encryption.FromSharedSecret(sharedSecret)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to create session"})
+			return
+		}
+
+		// Decrypt payload
+		decrypted, err := session.Decrypt(req.EncryptedPayload)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to decrypt payload"})
+			return
+		}
+
+		// Parse decrypted relay URL
+		var relayReq struct {
+			RelayURL string `json:"relayUrl"`
+		}
+		if err := json.Unmarshal(decrypted, &relayReq); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload"})
+			return
+		}
+
+		if err := config.Get().SetKey("relayUrl", relayReq.RelayURL); err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 	})
 
 	s.server = &http.Server{

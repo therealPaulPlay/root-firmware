@@ -9,10 +9,11 @@ import (
 )
 
 type Device struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	PublicKey   []byte    `json:"publicKey"`
-	ConnectedAt time.Time `json:"connectedAt"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	PublicKey        []byte    `json:"publicKey"`
+	CameraPrivateKey []byte    `json:"cameraPrivateKey"` // Camera's private key for this device
+	ConnectedAt      time.Time `json:"connectedAt"`
 }
 
 type Devices struct {
@@ -47,8 +48,21 @@ func (d *Devices) GetAll() []Device {
 	return d.getDevices()
 }
 
+// Get returns a specific device by ID
+func (d *Devices) GetByID(id string) (*Device, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	devices := d.getDevices()
+	for _, dev := range devices {
+		if dev.ID == id {
+			return &dev, true
+		}
+	}
+	return nil, false
+}
+
 // Add adds a new device or updates existing one
-func (d *Devices) Add(id, name string, publicKey []byte) error {
+func (d *Devices) Add(id, name string, publicKey, cameraPrivateKey []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -64,10 +78,11 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 
 	// Add new device
 	filtered = append(filtered, Device{
-		ID:          id,
-		Name:        name,
-		PublicKey:   publicKey,
-		ConnectedAt: time.Now(),
+		ID:               id,
+		Name:             name,
+		PublicKey:        publicKey,
+		CameraPrivateKey: cameraPrivateKey,
+		ConnectedAt:      time.Now(),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
