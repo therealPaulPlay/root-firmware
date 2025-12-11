@@ -1,15 +1,21 @@
 package pairing
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
+
+	"root-firmware/pkg/config"
 )
 
 type AP struct {
-	mu      sync.Mutex
-	running bool
+	mu            sync.Mutex
+	running       bool
+	ssid          string
+	hostapdCmd    *exec.Cmd
+	dnsmasqCmd    *exec.Cmd
 }
 
 var apInstance *AP
@@ -29,13 +35,24 @@ func GetAP() *AP {
 }
 
 // Start creates a WiFi access point for pairing
-// SSID will be "Root-Camera" and IP will be 192.168.4.1
 func (w *AP) Start() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if w.running {
 		return nil
+	}
+
+	// Generate or retrieve SSID
+	if w.ssid == "" {
+		// Check if SSID is stored in config
+		if storedSSID, ok := config.Get().GetKey("apSSID"); ok {
+			w.ssid = storedSSID.(string)
+		} else {
+			// Generate new SSID with 4 random letters
+			w.ssid = generateSSID()
+			config.Get().SetKey("apSSID", w.ssid)
+		}
 	}
 
 	// Stop any existing wpa_supplicant (client mode)
@@ -77,15 +94,31 @@ func (w *AP) Stop() error {
 		return nil
 	}
 
-	// Stop hostapd and dnsmasq
-	exec.Command("sudo", "killall", "hostapd").Run()
-	exec.Command("sudo", "killall", "dnsmasq").Run()
+	var lastErr error
+
+	// Stop hostapd process
+	if w.hostapdCmd != nil && w.hostapdCmd.Process != nil {
+		if err := w.hostapdCmd.Process.Kill(); err != nil {
+			lastErr = fmt.Errorf("failed to kill hostapd: %w", err)
+		}
+		w.hostapdCmd = nil
+	}
+
+	// Stop dnsmasq process
+	if w.dnsmasqCmd != nil && w.dnsmasqCmd.Process != nil {
+		if err := w.dnsmasqCmd.Process.Kill(); err != nil {
+			lastErr = fmt.Errorf("failed to kill dnsmasq: %w", err)
+		}
+		w.dnsmasqCmd = nil
+	}
 
 	// Bring down interface
-	exec.Command("sudo", "ip", "link", "set", "wlan0", "down").Run()
+	if err := exec.Command("sudo", "ip", "link", "set", "wlan0", "down").Run(); err != nil {
+		lastErr = fmt.Errorf("failed to bring down wlan0: %w", err)
+	}
 
 	w.running = false
-	return nil
+	return lastErr
 }
 
 func (w *AP) startDNSMasq() error {
@@ -102,22 +135,23 @@ address=/root.camera/192.168.4.1
 		return err
 	}
 
-	// Start dnsmasq
-	return exec.Command("sudo", "dnsmasq", "-C", "/tmp/dnsmasq.conf").Run()
+	// Start dnsmasq in background
+	w.dnsmasqCmd = exec.Command("sudo", "dnsmasq", "-C", "/tmp/dnsmasq.conf", "--no-daemon")
+	return w.dnsmasqCmd.Start()
 }
 
 func (w *AP) startHostAPD() error {
-	// Create hostapd config
-	config := `interface=wlan0
+	// Create hostapd config with dynamic SSID
+	config := fmt.Sprintf(`interface=wlan0
 driver=nl80211
-ssid=Root-Camera
+ssid=%s
 hw_mode=g
 channel=7
 wmm_enabled=0
 macaddr_acl=0
 auth_algs=1
 ignore_broadcast_ssid=0
-`
+`, w.ssid)
 	// Write config to /tmp/hostapd.conf
 	cmd := exec.Command("sudo", "tee", "/tmp/hostapd.conf")
 	cmd.Stdin = strings.NewReader(config)
@@ -126,8 +160,8 @@ ignore_broadcast_ssid=0
 	}
 
 	// Start hostapd in background
-	cmd = exec.Command("sudo", "hostapd", "/tmp/hostapd.conf")
-	return cmd.Start() // Start in background
+	w.hostapdCmd = exec.Command("sudo", "hostapd", "/tmp/hostapd.conf")
+	return w.hostapdCmd.Start()
 }
 
 // IsRunning returns whether AP mode is active
@@ -135,4 +169,17 @@ func (w *AP) IsRunning() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.running
+}
+
+// generateSSID creates a random SSID in format "ROOT-Observer-XXXX"
+func generateSSID() string {
+	letters := make([]byte, 4)
+	rand.Read(letters)
+
+	// Convert to uppercase letters A-Z
+	for i := range letters {
+		letters[i] = 'A' + (letters[i] % 26)
+	}
+
+	return fmt.Sprintf("ROOT-Observer-%s", string(letters))
 }
