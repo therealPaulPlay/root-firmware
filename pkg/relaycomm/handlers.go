@@ -1,11 +1,10 @@
-package api
+package relaycomm
 
 import (
 	"encoding/json"
 
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/record"
-	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/ups"
 	"root-firmware/pkg/wifi"
@@ -14,7 +13,7 @@ import (
 // RegisterHandlers registers all relay message handlers
 // TODO: Use end-2-end encryption here (from encryption package)
 func RegisterHandlers() {
-	relay := relaycomm.Get()
+	relay := Get()
 
 	// Device management
 	relay.On("getDevices", handleGetDevices)
@@ -46,7 +45,7 @@ func RegisterHandlers() {
 
 func handleGetDevices(payload json.RawMessage) {
 	allDevices := devices.Get().GetAll()
-	relaycomm.Get().Send("devicesResult", allDevices)
+	Get().Send("devicesResult", allDevices)
 }
 
 func handleRemoveDevice(payload json.RawMessage) {
@@ -59,7 +58,7 @@ func handleRemoveDevice(payload json.RawMessage) {
 	}
 
 	err := devices.Get().Remove(req.DeviceID)
-	relaycomm.Get().Send("removeDeviceResult", map[string]interface{}{
+	Get().Send("removeDeviceResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
@@ -74,14 +73,14 @@ func handleKickDevice(payload json.RawMessage) {
 	}
 
 	err := devices.Get().ScheduleKick(req.DeviceID)
-	relaycomm.Get().Send("kickDeviceResult", map[string]interface{}{
+	Get().Send("kickDeviceResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
 
 func handleWiFiScan(payload json.RawMessage) {
 	networks, err := wifi.Get().Scan()
-	relaycomm.Get().Send("wifiScanResult", map[string]interface{}{
+	Get().Send("wifiScanResult", map[string]interface{}{
 		"success":  err == nil,
 		"networks": networks,
 	})
@@ -100,14 +99,14 @@ func handleWiFiConnect(payload json.RawMessage) {
 	// TODO: Safely change WiFi - verify internet connection after switch
 	// If new network doesn't work, revert to previous network
 	err := wifi.Get().Connect(req.SSID, req.Password)
-	relaycomm.Get().Send("wifiConnectResult", map[string]interface{}{
+	Get().Send("wifiConnectResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
 
 func handleGetEvents(payload json.RawMessage) {
 	events, err := storage.Get().GetEventLog()
-	relaycomm.Get().Send("eventsResult", map[string]interface{}{
+	Get().Send("eventsResult", map[string]interface{}{
 		"success": err == nil,
 		"events":  events,
 	})
@@ -124,7 +123,7 @@ func handleGetRecording(payload json.RawMessage) {
 
 	filePath, err := storage.Get().GetRecordingPath(req.ID)
 	if err != nil {
-		relaycomm.Get().Send("recordingResult", map[string]interface{}{
+		Get().Send("recordingResult", map[string]interface{}{
 			"success": false,
 		})
 		return
@@ -132,7 +131,7 @@ func handleGetRecording(payload json.RawMessage) {
 
 	// TODO: Stream file contents to relay server in chunks
 	_ = filePath
-	relaycomm.Get().Send("recordingResult", map[string]interface{}{
+	Get().Send("recordingResult", map[string]interface{}{
 		"success": true,
 	})
 }
@@ -140,13 +139,13 @@ func handleGetRecording(payload json.RawMessage) {
 func handleStartStream(payload json.RawMessage) {
 	stream, err := record.Get().StartStream()
 	if err != nil {
-		relaycomm.Get().Send("streamResult", map[string]interface{}{
+		Get().Send("streamResult", map[string]interface{}{
 			"success": false,
 		})
 		return
 	}
 
-	relaycomm.Get().Send("streamResult", map[string]interface{}{
+	Get().Send("streamResult", map[string]interface{}{
 		"success": true,
 	})
 
@@ -157,7 +156,7 @@ func handleStartStream(payload json.RawMessage) {
 
 func handleStopStream(payload json.RawMessage) {
 	err := record.Get().StopStream()
-	relaycomm.Get().Send("stopStreamResult", map[string]interface{}{
+	Get().Send("stopStreamResult", map[string]interface{}{
 		"success": err == nil,
 	})
 }
@@ -173,7 +172,7 @@ func handleToggleBabyphone(payload json.RawMessage) {
 
 	// TODO: Implement babyphone mode (2-way audio)
 	// This would start audio streaming from device to camera
-	relaycomm.Get().Send("babyphoneResult", map[string]interface{}{
+	Get().Send("babyphoneResult", map[string]interface{}{
 		"success": true,
 		"enabled": req.Enabled,
 	})
@@ -189,7 +188,7 @@ func handleSetMicrophone(payload json.RawMessage) {
 	}
 
 	err := record.Get().SetMicrophoneEnabled(req.Enabled)
-	relaycomm.Get().Send("microphoneResult", map[string]interface{}{
+	Get().Send("microphoneResult", map[string]interface{}{
 		"success": err == nil,
 		"enabled": req.Enabled,
 	})
@@ -206,7 +205,7 @@ func handleSetRecordingSound(payload json.RawMessage) {
 	}
 
 	// TODO: Store in config and implement sound playback
-	relaycomm.Get().Send("recordingSoundResult", map[string]interface{}{
+	Get().Send("recordingSoundResult", map[string]interface{}{
 		"success": true,
 	})
 }
@@ -244,13 +243,13 @@ func handleGetHealth(payload json.RawMessage) {
 		}
 	}
 
-	relaycomm.Get().Send("healthResult", health)
+	Get().Send("healthResult", health)
 }
 
 func handleGetPreview(payload json.RawMessage) {
 	frameData, err := record.Get().CapturePreview()
 	if err != nil {
-		relaycomm.Get().Send("previewResult", map[string]interface{}{
+		Get().Send("previewResult", map[string]interface{}{
 			"success": false,
 		})
 		return
@@ -258,7 +257,7 @@ func handleGetPreview(payload json.RawMessage) {
 
 	// TODO: Send JPEG data - encode as base64 or send as binary
 	_ = frameData
-	relaycomm.Get().Send("previewResult", map[string]interface{}{
+	Get().Send("previewResult", map[string]interface{}{
 		"success": true,
 		// "image": base64.StdEncoding.EncodeToString(frameData),
 	})
@@ -268,7 +267,7 @@ func handleRestart(payload json.RawMessage) {
 	// TODO: Safely restart the camera
 	// exec.Command("sudo", "reboot").Run()
 
-	relaycomm.Get().Send("restartResult", map[string]interface{}{
+	Get().Send("restartResult", map[string]interface{}{
 		"success": true,
 	})
 }
