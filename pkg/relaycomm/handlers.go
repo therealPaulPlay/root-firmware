@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os/exec"
+	"time"
 
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
@@ -19,7 +20,9 @@ type EncryptedRequest struct {
 	EncryptedPayload string `json:"encryptedPayload"` // Base64 encrypted JSON
 }
 
-// useEncryption wraps a handler to decrypt device messages using E2E encryption
+const keyRotationInterval = 1 * time.Hour
+
+// Middleware for e2e encryption
 func useEncryption(messageType string, handler func(json.RawMessage)) func(json.RawMessage) {
 	return func(payload json.RawMessage) {
 		var req EncryptedRequest
@@ -39,6 +42,23 @@ func useEncryption(messageType string, handler func(json.RawMessage)) func(json.
 				"error":   "Device not paired",
 			})
 			return
+		}
+
+		// Check if key rotation is needed (keys older than 1 hour)
+		if time.Since(device.LastKeyRotation) > keyRotationInterval {
+			// Generate new keypair
+			newKeypair, err := encryption.GenerateKeypair()
+			if err == nil {
+				devices.Get().RotateKeys(req.DeviceID, device.PublicKey, newKeypair.PrivateKey)
+
+				// Notify device of new camera public key
+				Get().Send("keyRotation", map[string]interface{}{
+					"cameraPublicKey": newKeypair.PublicKey,
+				})
+
+				// Update device reference with new keys
+				device.CameraPrivateKey = newKeypair.PrivateKey
+			}
 		}
 
 		// Derive shared secret using camera's private key and device's public key

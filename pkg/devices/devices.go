@@ -14,6 +14,7 @@ type Device struct {
 	PublicKey        []byte    `json:"publicKey"`
 	CameraPrivateKey []byte    `json:"cameraPrivateKey"` // Camera's private key for this device
 	ConnectedAt      time.Time `json:"connectedAt"`
+	LastKeyRotation  time.Time `json:"lastKeyRotation"` // Last time keys were rotated
 }
 
 type Devices struct {
@@ -77,12 +78,14 @@ func (d *Devices) Add(id, name string, publicKey, cameraPrivateKey []byte) error
 	}
 
 	// Add new device
+	now := time.Now()
 	filtered = append(filtered, Device{
 		ID:               id,
 		Name:             name,
 		PublicKey:        publicKey,
 		CameraPrivateKey: cameraPrivateKey,
-		ConnectedAt:      time.Now(),
+		ConnectedAt:      now,
+		LastKeyRotation:  now,
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
@@ -138,6 +141,32 @@ func (d *Devices) ScheduleKick(deviceID string) error {
 	})
 
 	return nil
+}
+
+// RotateKeys updates the encryption keys for a device
+func (d *Devices) RotateKeys(deviceID string, newPublicKey, newCameraPrivateKey []byte) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	devices := d.getDevices()
+	updated := []Device{}
+	found := false
+
+	for _, dev := range devices {
+		if dev.ID == deviceID {
+			dev.PublicKey = newPublicKey
+			dev.CameraPrivateKey = newCameraPrivateKey
+			dev.LastKeyRotation = time.Now()
+			found = true
+		}
+		updated = append(updated, dev)
+	}
+
+	if !found {
+		return nil // Device not found, no error
+	}
+
+	return config.Get().SetKey("connectedDevices", updated)
 }
 
 func (d *Devices) getDevices() []Device {
