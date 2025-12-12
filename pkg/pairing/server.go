@@ -20,7 +20,7 @@ const pairingPort = "80"
 // EncryptedRequest wraps encrypted payloads from devices for HTTP endpoints
 type EncryptedRequest struct {
 	DeviceID         string `json:"deviceId"`
-	EncryptedPayload string `json:"encryptedPayload"` // Base64 encrypted JSON
+	EncryptedPayload string `json:"encryptedPayload"` // Base64 encrypted JSON (must include deviceId like { deviceId: "my-device", field1: ... })
 }
 
 // withEncryption is middleware for HTTP endpoints that require device authentication and E2E encryption
@@ -79,6 +79,22 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to decrypt payload"})
+			return
+		}
+
+		// Verify deviceID inside encrypted payload matches the outer claim
+		var payload struct {
+			DeviceID string `json:"deviceId"`
+		}
+		if err := json.Unmarshal(decrypted, &payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload format"})
+			return
+		}
+
+		if payload.DeviceID != req.DeviceID {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Device ID mismatch"})
 			return
 		}
 
@@ -175,6 +191,7 @@ func (s *Server) start(port string) error {
 	// WiFi connection endpoint (requires paired device with encrypted payload)
 	mux.HandleFunc("/set-wifi", withEncryption(func(w http.ResponseWriter, decrypted []byte) {
 		var wifiReq struct {
+			DeviceID string `json:"deviceId"`
 			SSID     string `json:"ssid"`
 			Password string `json:"password"`
 		}
@@ -195,6 +212,7 @@ func (s *Server) start(port string) error {
 	// Relay server setup endpoint (requires paired device with encrypted payload)
 	mux.HandleFunc("/set-relay", withEncryption(func(w http.ResponseWriter, decrypted []byte) {
 		var relayReq struct {
+			DeviceID string `json:"deviceId"`
 			RelayURL string `json:"relayUrl"`
 		}
 		if err := json.Unmarshal(decrypted, &relayReq); err != nil {
