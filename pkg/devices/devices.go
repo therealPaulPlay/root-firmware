@@ -67,7 +67,7 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 
 	devices := d.getDevices()
 
-	// Remove if already exists
+	// Remove if already exists (even if this device already exists, we want to freshly pair it with the new key etc.)
 	filtered := []Device{}
 	for _, dev := range devices {
 		if dev.ID != id {
