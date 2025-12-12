@@ -22,7 +22,7 @@ import (
 	"root-firmware/pkg/wifi"
 )
 
-//go:embed assets
+//go:embed assets/*
 var assets embed.FS
 
 func main() {
