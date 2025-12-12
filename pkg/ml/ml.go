@@ -16,6 +16,9 @@ const (
 	recordDuration    = 10 * time.Second
 )
 
+// TODO: Handle actual detection, should handle Start and Stop atuomatically depending on if device is in low power mode
+// No need to export Start and Stop!
+
 type ML struct {
 	mu        sync.Mutex
 	running   bool

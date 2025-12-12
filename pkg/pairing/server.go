@@ -2,14 +2,20 @@ package pairing
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"sync"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
+	"root-firmware/pkg/globals"
+	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/wifi"
 )
+
+const pairingPort = "80"
 
 // EncryptedRequest wraps encrypted payloads from devices for HTTP endpoints
 type EncryptedRequest struct {
@@ -88,32 +94,43 @@ type Server struct {
 var serverInstance *Server
 var serverOnce sync.Once
 
-// InitServer starts a simple HTTP server for pairing
-// The camera broadcasts its own WiFi access point, and the phone connects via HTTP
-func InitServer(port string) error {
+// Init initializes the pairing system (AP + HTTP server + helper)
+func Init() error {
+	InitAP()
+	InitHelper()
+
+	if err := GetAP().Start(); err != nil {
+		return fmt.Errorf("failed to start AP: %w", err)
+	}
+
 	var err error
 	serverOnce.Do(func() {
 		serverInstance = &Server{}
-		err = serverInstance.start(port)
+		err = serverInstance.start(pairingPort)
 	})
 	return err
-}
-
-func GetServer() *Server {
-	if serverInstance == nil {
-		panic("server not initialized - call InitServer() first")
-	}
-	return serverInstance
 }
 
 func (s *Server) start(port string) error {
 	mux := http.NewServeMux()
 
-	// Get pairing code endpoint
+	// Get pairing code endpoint - triggers camera to speak the code
 	mux.HandleFunc("/get-code", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
 		code := GetHelper().GetCode()
-		json.NewEncoder(w).Encode(map[string]interface{}{"code": code})
+
+		// Speak each digit of the code through the speaker
+		go func() {
+			for _, digit := range code {
+				soundFile := fmt.Sprintf("%s/sounds/numbers/%c.mp3", globals.AssetsPath, digit)
+				if err := speaker.Get().PlayFile(soundFile); err != nil {
+					log.Printf("Failed to play sound for digit %c: %v", digit, err)
+				}
+			}
+		}()
+
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 	})
 
 	// Pairing endpoint

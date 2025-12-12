@@ -20,19 +20,16 @@ type PairingCode struct {
 }
 
 type Pairing struct {
-	mu          sync.Mutex
-	code        *PairingCode
-	onCodeSpeak func(string)
+	mu   sync.Mutex
+	code *PairingCode
 }
 
 var helperInstance *Pairing
 var helperOnce sync.Once
 
-func InitHelper(onCodeSpeak func(string)) {
+func InitHelper() {
 	helperOnce.Do(func() {
-		helperInstance = &Pairing{
-			onCodeSpeak: onCodeSpeak,
-		}
+		helperInstance = &Pairing{}
 	})
 }
 
@@ -54,9 +51,6 @@ func (b *Pairing) GetCode() string {
 		b.code = &PairingCode{
 			Code:      code,
 			ExpiresAt: time.Now().Add(codeExpiry),
-		}
-		if b.onCodeSpeak != nil {
-			go b.onCodeSpeak(code)
 		}
 	}
 
