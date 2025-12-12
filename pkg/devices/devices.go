@@ -9,11 +9,10 @@ import (
 )
 
 type Device struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	PublicKey       []byte    `json:"publicKey"` // Device's public key
-	ConnectedAt     time.Time `json:"connectedAt"`
-	LastKeyRotation time.Time `json:"lastKeyRotation"` // Last time keys were rotated
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	PublicKey   []byte    `json:"publicKey"` // Device's public key
+	ConnectedAt time.Time `json:"connectedAt"`
 }
 
 type Devices struct {
@@ -77,13 +76,11 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 	}
 
 	// Add new device
-	now := time.Now()
 	filtered = append(filtered, Device{
-		ID:              id,
-		Name:            name,
-		PublicKey:       publicKey,
-		ConnectedAt:     now,
-		LastKeyRotation: now,
+		ID:          id,
+		Name:        name,
+		PublicKey:   publicKey,
+		ConnectedAt: time.Now(),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
@@ -139,31 +136,6 @@ func (d *Devices) ScheduleKick(deviceID string) error {
 	})
 
 	return nil
-}
-
-// RotateKeys updates the device's public key after key rotation
-func (d *Devices) RotateKeys(deviceID string, newDevicePublicKey []byte) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	devices := d.getDevices()
-	updated := []Device{}
-	found := false
-
-	for _, dev := range devices {
-		if dev.ID == deviceID {
-			dev.PublicKey = newDevicePublicKey
-			dev.LastKeyRotation = time.Now()
-			found = true
-		}
-		updated = append(updated, dev)
-	}
-
-	if !found {
-		return nil // Device not found, no error
-	}
-
-	return config.Get().SetKey("connectedDevices", updated)
 }
 
 func (d *Devices) getDevices() []Device {

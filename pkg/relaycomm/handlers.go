@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"time"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
@@ -52,8 +51,6 @@ Camera → Relay Server → Device:
 	}
 */
 
-const keyRotationInterval = 1 * time.Hour
-
 // Middleware for e2e encryption
 func useEncryption(messageType string, handler func(*HandlerContext, json.RawMessage)) func(json.RawMessage) {
 	return func(payload json.RawMessage) {
@@ -84,16 +81,6 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 				"error":   "Camera not initialized",
 			})
 			return
-		}
-
-		// Check if key rotation is needed (keys older than 1 hour)
-		if time.Since(device.LastKeyRotation) > keyRotationInterval {
-			// Request device to rotate its keys
-			Get().Send("keyRotation", map[string]interface{}{
-				"deviceId": req.DeviceID,
-			})
-			// Device will generate new keypair and send new public key
-			// We'll update it when we receive the rotated key
 		}
 
 		// Derive shared secret using camera's private key and device's public key
