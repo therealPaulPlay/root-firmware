@@ -11,11 +11,11 @@ import (
 )
 
 type AP struct {
-	mu            sync.Mutex
-	running       bool
-	ssid          string
-	hostapdCmd    *exec.Cmd
-	dnsmasqCmd    *exec.Cmd
+	mu         sync.Mutex
+	running    bool
+	ssid       string
+	hostapdCmd *exec.Cmd
+	dnsmasqCmd *exec.Cmd
 }
 
 var apInstance *AP

@@ -30,7 +30,7 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed!"})
 			return
 		}
 
@@ -38,7 +38,7 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		var req EncryptedRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid request"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid request!"})
 			return
 		}
 
@@ -46,7 +46,7 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		device, ok := devices.Get().GetByID(req.DeviceID)
 		if !ok {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Device not paired"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Device not paired!"})
 			return
 		}
 
@@ -54,7 +54,7 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		cameraPrivateKey, ok := config.Get().GetKey("cameraPrivateKey")
 		if !ok {
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Camera not initialized"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Camera not initialized!"})
 			return
 		}
 
@@ -62,7 +62,7 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		sharedSecret, err := encryption.DeriveSharedSecret(cameraPrivateKey.([]byte), device.PublicKey)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to derive key"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to derive key!"})
 			return
 		}
 
@@ -70,7 +70,7 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		session, err := encryption.FromSharedSecret(sharedSecret)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to create session"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to create session!"})
 			return
 		}
 
@@ -78,7 +78,7 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		decrypted, err := session.Decrypt(req.EncryptedPayload)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to decrypt payload"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to decrypt payload!"})
 			return
 		}
 
@@ -88,13 +88,13 @@ func withEncryption(handler func(w http.ResponseWriter, decrypted []byte)) http.
 		}
 		if err := json.Unmarshal(decrypted, &payload); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload format"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload format!"})
 			return
 		}
 
 		if payload.DeviceID != req.DeviceID {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Device ID mismatch"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Device ID mismatch!"})
 			return
 		}
 
@@ -166,7 +166,7 @@ func (s *Server) start(port string) error {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed!"})
 			return
 		}
 
@@ -187,7 +187,7 @@ func (s *Server) start(port string) error {
 		devicePublicKey, err := encryption.DecodePublicKey(req.DevicePublicKey)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid public key format"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid public key format!"})
 			return
 		}
 
@@ -209,7 +209,7 @@ func (s *Server) start(port string) error {
 		}
 		if err := json.Unmarshal(decrypted, &wifiReq); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload!"})
 			return
 		}
 
@@ -229,7 +229,14 @@ func (s *Server) start(port string) error {
 		}
 		if err := json.Unmarshal(decrypted, &relayReq); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid payload!"})
+			return
+		}
+
+		// Check if relay URL is already set
+		if existingURL, ok := config.Get().GetKey("relayUrl"); ok && existingURL != "" {
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Relay URL already configured!"})
 			return
 		}
 

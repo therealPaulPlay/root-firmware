@@ -203,6 +203,11 @@
         #device-name {
             margin-bottom: 5px;
         }
+
+        #relay-config-container.locked {
+            opacity: 0.5;
+            pointer-events: none;
+        }
     </style>
 </head>
 
@@ -249,22 +254,29 @@
         <h2>3. Set relay server</h2>
         <div id="relay-error" class="error" style="display:none;"></div>
 
-        <div class="checkbox-group">
-            <input type="checkbox" id="use-default-relay" checked onchange="toggleRelayInput()">
-            <label for="use-default-relay">Use official</label>
+        <div id="relay-locked-message" class="warning" style="display:none;">
+            Relay server already configured.
         </div>
 
-        <div id="custom-relay-container" style="display:none;">
-            <label>Relay server</label>
-            <input type="text" id="relay-url">
-
-            <div class="warning">
-                Warning: Using a custom relay server is not recommended. It is required to change it in the dashboard as
-                well.
+        <div id="relay-config-container">
+            <div class="checkbox-group">
+                <input type="checkbox" id="use-default-relay" checked onchange="toggleRelayInput()">
+                <label for="use-default-relay">Use official</label>
             </div>
-        </div>
 
-        <button onclick="setRelay()">Set relay server</button>
+            <div id="custom-relay-container" style="display:none;">
+                <label>Relay server</label>
+                <input type="text" id="relay-url">
+
+                <div class="warning">
+                    Warning: Using a custom relay server is not recommended. It is required to change it in the
+                    dashboard as
+                    well.
+                </div>
+            </div>
+
+            <button onclick="setRelay()">Set relay server</button>
+        </div>
     </div>
 
     <!-- Step 4: Complete -->
@@ -367,6 +379,13 @@
                 const relayUrl = data.data.relayUrl || RELAY_SERVER_URL;
                 document.getElementById("relay-url").value = relayUrl;
 
+                // Check if relay URL is already configured
+                const relayAlreadySet = data.data.relayUrl && data.data.relayUrl !== "";
+                if (relayAlreadySet) {
+                    document.getElementById("relay-config-container").classList.add("locked");
+                    document.getElementById("relay-locked-message").style.display = "block";
+                }
+
                 const networks = data.data.availableNetworks || [];
                 const select = document.getElementById("wifi-network");
                 select.innerHTML = "<option value=\"\">Select network...</option>";
@@ -464,6 +483,8 @@
         }
 
         async function setRelay() {
+            if (document.getElementById("relay-config-container").classList.contains("locked")) return; // If locked (= already set), skip
+
             const checkbox = document.getElementById("use-default-relay");
             const relayUrl = checkbox.checked
                 ? RELAY_SERVER_URL

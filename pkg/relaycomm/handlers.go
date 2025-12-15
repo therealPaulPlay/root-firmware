@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os/exec"
 
 	"root-firmware/pkg/config"
@@ -58,7 +59,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if err := json.Unmarshal(payload, &req); err != nil {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Invalid request format",
+				"error":   "Invalid request format!",
 			})
 			return
 		}
@@ -68,7 +69,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if !ok {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Device not paired",
+				"error":   "Device not paired!",
 			})
 			return
 		}
@@ -78,7 +79,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if !ok {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Camera not initialized",
+				"error":   "Camera not initialized!",
 			})
 			return
 		}
@@ -88,7 +89,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if err != nil {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Failed to derive encryption key",
+				"error":   "Failed to derive encryption key!",
 			})
 			return
 		}
@@ -98,7 +99,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if err != nil {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Failed to create encryption session",
+				"error":   "Failed to create encryption session!",
 			})
 			return
 		}
@@ -108,7 +109,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if err != nil {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Failed to decrypt payload",
+				"error":   "Failed to decrypt payload!",
 			})
 			return
 		}
@@ -120,7 +121,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if err := json.Unmarshal(decrypted, &payloadCheck); err != nil {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Invalid payload format",
+				"error":   "Invalid payload format!",
 			})
 			return
 		}
@@ -128,7 +129,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		if payloadCheck.DeviceID != req.DeviceID {
 			Get().Send(messageType+"Result", map[string]interface{}{
 				"success": false,
-				"error":   "Device ID mismatch",
+				"error":   "Device ID mismatch!",
 			})
 			return
 		}
@@ -165,9 +166,7 @@ func SendEncrypted(ctx *HandlerContext, messageType string, payload interface{})
 	}
 
 	// Merge the actual payload into the wrapped payload
-	for k, v := range payloadMap {
-		wrappedPayload[k] = v
-	}
+	maps.Copy(wrappedPayload, payloadMap)
 
 	// Marshal wrapped payload to JSON
 	payloadJSON, err := json.Marshal(wrappedPayload)
@@ -259,7 +258,7 @@ func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
 	if req.TargetDeviceID == ctx.DeviceID {
 		SendEncrypted(ctx, "kickDeviceResult", map[string]interface{}{
 			"success": false,
-			"error":   "Cannot kick self",
+			"error":   "Cannot kick self!",
 		})
 		return
 	}
