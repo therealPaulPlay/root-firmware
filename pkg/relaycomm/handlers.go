@@ -421,7 +421,6 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		"battery": map[string]any{
 			"percent":   100,
 			"onACPower": true,
-			"lowPower":  false,
 		},
 		"wifi": map[string]any{
 			"connected": wifi.Get().IsConnected(),
@@ -438,7 +437,6 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		health["battery"] = map[string]any{
 			"percent":   u.GetBatteryPercent(),
 			"onACPower": u.OnACPower(),
-			"lowPower":  u.IsLowPower(),
 		}
 	}
 

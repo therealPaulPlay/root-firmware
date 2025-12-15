@@ -59,7 +59,6 @@ func Get() *UPS {
 	return instance
 }
 
-
 func (u *UPS) readRegister(reg byte) int {
 	write := []byte{byte(regCalibration), byte(calValue >> 8), byte(calValue & 0xFF)}
 	u.dev.Write(write)
@@ -108,7 +107,7 @@ func (u *UPS) GetBatteryPercent() int {
 }
 
 // IsLowPower returns true if in low-power mode (≤10% and no external power)
-// When true: stop recordings, no ML, no new recordings, no config writes
+// When true: Stops event detection (and automatic recordings)
 func (u *UPS) IsLowPower() bool {
 	if u == nil {
 		return false
