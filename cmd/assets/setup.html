@@ -299,7 +299,7 @@
 
             devicePrivateKey = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
             const publicKeyRaw = await crypto.subtle.exportKey("raw", keyPair.publicKey);
-            devicePublicKey = btoa(String.fromCharCode(...new Uint8Array(publicKeyRaw)));
+            devicePublicKey = base64Encode(new Uint8Array(publicKeyRaw));
         }
 
         generateKeypair();
@@ -311,6 +311,31 @@
         window.addEventListener('DOMContentLoaded', () => {
             toggleRelayInput();
         });
+
+        function base64Encode(bytes) {
+            return btoa(String.fromCharCode(...bytes));
+        }
+
+        function base64Decode(str) {
+            return Uint8Array.from(atob(str), c => c.charCodeAt(0));
+        }
+
+        async function postJSON(url, body) {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
+
+            let data;
+            try { data = await res.json(); } catch {
+                throw new Error(`Request failed with status ${res.status}`);
+            }
+
+            // If we have JSON, check success field
+            if (!data.success) throw new Error(data.error || `Request failed with status ${res.status}`);
+            return data;
+        }
 
         async function speakCode() {
             try {
@@ -331,19 +356,12 @@
             }
 
             try {
-                const res = await fetch("/pair", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        deviceId: deviceId,
-                        deviceName: deviceName,
-                        code: code,
-                        devicePublicKey: devicePublicKey
-                    })
+                const data = await postJSON("/pair", {
+                    deviceId,
+                    deviceName,
+                    code,
+                    devicePublicKey
                 });
-
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error || "Request failed with status " + res.status);
 
                 cameraPublicKey = data.data.cameraPublicKey;
                 const relayUrl = data.data.relayUrl || RELAY_SERVER_URL;
@@ -360,12 +378,7 @@
                 });
 
                 hideError("pairing");
-
-                if (data.data.wifiConnected) {
-                    showStep("step-relay");
-                } else {
-                    showStep("step-wifi");
-                }
+                showStep(data.data.wifiConnected ? "step-relay" : "step-wifi");
             } catch (err) {
                 showError("pairing", err.message);
             }
@@ -380,10 +393,9 @@
                 ["deriveKey", "deriveBits"]
             );
 
-            const cameraKeyRaw = Uint8Array.from(atob(cameraPublicKey), c => c.charCodeAt(0));
             const publicKey = await crypto.subtle.importKey(
                 "raw",
-                cameraKeyRaw,
+                base64Decode(cameraPublicKey),
                 { name: "ECDH", namedCurve: "P-256" },
                 false,
                 []
@@ -405,16 +417,17 @@
             const encodedPayload = new TextEncoder().encode(JSON.stringify(payload));
 
             const encrypted = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: iv },
+                { name: "AES-GCM", iv },
                 sharedSecret,
                 encodedPayload
             );
 
+            // Prepend IV to ciphertext
             const combined = new Uint8Array(iv.length + encrypted.byteLength);
             combined.set(iv);
             combined.set(new Uint8Array(encrypted), iv.length);
 
-            return btoa(String.fromCharCode(...combined));
+            return base64Encode(combined);
         }
 
         async function connectWifi() {
@@ -427,20 +440,8 @@
             }
 
             try {
-                const payload = { deviceId, ssid, password };
-                const encryptedPayload = await encryptPayload(payload);
-
-                const res = await fetch("/set-wifi", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        deviceId: deviceId,
-                        encryptedPayload: encryptedPayload
-                    })
-                });
-
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error || "Request failed with status " + res.status);
+                const encryptedPayload = await encryptPayload({ deviceId, ssid, password });
+                await postJSON("/set-wifi", { deviceId, encryptedPayload });
 
                 hideError("wifi");
                 document.getElementById("wifi-success").style.display = "block";
@@ -474,20 +475,8 @@
             }
 
             try {
-                const payload = { deviceId, relayUrl };
-                const encryptedPayload = await encryptPayload(payload);
-
-                const res = await fetch("/set-relay", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        deviceId: deviceId,
-                        encryptedPayload: encryptedPayload
-                    })
-                });
-
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error || "Request failed with status " + res.status);
+                const encryptedPayload = await encryptPayload({ deviceId, relayUrl });
+                await postJSON("/set-relay", { deviceId, encryptedPayload });
 
                 hideError("relay");
                 showStep("step-complete");
