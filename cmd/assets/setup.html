@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROOT setup</title>
+    <style>
+        @font-face {
+            font-family: "Clash Display";
+            src: url("/fonts/clash-display-variable.woff2") format("woff2");
+            font-weight: 100 900;
+        }
+
+        @font-face {
+            font-family: "Commit Mono";
+            src: url("/fonts/commit-mono-variable.woff2") format("woff2");
+            font-weight: 100 900;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Commit Mono", monospace;
+            background: #fff;
+            color: #000;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #888;
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        h2 {
+            font-family: "Clash Display", sans-serif;
+            font-size: 18px;
+            margin-bottom: 25px;
+            text-transform: uppercase;
+            font-weight: 500;
+            /* Tracking wide */
+            letter-spacing: 0.025em;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #888;
+            background: #fff;
+            font-family: "Commit Mono", monospace;
+            font-size: 14px;
+        }
+
+        input:focus,
+        select:focus {
+            outline: 2px solid #000;
+        }
+
+        input[readonly] {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: 1px solid #000;
+            text-transform: uppercase;
+            background: #000;
+            color: #fff;
+            font-family: "Commit Mono", monospace;
+            font-size: 14px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background: #fff;
+            color: #000;
+        }
+
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #fff;
+            color: #000;
+        }
+
+        button.secondary:hover {
+            background: #000;
+            color: #fff;
+        }
+
+        .inline-group {
+            display: flex;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 15px;
+        }
+
+        .inline-group input {
+            margin-bottom: 0;
+        }
+
+        .inline-group>div {
+            flex: 1;
+        }
+
+        .warning {
+            margin-bottom: 15px;
+            padding: 10px;
+            border: 1px solid #888;
+            font-size: 12px;
+            display: none;
+        }
+
+        .warning.show {
+            display: block;
+        }
+
+        .error {
+            color: #000;
+            background: #f0f0f0;
+            padding: 10px;
+            border: 1px solid #000;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+
+        .success {
+            padding: 10px;
+            border: 1px solid #000;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Step 1: Pairing -->
+    <div class="section active" id="step-pairing">
+        <h2>1. Pair device</h2>
+        <div id="pairing-error" class="error" style="display:none;"></div>
+
+        <label>Device name</label>
+        <input type="text" id="device-name" placeholder="My phone">
+
+        <label>Device ID (auto-generated)</label>
+        <input type="text" id="device-id" readonly>
+
+        <div class="inline-group">
+            <div>
+                <label>Pairing code</label>
+                <input type="text" id="pairing-code" placeholder="000000" maxlength="6">
+            </div>
+            <button class="secondary" onclick="speakCode()">Speak code</button>
+        </div>
+
+        <button onclick="pair()">Pair device</button>
+    </div>
+
+    <!-- Step 2: WiFi Setup -->
+    <div class="section" id="step-wifi">
+        <h2>2. Connect to WiFi</h2>
+        <div id="wifi-error" class="error" style="display:none;"></div>
+        <div id="wifi-success" class="success" style="display:none;">WiFi connected successfully</div>
+
+        <label>Network</label>
+        <select id="wifi-network">
+            <option value="">Select network</option>
+        </select>
+
+        <label>Password</label>
+        <input type="password" id="wifi-password" placeholder="ABCD1234">
+
+        <button onclick="connectWifi()">Connect WiFi</button>
+    </div>
+
+    <!-- Step 3: Relay Server -->
+    <div class="section" id="step-relay">
+        <h2>3. Set relay server</h2>
+        <div id="relay-error" class="error" style="display:none;"></div>
+
+        <label>Relay server URL</label>
+        <input type="text" id="relay-url" value="wss://relay.rootprivacy.com">
+
+        <div class="warning" id="relay-warning">
+            Warning: Using a custom relay server requires updating the URL in the dashboard too. Not recommended for
+            optimal security.
+        </div>
+
+        <button onclick="setRelay()">Set relay server</button>
+    </div>
+
+    <script>
+        const deviceId = crypto.randomUUID();
+        document.getElementById("device-id").value = deviceId;
+
+        let devicePrivateKey, devicePublicKey;
+
+        async function generateKeypair() {
+            const keyPair = await crypto.subtle.generateKey(
+                { name: "ECDH", namedCurve: "P-256" },
+                true,
+                ["deriveKey", "deriveBits"]
+            );
+
+            devicePrivateKey = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+            const publicKeyRaw = await crypto.subtle.exportKey("raw", keyPair.publicKey);
+            devicePublicKey = btoa(String.fromCharCode(...new Uint8Array(publicKeyRaw)));
+        }
+
+        generateKeypair();
+
+        let cameraPublicKey = "";
+        let sharedSecret;
+
+        async function speakCode() {
+            try {
+                const res = await fetch("/get-code", { method: "POST" });
+                if (!res.ok) throw new Error("Failed to trigger code!");
+            } catch (err) {
+                showError("pairing", "Failed to speak code: " + err.message);
+            }
+        }
+
+        async function pair() {
+            const deviceName = document.getElementById("device-name").value.trim();
+            const code = document.getElementById("pairing-code").value.trim();
+
+            if (!deviceName || !code) {
+                showError("pairing", "Fill in all fields!");
+                return;
+            }
+
+            try {
+                const res = await fetch("/pair", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        deviceId: deviceId,
+                        deviceName: deviceName,
+                        code: code,
+                        devicePublicKey: devicePublicKey
+                    })
+                });
+
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || "Pairing failed!");
+
+                cameraPublicKey = data.data.cameraPublicKey;
+                const relayUrl = data.data.relayUrl || "wss://relay.rootprivacy.com";
+                document.getElementById("relay-url").value = relayUrl;
+
+                const networks = data.data.availableNetworks || [];
+                const select = document.getElementById("wifi-network");
+                select.innerHTML = "<option value=\"\">Select network...</option>";
+                networks.forEach(net => {
+                    const option = document.createElement("option");
+                    option.value = net.ssid;
+                    option.textContent = `${net.ssid} (${net.signal})`;
+                    select.appendChild(option);
+                });
+
+                hideError("pairing");
+
+                if (data.data.wifiConnected) {
+                    showStep("step-relay");
+                } else {
+                    showStep("step-wifi");
+                }
+            } catch (err) {
+                showError("pairing", err.message);
+            }
+        }
+
+        async function deriveSharedSecret() {
+            const privateKey = await crypto.subtle.importKey(
+                "jwk",
+                devicePrivateKey,
+                { name: "ECDH", namedCurve: "P-256" },
+                false,
+                ["deriveKey", "deriveBits"]
+            );
+
+            const cameraKeyRaw = Uint8Array.from(atob(cameraPublicKey), c => c.charCodeAt(0));
+            const publicKey = await crypto.subtle.importKey(
+                "raw",
+                cameraKeyRaw,
+                { name: "ECDH", namedCurve: "P-256" },
+                false,
+                []
+            );
+
+            sharedSecret = await crypto.subtle.deriveKey(
+                { name: "ECDH", public: publicKey },
+                privateKey,
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        async function encryptPayload(payload) {
+            if (!sharedSecret) await deriveSharedSecret();
+
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const encodedPayload = new TextEncoder().encode(JSON.stringify(payload));
+
+            const encrypted = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                sharedSecret,
+                encodedPayload
+            );
+
+            const combined = new Uint8Array(iv.length + encrypted.byteLength);
+            combined.set(iv);
+            combined.set(new Uint8Array(encrypted), iv.length);
+
+            return btoa(String.fromCharCode(...combined));
+        }
+
+        async function connectWifi() {
+            const ssid = document.getElementById("wifi-network").value;
+            const password = document.getElementById("wifi-password").value;
+
+            if (!ssid || !password) {
+                showError("wifi", "Please select a network and enter a password!");
+                return;
+            }
+
+            try {
+                const payload = { deviceId, ssid, password };
+                const encryptedPayload = await encryptPayload(payload);
+
+                const res = await fetch("/set-wifi", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        deviceId: deviceId,
+                        encryptedPayload: encryptedPayload
+                    })
+                });
+
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || "WiFi connection failed!");
+
+                hideError("wifi");
+                document.getElementById("wifi-success").style.display = "block";
+                setTimeout(() => showStep("step-relay"), 1500);
+            } catch (err) {
+                showError("wifi", err.message);
+            }
+        }
+
+        async function setRelay() {
+            const relayUrl = document.getElementById("relay-url").value.trim();
+
+            if (!relayUrl) {
+                showError("relay", "Please enter relay server URL!");
+                return;
+            }
+
+            try {
+                const payload = { deviceId, relayUrl };
+                const encryptedPayload = await encryptPayload(payload);
+
+                const res = await fetch("/set-relay", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        deviceId: deviceId,
+                        encryptedPayload: encryptedPayload
+                    })
+                });
+
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || "Failed to set relay server!");
+
+                const privateKeyStr = JSON.stringify(devicePrivateKey);
+                const url = `https://rootprivacy.com?observer-setup=true&device-id=${encodeURIComponent(deviceId)}&root-public-key=${encodeURIComponent(cameraPublicKey)}&device-private-key=${encodeURIComponent(privateKeyStr)}`;
+                window.location.href = url;
+            } catch (err) {
+                showError("relay", err.message);
+            }
+        }
+
+        document.getElementById("relay-url").addEventListener("input", function () {
+            const defaultUrl = "wss://relay.rootprivacy.com";
+            const warning = document.getElementById("relay-warning");
+            if (this.value !== defaultUrl)
+                warning.classList.add("show");
+            else
+                warning.classList.remove("show");
+        });
+
+        function showStep(stepId) {
+            document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+            document.getElementById(stepId).classList.add("active");
+        }
+
+        function showError(section, message) {
+            const errorEl = document.getElementById(section + "-error");
+            errorEl.textContent = message;
+            errorEl.style.display = "block";
+        }
+
+        function hideError(section) {
+            document.getElementById(section + "-error").style.display = "none";
+        }
+    </script>
+</body>
+
+</html>

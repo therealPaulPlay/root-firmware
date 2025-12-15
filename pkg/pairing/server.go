@@ -130,6 +130,18 @@ func Init() error {
 func (s *Server) start(port string) error {
 	mux := http.NewServeMux()
 
+	// Serve setup page at root
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, globals.AssetsPath+"/setup.html")
+	})
+
+	// Serve fonts
+	mux.Handle("/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir(globals.AssetsPath+"/fonts"))))
+
 	// Get pairing code endpoint - triggers camera to speak the code
 	mux.HandleFunc("/get-code", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
