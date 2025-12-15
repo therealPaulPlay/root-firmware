@@ -70,7 +70,7 @@ func (r *RelayComm) Start() error {
 }
 
 // Send sends a message to the relay server
-func (r *RelayComm) Send(messageType string, payload interface{}) error {
+func (r *RelayComm) Send(messageType string, payload any) error {
 	if r.conn == nil {
 		return fmt.Errorf("not connected")
 	}

@@ -58,7 +58,7 @@ func (b *Pairing) GetCode() string {
 }
 
 // PairDevice pairs a device using the pairing code
-func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey []byte) (map[string]interface{}, error) {
+func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey []byte) (map[string]any, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -100,7 +100,7 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 	// Encode camera public key to base64 for JSON transmission
 	cameraPublicKeyEncoded := encryption.EncodePublicKey(cameraPublicKey.([]byte))
 
-	return map[string]interface{}{
+	return map[string]any{
 		"cameraId":          cameraID,
 		"cameraPublicKey":   cameraPublicKeyEncoded,
 		"wifiConnected":     wifi.Get().IsConnected(),
