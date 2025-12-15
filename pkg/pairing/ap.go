@@ -126,7 +126,9 @@ func (w *AP) startDNSMasq() error {
 	config := `interface=wlan0
 dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
 domain=wlan
-address=/root.pair/192.168.4.1
+address=/root.test/192.168.4.1
+no-resolv
+no-poll
 `
 	// Write config to /tmp/dnsmasq.conf
 	cmd := exec.Command("sudo", "tee", "/tmp/dnsmasq.conf")

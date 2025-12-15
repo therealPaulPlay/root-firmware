@@ -146,6 +146,18 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 	}
 }
 
+// buildResult creates a result map with optional error
+func buildResult(err error, fields map[string]any) map[string]any {
+	result := map[string]any{
+		"success": err == nil,
+	}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	maps.Copy(result, fields)
+	return result
+}
+
 // SendEncrypted sends an encrypted response to a specific device
 func SendEncrypted(ctx *HandlerContext, messageType string, payload any) error {
 	// Get camera ID
@@ -239,9 +251,7 @@ func handleRemoveDevice(ctx *HandlerContext, payload json.RawMessage) {
 
 	// Device can only remove itself
 	err := devices.Get().Remove(ctx.DeviceID)
-	SendEncrypted(ctx, "removeDeviceResult", map[string]any{
-		"success": err == nil,
-	})
+	SendEncrypted(ctx, "removeDeviceResult", buildResult(err, nil))
 }
 
 func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
@@ -264,17 +274,14 @@ func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	err := devices.Get().ScheduleKick(req.TargetDeviceID)
-	SendEncrypted(ctx, "kickDeviceResult", map[string]any{
-		"success": err == nil,
-	})
+	SendEncrypted(ctx, "kickDeviceResult", buildResult(err, nil))
 }
 
 func handleWiFiScan(ctx *HandlerContext, payload json.RawMessage) {
 	networks, err := wifi.Get().Scan()
-	SendEncrypted(ctx, "wifiScanResult", map[string]any{
-		"success":  err == nil,
+	SendEncrypted(ctx, "wifiScanResult", buildResult(err, map[string]any{
 		"networks": networks,
-	})
+	}))
 }
 
 func handleWiFiConnect(ctx *HandlerContext, payload json.RawMessage) {
@@ -290,17 +297,14 @@ func handleWiFiConnect(ctx *HandlerContext, payload json.RawMessage) {
 
 	// Connect method verifies internet connectivity, otherwise rejects wifi
 	err := wifi.Get().Connect(req.SSID, req.Password)
-	SendEncrypted(ctx, "wifiConnectResult", map[string]any{
-		"success": err == nil,
-	})
+	SendEncrypted(ctx, "wifiConnectResult", buildResult(err, nil))
 }
 
 func handleGetEvents(ctx *HandlerContext, payload json.RawMessage) {
 	events, err := storage.Get().GetEventLog()
-	SendEncrypted(ctx, "eventsResult", map[string]any{
-		"success": err == nil,
-		"events":  events,
-	})
+	SendEncrypted(ctx, "eventsResult", buildResult(err, map[string]any{
+		"events": events,
+	}))
 }
 
 func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
@@ -317,6 +321,7 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 	if err != nil {
 		SendEncrypted(ctx, "recordingResult", map[string]any{
 			"success": false,
+			"error":   err.Error(),
 		})
 		return
 	}
@@ -333,6 +338,7 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 	if err != nil {
 		SendEncrypted(ctx, "streamResult", map[string]any{
 			"success": false,
+			"error":   err.Error(),
 		})
 		return
 	}
@@ -348,9 +354,7 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 
 func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
 	err := record.Get().StopStream()
-	SendEncrypted(ctx, "stopStreamResult", map[string]any{
-		"success": err == nil,
-	})
+	SendEncrypted(ctx, "stopStreamResult", buildResult(err, nil))
 }
 
 func handleToggleBabyphone(ctx *HandlerContext, payload json.RawMessage) {
@@ -382,10 +386,9 @@ func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	err := record.Get().SetMicrophoneEnabled(req.Enabled)
-	SendEncrypted(ctx, "microphoneResult", map[string]any{
-		"success": err == nil,
+	SendEncrypted(ctx, "microphoneResult", buildResult(err, map[string]any{
 		"enabled": req.Enabled,
-	})
+	}))
 }
 
 func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
