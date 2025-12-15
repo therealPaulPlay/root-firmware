@@ -12,27 +12,36 @@ import (
 )
 
 const (
-	detectionInterval = 5 * time.Second
-	recordDuration    = 10 * time.Second
+	checkInterval  = 5 * time.Second
+	recordDuration = 10 * time.Second
+	modelPath      = "pkg/ml/models/nanodet-plus-m_416.onnx"
 )
-
-// TODO: Handle actual detection, should handle Start and Stop atuomatically depending on if device is in low power mode
-// No need to export Start and Stop!
 
 type ML struct {
 	mu        sync.Mutex
-	running   bool
 	stopChan  chan struct{}
 	recording bool
+	detector  *detector
 }
 
 var instance *ML
 var once sync.Once
 
-func Init() {
+func Init() error {
+	var err error
 	once.Do(func() {
-		instance = &ML{}
+		det, loadErr := newDetector(modelPath)
+		if loadErr != nil {
+			err = fmt.Errorf("failed to load ML model: %w", loadErr)
+			return
+		}
+		instance = &ML{
+			detector: det,
+			stopChan: make(chan struct{}),
+		}
+		go instance.loop()
 	})
+	return err
 }
 
 func Get() *ML {
@@ -42,36 +51,8 @@ func Get() *ML {
 	return instance
 }
 
-// Start starts ML detection loop
-func (m *ML) Start() error {
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return fmt.Errorf("already running")
-	}
-	m.running = true
-	m.stopChan = make(chan struct{})
-	m.mu.Unlock()
-
-	go m.detectLoop()
-	return nil
-}
-
-// Stop stops ML detection loop
-func (m *ML) Stop() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if !m.running {
-		return
-	}
-
-	close(m.stopChan)
-	m.running = false
-}
-
-func (m *ML) detectLoop() {
-	ticker := time.NewTicker(detectionInterval)
+func (m *ML) loop() {
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	for {
@@ -79,71 +60,54 @@ func (m *ML) detectLoop() {
 		case <-m.stopChan:
 			return
 		case <-ticker.C:
-			// Skip detection if in low power mode or already recording
-			if ups.Get() != nil && ups.Get().IsLowPower() {
-				continue
-			}
-			if m.recording {
-				continue
-			}
-
-			// Run detection
-			detected, eventType := m.runDetection()
-			if detected {
-				m.handleEvent(eventType)
-			}
+			m.check()
 		}
 	}
 }
 
-// runDetection captures frame and runs ML inference
-func (m *ML) runDetection() (bool, string) {
-	// Capture single frame
-	frame, err := record.Get().CapturePreview()
-	if err != nil {
-		return false, ""
+func (m *ML) check() {
+	// Skip if low power or already recording
+	if ups.Get() != nil && ups.Get().IsLowPower() {
+		return
 	}
-
-	// TODO: Run ML model inference on frame
-	// Options for Go ML:
-	// 1. TensorFlow Lite Go bindings (github.com/mattn/go-tflite)
-	// 2. ONNX Runtime Go (github.com/yalue/onnxruntime_go)
-	// 3. OpenCV Go (gocv.io/x/gocv)
-	//
-	// For now, placeholder returns false (no detection)
-	_ = frame
-
-	// When implemented, return:
-	// - true, "person" for person detection
-	// - true, "motion" for motion detection
-	// - true, "package" for package detection
-
-	return false, ""
-}
-
-// handleEvent starts recording when event detected
-func (m *ML) handleEvent(eventType string) {
 	if m.recording {
 		return
 	}
-	m.recording = true
 
-	// Generate recording path in /data/recordings
-	filename := fmt.Sprintf("temp-%d.mp4", time.Now().Unix())
-	tempPath := filepath.Join("/data/recordings", filename)
+	// Capture and detect
+	frame, err := record.Get().CapturePreview()
+	if err != nil {
+		return
+	}
+
+	detection, err := m.detector.detect(frame)
+	if err != nil || !detection.HasPerson {
+		return
+	}
 
 	// Start recording
+	m.startRecording()
+}
+
+func (m *ML) startRecording() {
+	m.mu.Lock()
+	if m.recording {
+		m.mu.Unlock()
+		return
+	}
+	m.recording = true
+	m.mu.Unlock()
+
+	tempPath := filepath.Join("/data/recordings", fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
+
 	if err := record.Get().StartRecording(tempPath); err != nil {
 		m.recording = false
 		return
 	}
 
-	// Stop recording after duration
 	time.AfterFunc(recordDuration, func() {
 		record.Get().StopRecording()
+		storage.Get().SaveRecording(tempPath, recordDuration.Seconds(), "person")
 		m.recording = false
-
-		// Save recording to storage (moves to permanent location)
-		storage.Get().SaveRecording(tempPath, recordDuration.Seconds(), eventType)
 	})
 }
