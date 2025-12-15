@@ -7,6 +7,11 @@ import (
 	"maps"
 	"os/exec"
 
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v3/mem"
+
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
@@ -413,9 +418,46 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 	u := ups.Get()
 
 	// TODO: Get error log from somewhere
-	// TODO: Get performance metrics with gopsutil
 	// TODO: Get firmware version from config
 	// TODO: Get firmware update status
+
+	// Get performance metrics using gopsutil
+	performance := map[string]any{}
+
+	// CPU usage (average over 500ms)
+	if percentages, err := cpu.Percent(0, false); err == nil && len(percentages) > 0 {
+		performance["cpuUsagePercent"] = percentages[0]
+	}
+
+	// CPU temperature
+	if temps, err := host.SensorsTemperatures(); err == nil {
+		for _, temp := range temps {
+			// Look for CPU temp (common sensor names on Raspberry Pi)
+			if temp.SensorKey == "cpu_thermal" || temp.SensorKey == "coretemp" {
+				performance["cpuTempCelsius"] = temp.Temperature
+				break
+			}
+		}
+	}
+
+	// Memory stats
+	if vmStat, err := mem.VirtualMemory(); err == nil {
+		performance["memoryUsedMB"] = vmStat.Used / (1024 * 1024)
+		performance["memoryTotalMB"] = vmStat.Total / (1024 * 1024)
+		performance["memoryUsagePercent"] = vmStat.UsedPercent
+	}
+
+	// Disk stats for /data
+	if diskStat, err := disk.Usage("/data"); err == nil {
+		performance["diskUsedGB"] = diskStat.Used / (1024 * 1024 * 1024)
+		performance["diskTotalGB"] = diskStat.Total / (1024 * 1024 * 1024)
+		performance["diskUsagePercent"] = diskStat.UsedPercent
+	}
+
+	// Uptime
+	if uptime, err := host.Uptime(); err == nil {
+		performance["uptimeSeconds"] = uptime
+	}
 
 	health := map[string]any{
 		"battery": map[string]any{
@@ -430,7 +472,7 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		"updateStatus":    "up-to-date",
 		"relayUrl":        "", // TODO: Get from config
 		"errors":          []string{},
-		"performance":     map[string]any{},
+		"performance":     performance,
 	}
 
 	if u != nil {
