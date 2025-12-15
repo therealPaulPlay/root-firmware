@@ -230,6 +230,7 @@ func RegisterHandlers() {
 	relay.On("getHealth", useEncryption("getHealth", handleGetHealth))
 	relay.On("getPreview", useEncryption("getPreview", handleGetPreview))
 	relay.On("restart", useEncryption("restart", handleRestart))
+	relay.On("reset", useEncryption("reset", handleReset))
 }
 
 func handleGetDevices(ctx *HandlerContext, payload json.RawMessage) {
@@ -467,6 +468,21 @@ func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
 
 	// Reboot the system
 	go func() {
+		exec.Command("sudo", "reboot").Run()
+	}()
+}
+
+func handleReset(ctx *HandlerContext, payload json.RawMessage) {
+	// Send success response before resetting
+	SendEncrypted(ctx, "resetResult", map[string]any{
+		"success": true,
+	})
+
+	// Remove all contents of /data partition, then reboot
+	go func() {
+		// Note: Using /data/* requires shell expansion, so use sh -c
+		exec.Command("sh", "-c", "rm -rf /data/*").Run()
+		// Reboot the system after deletion completes
 		exec.Command("sudo", "reboot").Run()
 	}()
 }
