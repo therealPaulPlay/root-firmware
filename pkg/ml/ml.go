@@ -13,14 +13,24 @@ import (
 )
 
 const (
-	checkInterval  = 5 * time.Second
-	recordDuration = 10 * time.Second
-	modelPath      = "pkg/ml/models/nanodet-plus-m_416.onnx"
+	checkInterval    = 1 * time.Second // Check frequently for motion
+	recordDuration   = 10 * time.Second // Fixed recording chunks
+	cooldownDuration = 5 * time.Second // Wait after recording stops
+	motionTimeout    = 3 * time.Second // Stop recording if no motion
 )
 
+var modelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
+
 type ML struct {
-	stopChan chan struct{}
-	detector *detector
+	stopChan       chan struct{}
+	objectDetector *objectDetector
+	motionDetector *motionDetector
+	recordingPath  string
+	recordingEvent string
+	recordingStart time.Time
+	lastMotionAt   time.Time
+	lastRecordedAt time.Time
+	mu             sync.Mutex
 }
 
 var instance *ML
@@ -29,14 +39,15 @@ var once sync.Once
 func Init() error {
 	var err error
 	once.Do(func() {
-		det, loadErr := newDetector(modelPath)
+		objDet, loadErr := newObjectDetector(modelPath)
 		if loadErr != nil {
 			err = fmt.Errorf("failed to load ML model: %w", loadErr)
 			return
 		}
 		instance = &ML{
-			detector: det,
-			stopChan: make(chan struct{}),
+			objectDetector: objDet,
+			motionDetector: newMotionDetector(),
+			stopChan:       make(chan struct{}),
 		}
 		go instance.loop()
 	})
@@ -65,28 +76,65 @@ func (m *ML) loop() {
 }
 
 func (m *ML) check() {
-	// Skip if low power or camera already in use
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Skip if low power
 	if ups.Get() != nil && ups.Get().IsLowPower() {
 		return
 	}
 
-	if record.Get().IsStreamingOrRecording() {
+	isRecording := record.Get().IsStreamingOrRecording()
+
+	// Cooldown period after recording stops
+	if !isRecording && time.Since(m.lastRecordedAt) < cooldownDuration {
 		return
 	}
 
-	// Capture and detect
 	frame, err := record.Get().CapturePreview()
 	if err != nil {
 		return
 	}
 
-	detection, err := m.detector.detect(frame)
-	if err != nil || detection.EventType == "" {
+	// Gate 1: Motion detection (fast, cheap)
+	hasMotion, err := m.motionDetector.detectMotion(frame)
+	if err != nil {
 		return
 	}
 
-	// Start recording with detected event type
-	m.startRecording(detection.EventType)
+	if !hasMotion {
+		// Stop recording if no motion for timeout period
+		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
+			m.stopRecording()
+		}
+		return
+	}
+
+	// Gate 2: ML object detection (slow, expensive)
+	detection, err := m.objectDetector.detect(frame)
+	if err != nil || detection.EventType == "" {
+		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
+			m.stopRecording()
+		}
+		return
+	}
+
+	// Motion detected with relevant object
+	now := time.Now()
+	m.lastMotionAt = now
+
+	if !isRecording {
+		m.startRecording(detection.EventType)
+		return
+	}
+
+	// Split recording if reached duration limit
+	if time.Since(m.recordingStart) >= recordDuration {
+		m.stopRecording()
+		m.startRecording(detection.EventType)
+		// Reset background to prevent re-detecting same stationary object
+		m.motionDetector.reset(frame)
+	}
 }
 
 func (m *ML) startRecording(eventType string) {
@@ -96,8 +144,18 @@ func (m *ML) startRecording(eventType string) {
 		return
 	}
 
-	time.AfterFunc(recordDuration, func() {
-		record.Get().StopRecording()
-		storage.Get().SaveRecording(tempPath, recordDuration.Seconds(), eventType)
-	})
+	m.recordingPath = tempPath
+	m.recordingEvent = eventType
+	m.recordingStart = time.Now()
+	m.lastMotionAt = time.Now()
+}
+
+func (m *ML) stopRecording() {
+	record.Get().StopRecording()
+
+	duration := time.Since(m.recordingStart).Seconds()
+	storage.Get().SaveRecording(m.recordingPath, duration, m.recordingEvent)
+
+	m.recordingPath = ""
+	m.lastRecordedAt = time.Now()
 }

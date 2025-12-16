@@ -37,11 +37,11 @@ func decodeLabel(classID int) string {
 	}
 }
 
-type detector struct {
+type objectDetector struct {
 	session *ort.DynamicAdvancedSession
 }
 
-func newDetector(modelPath string) (*detector, error) {
+func newObjectDetector(modelPath string) (*objectDetector, error) {
 	if err := ort.InitializeEnvironment(); err != nil {
 		return nil, err
 	}
@@ -61,10 +61,10 @@ func newDetector(modelPath string) (*detector, error) {
 		return nil, err
 	}
 
-	return &detector{session: session}, nil
+	return &objectDetector{session: session}, nil
 }
 
-func (d *detector) detect(jpegData []byte) (*Detection, error) {
+func (d *objectDetector) detect(jpegData []byte) (*Detection, error) {
 	img, _, err := image.Decode(bytes.NewReader(jpegData))
 	if err != nil {
 		return nil, err
@@ -88,7 +88,7 @@ func (d *detector) detect(jpegData []byte) (*Detection, error) {
 	return d.postprocess(outputTensor), nil
 }
 
-func (d *detector) preprocess(img image.Image) ort.Value {
+func (d *objectDetector) preprocess(img image.Image) ort.Value {
 	resized := image.NewRGBA(image.Rect(0, 0, modelWidth, modelHeight))
 	bounds := img.Bounds()
 
@@ -125,7 +125,7 @@ func (d *detector) preprocess(img image.Image) ort.Value {
 	return tensor
 }
 
-func (d *detector) postprocess(outputTensor *ort.Tensor[float32]) *Detection {
+func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detection {
 	outputData := outputTensor.GetData()
 
 	// NanoDet output: [1, 2100, 84] where 84 = 80 class logits + 4 bbox values
