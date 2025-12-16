@@ -1,22 +1,25 @@
 package globals
 
-// DataDir is the root writable data directory
+// Writable data directory
 var DataDir = "/data"
 
-// AssetsPath is the directory where embedded assets are extracted
+// Extract embedded assets
 var AssetsPath = DataDir + "/assets"
 
-// FirmwareDataDir is the writable directory for persistent firmware data
+// Firmware data
 var FirmwareDataDir = DataDir + "/.firmware-data"
 
-// ConfigPath is the path to the firmware configuration file
+// Config
 var ConfigPath = FirmwareDataDir + "/config.json"
 
-// WpaSupplicantPath is the system path to WiFi credentials file (must be writable)
+// Logs
+var LogsPath = FirmwareDataDir + "/logs.json"
+
+// WpaSupplicantPath for WiFi credentials
 var WpaSupplicantPath = "/etc/wpa_supplicant/wpa_supplicant.conf"
 
-// RecordingsPath is the directory where video recordings are stored
+// Recordings
 var RecordingsPath = DataDir + "/recordings"
 
-// EventLogPath is the path to the event log JSON file
+// Event log
 var EventLogPath = RecordingsPath + "/events.json"

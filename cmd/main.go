@@ -12,6 +12,7 @@ import (
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/globals"
+	"root-firmware/pkg/logger"
 	"root-firmware/pkg/ml"
 	"root-firmware/pkg/pairing"
 	"root-firmware/pkg/record"
@@ -26,6 +27,9 @@ import (
 var assets embed.FS
 
 func main() {
+	// Initialize logger first to capture all logs
+	logger.Init()
+	
 	log.Println("Starting...")
 
 	// Initialize config

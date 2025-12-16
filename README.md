@@ -20,6 +20,10 @@ This package exposes functions for creating encryption keys using the Diffie-Hel
 
 Global variables. All paths or other constants that are reused across packages go here.
 
+### Logger
+
+Collect logs and store them in a JSON for easy access.
+
 ### ML (Machine learning)
 
 Uses ONNX for basic event detection. Heavily inspired by [Secluso](https://github.com/secluso/secluso). 

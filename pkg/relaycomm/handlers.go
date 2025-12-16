@@ -17,6 +17,7 @@ import (
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
+	"root-firmware/pkg/logger"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/storage"
@@ -528,7 +529,7 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 
 	health := map[string]any{
 		"battery": map[string]any{
-			"percent":   100,
+			"percent":   0,
 			"onACPower": true,
 		},
 		"wifi": map[string]any{
@@ -538,7 +539,7 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		"firmwareVersion": firmwareVersion,
 		"updateStatus":    "up-to-date",
 		"relayUrl":        relayURL,
-		"errors":          []string{},
+		"logs":            logger.GetLogs(),
 		"performance":     performance,
 	}
 
