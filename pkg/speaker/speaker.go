@@ -9,10 +9,11 @@ import (
 )
 
 type Speaker struct {
-	streaming  bool
+	streaming bool
 	streamPipe io.WriteCloser
-	streamCmd  *exec.Cmd
-	mu         sync.Mutex
+	streamCmd *exec.Cmd
+	playCmd   *exec.Cmd
+	mu        sync.Mutex
 }
 
 var instance *Speaker
@@ -48,72 +49,98 @@ func (s *Speaker) PlayFile(filePath string) error {
 	return nil
 }
 
-// StartStream starts audio streaming for 2-way-audio mode
-// Returns a writer - write PCM audio data (16-bit, 44.1kHz, mono)
-// Call Close() on the writer to stop streaming
-func (s *Speaker) StartStream() (io.WriteCloser, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.streaming {
-		return nil, fmt.Errorf("already streaming")
-	}
-
-	cmd := exec.Command("aplay", "-D", "default", "-f", "S16_LE", "-r", "44100", "-c", "1")
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start streaming: %w", err)
-	}
-
-	s.streaming = true
-	s.streamPipe = stdin
-	s.streamCmd = cmd
-
-	return &streamWriter{speaker: s}, nil
-}
-
+// IsStreaming returns whether audio streaming is currently active
 func (s *Speaker) IsStreaming() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.streaming
 }
 
-type streamWriter struct {
-	speaker *Speaker
+// WriteChunk writes an AAC audio chunk (ADTS format) to the speaker
+// Automatically starts streaming on first write
+func (s *Speaker) WriteChunk(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Start streaming if not already active
+	if !s.streaming {
+		// Use ffmpeg to decode AAC and pipe to aplay
+		cmd := exec.Command("ffmpeg",
+			"-f", "adts",
+			"-i", "pipe:0",
+			"-f", "s16le",
+			"-ar", "44100",
+			"-ac", "1",
+			"pipe:1",
+		)
+
+		// Connect stdin for AAC input
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("failed to create pipe: %w", err)
+		}
+
+		// Connect stdout to aplay
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			stdin.Close()
+			return fmt.Errorf("failed to create stdout pipe: %w", err)
+		}
+
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to start ffmpeg: %w", err)
+		}
+
+		// Start aplay to play the decoded audio
+		playCmd := exec.Command("aplay", "-D", "default", "-f", "S16_LE", "-r", "44100", "-c", "1")
+		playCmd.Stdin = stdout
+
+		if err := playCmd.Start(); err != nil {
+			cmd.Process.Kill()
+			return fmt.Errorf("failed to start aplay: %w", err)
+		}
+
+		s.streaming = true
+		s.streamPipe = stdin
+		s.streamCmd = cmd
+		s.playCmd = playCmd
+	}
+
+	// Write AAC chunk to ffmpeg
+	if _, err := s.streamPipe.Write(data); err != nil {
+		return fmt.Errorf("failed to write audio: %w", err)
+	}
+
+	return nil
 }
 
-func (w *streamWriter) Write(p []byte) (int, error) {
-	w.speaker.mu.Lock()
-	defer w.speaker.mu.Unlock()
+// StopStream stops the audio stream
+func (s *Speaker) StopStream() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if w.speaker.streamPipe == nil {
-		return 0, fmt.Errorf("stream closed")
+	if !s.streaming {
+		return nil
 	}
 
-	return w.speaker.streamPipe.Write(p)
-}
-
-func (w *streamWriter) Close() error {
-	w.speaker.mu.Lock()
-	defer w.speaker.mu.Unlock()
-
-	if w.speaker.streamPipe != nil {
-		w.speaker.streamPipe.Close()
+	if s.streamPipe != nil {
+		s.streamPipe.Close()
 	}
 
-	if w.speaker.streamCmd != nil && w.speaker.streamCmd.Process != nil {
-		w.speaker.streamCmd.Process.Kill()
-		w.speaker.streamCmd.Wait()
+	if s.streamCmd != nil && s.streamCmd.Process != nil {
+		s.streamCmd.Process.Kill()
+		s.streamCmd.Wait()
 	}
 
-	w.speaker.streaming = false
-	w.speaker.streamPipe = nil
-	w.speaker.streamCmd = nil
+	if s.playCmd != nil && s.playCmd.Process != nil {
+		s.playCmd.Process.Kill()
+		s.playCmd.Wait()
+	}
+
+	s.streaming = false
+	s.streamPipe = nil
+	s.streamCmd = nil
+	s.playCmd = nil
 
 	return nil
 }

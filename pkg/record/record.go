@@ -40,7 +40,7 @@ func Get() *Recorder {
 }
 
 func micEnabled() bool {
-	val, ok := config.Get().GetKey("microphone_enabled")
+	val, ok := config.Get().GetKey("microphoneEnabled")
 	if !ok {
 		return true // Default enabled
 	}
@@ -203,7 +203,7 @@ func (r *Recorder) StopStream() error {
 // SetMicrophoneEnabled enables or disables microphone
 // Changes take effect on next recording/stream start
 func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
-	return config.Get().SetKey("microphone_enabled", enabled)
+	return config.Get().SetKey("microphoneEnabled", enabled)
 }
 
 // CapturePreview captures a single frame as JPEG

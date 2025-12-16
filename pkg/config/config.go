@@ -71,7 +71,7 @@ func (c *Config) createInitialConfig() error {
 
 	c.data = map[string]any{
 		"id":               id.String(),
-		"firmware_version": "1.0.0",
+		"firmwareVersion": "1.0.0",
 	}
 
 	return c.save()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"os/exec"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -17,6 +18,7 @@ import (
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
+	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/ups"
 	"root-firmware/pkg/wifi"
@@ -226,7 +228,7 @@ func RegisterHandlers() {
 	// Streaming
 	relay.On("startStream", useEncryption("startStream", handleStartStream))
 	relay.On("stopStream", useEncryption("stopStream", handleStopStream))
-	relay.On("toggleBabyphone", useEncryption("toggleBabyphone", handleToggleBabyphone))
+	relay.On("sendAudioChunk", useEncryption("sendAudioChunk", handleSendAudioChunk))
 
 	// Settings
 	relay.On("setMicrophone", useEncryption("setMicrophone", handleSetMicrophone))
@@ -326,37 +328,52 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 
 	filePath, err := storage.Get().GetRecordingPath(req.ID)
 	if err != nil {
-		SendEncrypted(ctx, "recordingResult", map[string]any{
-			"success": false,
-			"error":   err.Error(),
-		})
+		SendEncrypted(ctx, "recordingResult", buildResult(err, nil))
 		return
 	}
 
-	// TODO: Stream file contents to relay server in chunks
-	_ = filePath
-	SendEncrypted(ctx, "recordingResult", map[string]any{
-		"success": true,
-	})
+	// Read and encode file (recordings are short ~10s videos)
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		SendEncrypted(ctx, "recordingResult", buildResult(fmt.Errorf("failed to read file: %w", err), nil))
+		return
+	}
+
+	SendEncrypted(ctx, "recordingResult", buildResult(nil, map[string]any{
+		"data": base64.StdEncoding.EncodeToString(fileData),
+	}))
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 	stream, err := record.Get().StartStream()
 	if err != nil {
-		SendEncrypted(ctx, "streamResult", map[string]any{
-			"success": false,
-			"error":   err.Error(),
-		})
+		SendEncrypted(ctx, "startStreamResult", buildResult(err, nil))
 		return
 	}
 
-	SendEncrypted(ctx, "streamResult", map[string]any{
-		"success": true,
-	})
+	// Stream video data in background
+	go func() {
+		if err := StreamReader(ctx, stream.Video, "streamVideoChunkResult"); err != nil {
+			SendEncrypted(ctx, "streamVideoChunkResult", map[string]any{
+				"success": false,
+				"error":   err.Error(),
+				"done":    true,
+			})
+		}
+	}()
 
-	// TODO: Stream video/audio data to relay server (see record package)
-	// Read from stream.Video and stream.Audio, send chunks via WebSocket
-	_ = stream
+	// Stream audio data in background (if available)
+	if stream.Audio != nil {
+		go func() {
+			if err := StreamReader(ctx, stream.Audio, "streamAudioChunkResult"); err != nil {
+				SendEncrypted(ctx, "streamAudioChunkResult", map[string]any{
+					"success": false,
+					"error":   err.Error(),
+					"done":    true,
+				})
+			}
+		}()
+	}
 }
 
 func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
@@ -364,22 +381,30 @@ func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
 	SendEncrypted(ctx, "stopStreamResult", buildResult(err, nil))
 }
 
-func handleToggleBabyphone(ctx *HandlerContext, payload json.RawMessage) {
+func handleSendAudioChunk(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		DeviceID string `json:"deviceId"`
-		Enabled  bool   `json:"enabled"`
+		Chunk    string `json:"chunk"` // Base64-encoded AAC audio data (ADTS format)
+		Done     bool   `json:"done"`  // Indicates end of audio stream
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return
 	}
 
-	// TODO: Implement babyphone mode (2-way audio)
-	// This would start audio streaming from device to camera
-	SendEncrypted(ctx, "babyphoneResult", map[string]any{
-		"success": true,
-		"enabled": req.Enabled,
-	})
+	// Handle stream end
+	if req.Done {
+		speaker.Get().StopStream()
+		return
+	}
+
+	// Decode and play audio chunk
+	audioData, err := base64.StdEncoding.DecodeString(req.Chunk)
+	if err != nil {
+		return
+	}
+
+	speaker.Get().WriteChunk(audioData)
 }
 
 func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
@@ -400,27 +425,23 @@ func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 
 func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
-		DeviceID     string `json:"deviceId"`
-		PlayOnRecord bool   `json:"playOnRecord"`
-		PlayOnLive   bool   `json:"playOnLive"`
+		DeviceID string `json:"deviceId"`
+		Enabled  bool   `json:"enabled"`
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return
 	}
 
-	// TODO: Store in config and implement sound playback
-	SendEncrypted(ctx, "recordingSoundResult", map[string]any{
-		"success": true,
-	})
+	// Store setting in config - play sound when camera is actively recording or streaming
+	err := config.Get().SetKey("play_active_camera_sound", req.Enabled)
+	SendEncrypted(ctx, "recordingSoundResult", buildResult(err, map[string]any{
+		"enabled": req.Enabled,
+	}))
 }
 
 func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 	u := ups.Get()
-
-	// TODO: Get error log from somewhere
-	// TODO: Get firmware version from config
-	// TODO: Get firmware update status
 
 	// Get performance metrics using gopsutil
 	performance := map[string]any{}
@@ -460,6 +481,22 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		performance["uptimeSeconds"] = uptime
 	}
 
+	// Get firmware version from config
+	firmwareVersion := "1.0.0" // Default
+	if ver, ok := config.Get().GetKey("firmwareVersion"); ok {
+		if verStr, ok := ver.(string); ok {
+			firmwareVersion = verStr
+		}
+	}
+
+	// Get relay URL from config
+	relayURL := ""
+	if url, ok := config.Get().GetKey("relayUrl"); ok {
+		if urlStr, ok := url.(string); ok {
+			relayURL = urlStr
+		}
+	}
+
 	health := map[string]any{
 		"battery": map[string]any{
 			"percent":   100,
@@ -469,9 +506,9 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 			"connected": wifi.Get().IsConnected(),
 			"ssid":      wifi.Get().GetCurrentNetwork(),
 		},
-		"firmwareVersion": "1.0.0", // TODO: Get from config
+		"firmwareVersion": firmwareVersion,
 		"updateStatus":    "up-to-date",
-		"relayUrl":        "", // TODO: Get from config
+		"relayUrl":        relayURL,
 		"errors":          []string{},
 		"performance":     performance,
 	}

@@ -18,7 +18,7 @@ This package exposes functions for creating encryption keys using the Diffie-Hel
 
 ### Globals
 
-Global variables.
+Global variables. All paths or other constants that are reused across packages go here.
 
 ### ML (Machine learning)
 
