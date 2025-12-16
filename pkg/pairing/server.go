@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
@@ -16,6 +17,54 @@ import (
 )
 
 const pairingPort = "80"
+
+// rateLimiter limits requests to 10 per second across all clients
+type rateLimiter struct {
+	mu        sync.Mutex
+	counter   int
+	lastReset time.Time
+}
+
+func newRateLimiter() *rateLimiter {
+	return &rateLimiter{
+		lastReset: time.Now(),
+	}
+}
+
+func (rl *rateLimiter) allow() bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	// Reset counter every second
+	if now.Sub(rl.lastReset) >= time.Second {
+		rl.counter = 0
+		rl.lastReset = now
+	}
+
+	// Check if under limit
+	if rl.counter < 10 {
+		rl.counter++
+		return true
+	}
+
+	return false
+}
+
+func (rl *rateLimiter) middleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !rl.allow() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   "Rate limit exceeded",
+			})
+			return
+		}
+		next(w, r)
+	}
+}
 
 // EncryptedRequest wraps encrypted payloads from devices for HTTP endpoints
 type EncryptedRequest struct {
@@ -129,6 +178,7 @@ func Init() error {
 
 func (s *Server) start(port string) error {
 	mux := http.NewServeMux()
+	limiter := newRateLimiter()
 
 	// Serve setup page at root
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +193,7 @@ func (s *Server) start(port string) error {
 	mux.Handle("/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir(globals.AssetsPath+"/fonts"))))
 
 	// Get pairing code endpoint - triggers camera to speak the code
-	mux.HandleFunc("/get-code", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/get-code", limiter.middleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		code := GetHelper().GetCode()
@@ -159,10 +209,10 @@ func (s *Server) start(port string) error {
 		}()
 
 		json.NewEncoder(w).Encode(map[string]any{"success": true})
-	})
+	}))
 
 	// Pairing endpoint
-	mux.HandleFunc("/pair", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/pair", limiter.middleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -198,10 +248,10 @@ func (s *Server) start(port string) error {
 		}
 
 		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": result})
-	})
+	}))
 
 	// WiFi connection endpoint (requires paired device with encrypted payload)
-	mux.HandleFunc("/set-wifi", withEncryption(func(w http.ResponseWriter, decrypted []byte) {
+	mux.HandleFunc("/set-wifi", limiter.middleware(withEncryption(func(w http.ResponseWriter, decrypted []byte) {
 		var wifiReq struct {
 			DeviceID string `json:"deviceId"`
 			SSID     string `json:"ssid"`
@@ -219,10 +269,10 @@ func (s *Server) start(port string) error {
 		}
 
 		json.NewEncoder(w).Encode(map[string]any{"success": true})
-	}))
+	})))
 
 	// Relay server setup endpoint (requires paired device with encrypted payload)
-	mux.HandleFunc("/set-relay", withEncryption(func(w http.ResponseWriter, decrypted []byte) {
+	mux.HandleFunc("/set-relay", limiter.middleware(withEncryption(func(w http.ResponseWriter, decrypted []byte) {
 		var relayReq struct {
 			DeviceID string `json:"deviceId"`
 			RelayURL string `json:"relayUrl"`
@@ -246,7 +296,7 @@ func (s *Server) start(port string) error {
 		}
 
 		json.NewEncoder(w).Encode(map[string]any{"success": true})
-	}))
+	})))
 
 	s.server = &http.Server{
 		Addr:    ":" + port,

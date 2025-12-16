@@ -76,21 +76,21 @@ func (m *ML) loop() {
 }
 
 func (m *ML) check() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	// Skip if low power
 	if ups.Get() != nil && ups.Get().IsLowPower() {
 		return
 	}
 
+	// Check recording state and cooldown (need lock for timestamps)
+	m.mu.Lock()
 	isRecording := record.Get().IsStreamingOrRecording()
-
-	// Cooldown period after recording stops
 	if !isRecording && time.Since(m.lastRecordedAt) < cooldownDuration {
+		m.mu.Unlock()
 		return
 	}
+	m.mu.Unlock()
 
+	// Capture frame without holding lock (this is a slow blocking call to ffmpeg)
 	frame, err := record.Get().CapturePreview()
 	if err != nil {
 		return
@@ -104,22 +104,29 @@ func (m *ML) check() {
 
 	if !hasMotion {
 		// Stop recording if no motion for timeout period
+		m.mu.Lock()
 		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
 			m.stopRecording()
 		}
+		m.mu.Unlock()
 		return
 	}
 
 	// Gate 2: ML object detection (slow, expensive)
 	detection, err := m.objectDetector.detect(frame)
 	if err != nil || detection.EventType == "" {
+		m.mu.Lock()
 		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
 			m.stopRecording()
 		}
+		m.mu.Unlock()
 		return
 	}
 
 	// Motion detected with relevant object
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	now := time.Now()
 	m.lastMotionAt = now
 

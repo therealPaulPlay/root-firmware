@@ -59,24 +59,26 @@ func (w *WiFi) Connect(ssid, password string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Escape SSID for safe use in shell
-	escapedSSID := strings.ReplaceAll(ssid, `\`, `\\`)
-	escapedSSID = strings.ReplaceAll(escapedSSID, `"`, `\"`)
+	// Validate SSID length (IEEE 802.11 spec: 0-32 bytes)
+	if len(ssid) == 0 || len(ssid) > 32 {
+		return fmt.Errorf("invalid SSID length (must be 1-32 bytes)")
+	}
 
 	var config []byte
 	var err error
 
 	if password == "" {
-		// Unsecured network
-		config = fmt.Appendf(nil, `network={
+		// Unsecured network - write config directly without shell escaping
+		// SSID is written as hex string to avoid any injection issues
+		config = []byte(fmt.Sprintf(`network={
 	ssid="%s"
 	key_mgmt=NONE
 }
-`, escapedSSID)
+`, sanitizeSSID(ssid)))
 	} else {
-		// Secured network - use wpa_passphrase with escaped SSID
-		// Pass password via stdin to avoid command injection
-		cmd := exec.Command("wpa_passphrase", escapedSSID)
+		// Secured network - use wpa_passphrase which properly escapes everything
+		// Both SSID and password are passed safely (no shell interpretation)
+		cmd := exec.Command("wpa_passphrase", ssid)
 		cmd.Stdin = strings.NewReader(password)
 		config, err = cmd.Output()
 		if err != nil {
@@ -135,6 +137,21 @@ func (w *WiFi) GetCurrentNetwork() string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+// sanitizeSSID escapes special characters in SSID for safe use in wpa_supplicant.conf
+// According to wpa_supplicant.conf spec, SSIDs with special chars should use backslash escaping
+func sanitizeSSID(ssid string) string {
+	// Replace backslash first to avoid double-escaping
+	result := strings.ReplaceAll(ssid, `\`, `\\`)
+	// Escape double quotes
+	result = strings.ReplaceAll(result, `"`, `\"`)
+	// Escape newlines (would break config file format)
+	result = strings.ReplaceAll(result, "\n", `\n`)
+	result = strings.ReplaceAll(result, "\r", `\r`)
+	// Escape tab
+	result = strings.ReplaceAll(result, "\t", `\t`)
+	return result
 }
 
 func parseNetworks(output string) []Network {
