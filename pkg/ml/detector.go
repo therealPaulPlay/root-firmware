@@ -12,8 +12,10 @@ import (
 const (
 	modelWidth  = 416
 	modelHeight = 416
-	confThresh  = 0.35
+	confThresh  = 0.4 // Match reference implementation
 	nmsThresh   = 0.5
+	regMax      = 7  // Distribution head bins [0-7]
+	numClasses  = 80 // COCO classes
 )
 
 type Detection struct {
@@ -126,41 +128,67 @@ func (d *detector) preprocess(img image.Image) ort.Value {
 func (d *detector) postprocess(outputTensor *ort.Tensor[float32]) *Detection {
 	outputData := outputTensor.GetData()
 
-	// NanoDet output: [1, 2100, 84] where 84 = 4 bbox + 80 classes
-	// Check classes: person(0), car(2), cat(15), dog(16)
-	classesToCheck := []int{0, 2, 15, 16}
+	// NanoDet output: [1, 2100, 84] where 84 = 80 class logits + 4 bbox values
+	// Layout per prediction: [class_0, class_1, ..., class_79, bbox_l, bbox_t, bbox_r, bbox_b]
+	classesToCheck := []int{0, 2, 15, 16} // person, car, cat, dog
 
 	var boxes [][4]float32
 	var scores []float32
 	var labels []int
 
-	for i := range 2100 {
-		offset := i * 84
-		if offset+84 > len(outputData) {
-			break
-		}
+	// Multi-scale feature map strides
+	strides := []int{8, 16, 32, 64}
+	totalIdx := 0
 
-		// Find best scoring class for this box
-		var bestClass int
-		var bestScore float32
+	// Process each stride level
+	for _, stride := range strides {
+		featureH := modelHeight / stride
+		featureW := modelWidth / stride
 
-		for _, classID := range classesToCheck {
-			score := outputData[offset+4+classID]
-			if score > bestScore {
-				bestScore = score
-				bestClass = classID
+		for row := range featureH {
+			for col := range featureW {
+				if totalIdx >= 2100 {
+					break
+				}
+
+				offset := totalIdx * 84
+
+				// Find best class score from first 80 values
+				var bestClass int
+				var bestScore float32
+
+				for _, classID := range classesToCheck {
+					score := outputData[offset+classID]
+					if score > bestScore {
+						bestScore = score
+						bestClass = classID
+					}
+				}
+
+				if bestScore >= confThresh {
+					// Bbox values are at indices 80-83
+					l := outputData[offset+numClasses]
+					t := outputData[offset+numClasses+1]
+					r := outputData[offset+numClasses+2]
+					b := outputData[offset+numClasses+3]
+
+					// Calculate anchor center
+					cx := (float32(col) + 0.5) * float32(stride)
+					cy := (float32(row) + 0.5) * float32(stride)
+
+					// Convert to absolute bbox coordinates
+					x1 := max(cx-l, 0)
+					y1 := max(cy-t, 0)
+					x2 := min(cx+r, modelWidth)
+					y2 := min(cy+b, modelHeight)
+
+					boxes = append(boxes, [4]float32{x1, y1, x2, y2})
+					scores = append(scores, bestScore)
+					labels = append(labels, bestClass)
+				}
+
+				totalIdx++
 			}
-		}
-
-		if bestScore >= confThresh {
-			boxes = append(boxes, [4]float32{
-				outputData[offset],
-				outputData[offset+1],
-				outputData[offset+2],
-				outputData[offset+3],
-			})
-			scores = append(scores, bestScore)
-			labels = append(labels, bestClass)
 		}
 	}
 
