@@ -48,6 +48,13 @@ func micEnabled() bool {
 	return ok && b
 }
 
+// IsStreamingOrRecording returns true if camera is in use
+func (r *Recorder) IsStreamingOrRecording() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.recording || r.streaming
+}
+
 // StartRecording starts recording video (and audio if mic enabled) to file
 func (r *Recorder) StartRecording(outputPath string) error {
 	r.mu.Lock()
@@ -55,6 +62,10 @@ func (r *Recorder) StartRecording(outputPath string) error {
 
 	if r.recording {
 		return fmt.Errorf("already recording")
+	}
+
+	if r.streaming {
+		return fmt.Errorf("camera in use (streaming)")
 	}
 
 	var args []string
@@ -109,6 +120,14 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 
 	if r.streaming {
 		return nil, fmt.Errorf("already streaming")
+	}
+
+	// Stop any active recording to give stream priority
+	if r.recording && r.recordCmd != nil && r.recordCmd.Process != nil {
+		r.recordCmd.Process.Kill()
+		r.recordCmd.Wait()
+		r.recording = false
+		r.recordCmd = nil
 	}
 
 	videoCmd := exec.Command("ffmpeg",

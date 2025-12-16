@@ -18,10 +18,8 @@ const (
 )
 
 type ML struct {
-	mu        sync.Mutex
-	stopChan  chan struct{}
-	recording bool
-	detector  *detector
+	stopChan chan struct{}
+	detector *detector
 }
 
 var instance *ML
@@ -66,11 +64,12 @@ func (m *ML) loop() {
 }
 
 func (m *ML) check() {
-	// Skip if low power or already recording
+	// Skip if low power or camera already in use
 	if ups.Get() != nil && ups.Get().IsLowPower() {
 		return
 	}
-	if m.recording {
+
+	if record.Get().IsStreamingOrRecording() {
 		return
 	}
 
@@ -90,24 +89,14 @@ func (m *ML) check() {
 }
 
 func (m *ML) startRecording() {
-	m.mu.Lock()
-	if m.recording {
-		m.mu.Unlock()
-		return
-	}
-	m.recording = true
-	m.mu.Unlock()
-
 	tempPath := filepath.Join("/data/recordings", fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
 	if err := record.Get().StartRecording(tempPath); err != nil {
-		m.recording = false
 		return
 	}
 
 	time.AfterFunc(recordDuration, func() {
 		record.Get().StopRecording()
 		storage.Get().SaveRecording(tempPath, recordDuration.Seconds(), "person")
-		m.recording = false
 	})
 }
