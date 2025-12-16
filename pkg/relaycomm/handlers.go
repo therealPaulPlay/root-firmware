@@ -15,6 +15,7 @@ import (
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
+	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/ups"
@@ -447,8 +448,8 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		performance["memoryUsagePercent"] = vmStat.UsedPercent
 	}
 
-	// Disk stats for /data
-	if diskStat, err := disk.Usage("/data"); err == nil {
+	// Disk stats for data partition
+	if diskStat, err := disk.Usage(globals.DataDir); err == nil {
 		performance["diskUsedGB"] = diskStat.Used / (1024 * 1024 * 1024)
 		performance["diskTotalGB"] = diskStat.Total / (1024 * 1024 * 1024)
 		performance["diskUsagePercent"] = diskStat.UsedPercent
@@ -518,10 +519,10 @@ func handleReset(ctx *HandlerContext, payload json.RawMessage) {
 		"success": true,
 	})
 
-	// Remove all contents of /data partition, then reboot
+	// Remove all contents of data partition, then reboot
 	go func() {
-		// Note: Using /data/* requires shell expansion, so use sh -c
-		exec.Command("sh", "-c", "rm -rf /data/*").Run()
+		// Note: Using wildcard requires shell expansion, so use sh -c
+		exec.Command("sh", "-c", "rm -rf "+globals.DataDir+"/*").Run()
 		// Reboot the system after deletion completes
 		exec.Command("sudo", "reboot").Run()
 	}()

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/ups"
@@ -89,7 +90,7 @@ func (m *ML) check() {
 }
 
 func (m *ML) startRecording(eventType string) {
-	tempPath := filepath.Join("/data/recordings", fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
+	tempPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
 	if err := record.Get().StartRecording(tempPath); err != nil {
 		return

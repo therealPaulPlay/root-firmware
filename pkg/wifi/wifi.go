@@ -1,13 +1,15 @@
 package wifi
 
 import (
-	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"root-firmware/pkg/globals"
 )
 
 type Network struct {
@@ -66,10 +68,11 @@ func (w *WiFi) Connect(ssid, password string) error {
 
 	if password == "" {
 		// Unsecured network
-		config = []byte(fmt.Sprintf(`network={
+		config = fmt.Appendf(nil, `network={
 	ssid="%s"
 	key_mgmt=NONE
-}`, escapedSSID))
+}
+`, escapedSSID)
 	} else {
 		// Secured network - use wpa_passphrase with escaped SSID
 		// Pass password via stdin to avoid command injection
@@ -81,12 +84,15 @@ func (w *WiFi) Connect(ssid, password string) error {
 		}
 	}
 
-	// Append to wpa_supplicant.conf using stdin to avoid injection
-	appendCmd := exec.Command("sudo", "tee", "-a", "/etc/wpa_supplicant/wpa_supplicant.conf")
-	appendCmd.Stdin = bytes.NewReader(config)
-	appendCmd.Stdout = nil // Discard output
-	if err := appendCmd.Run(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+	// Append to wpa_supplicant.conf
+	f, err := os.OpenFile(globals.WpaSupplicantPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to open wpa_supplicant.conf: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(config); err != nil {
+		return fmt.Errorf("failed to write wpa config: %w", err)
 	}
 
 	// Reconfigure wpa_supplicant

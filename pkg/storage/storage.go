@@ -10,13 +10,13 @@ import (
 	"syscall"
 	"time"
 
+	"root-firmware/pkg/globals"
+
 	"github.com/gofrs/uuid"
 )
 
 const (
-	recordingsPath = "/data/recordings"
-	eventLogPath   = "/data/recordings/events.json"
-	minFreeSpace   = 3 * 1024 * 1024 * 1024 // 3GB in bytes
+	minFreeSpace = 3 * 1024 * 1024 * 1024 // 3GB in bytes
 )
 
 type Event struct {
@@ -43,18 +43,18 @@ func Init() error {
 	})
 
 	// MkdirAll is safe - it's a no-op if directory exists
-	if err := os.MkdirAll(recordingsPath, 0755); err != nil {
+	if err := os.MkdirAll(globals.RecordingsPath, 0755); err != nil {
 		return fmt.Errorf("failed to create recordings directory: %w", err)
 	}
 
-	// Run fsck on /data partition (non-blocking, best effort)
-	exec.Command("fsck", "-p", "/data").Run()
+	// Run fsck on data partition (non-blocking, best effort)
+	exec.Command("fsck", "-p", globals.DataDir).Run()
 
 	// Create event log if it doesn't exist
-	if _, err := os.Stat(eventLogPath); os.IsNotExist(err) {
+	if _, err := os.Stat(globals.EventLogPath); os.IsNotExist(err) {
 		log := EventLog{Events: []Event{}}
 		data, _ := json.Marshal(log)
-		if err := os.WriteFile(eventLogPath, data, 0644); err != nil {
+		if err := os.WriteFile(globals.EventLogPath, data, 0644); err != nil {
 			return fmt.Errorf("failed to create event log: %w", err)
 		}
 	}
@@ -92,7 +92,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		return fmt.Errorf("failed to generate ID: %w", err)
 	}
 
-	finalPath := filepath.Join(recordingsPath, fmt.Sprintf("%s.mp4", id.String()))
+	finalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", id.String()))
 	if err := os.Rename(filePath, finalPath); err != nil {
 		return fmt.Errorf("failed to move recording: %w", err)
 	}
@@ -135,7 +135,7 @@ func (s *Storage) GetEventLog() ([]Event, error) {
 
 // GetRecordingPath returns the file path for a recording by ID
 func (s *Storage) GetRecordingPath(id string) (string, error) {
-	filePath := filepath.Join(recordingsPath, fmt.Sprintf("%s.mp4", id))
+	filePath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", id))
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("recording not found: %s", id)
 	}
@@ -143,7 +143,7 @@ func (s *Storage) GetRecordingPath(id string) (string, error) {
 }
 
 func (s *Storage) readEventLog() (*EventLog, error) {
-	data, err := os.ReadFile(eventLogPath)
+	data, err := os.ReadFile(globals.EventLogPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read event log: %w", err)
 	}
@@ -162,7 +162,7 @@ func (s *Storage) writeEventLog(log *EventLog) error {
 		return fmt.Errorf("failed to marshal event log: %w", err)
 	}
 
-	if err := os.WriteFile(eventLogPath, data, 0644); err != nil {
+	if err := os.WriteFile(globals.EventLogPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write event log: %w", err)
 	}
 
@@ -195,7 +195,7 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 
 		// Remove oldest event (first in array)
 		oldest := log.Events[0]
-		videoPath := filepath.Join(recordingsPath, fmt.Sprintf("%s.mp4", oldest.ID))
+		videoPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", oldest.ID))
 
 		// Permanently delete video file
 		if err := os.Remove(videoPath); err != nil && !os.IsNotExist(err) {
@@ -210,10 +210,10 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 	}
 }
 
-// getFreeSpace returns free space in bytes on /data partition
+// getFreeSpace returns free space in bytes on data partition
 func (s *Storage) getFreeSpace() (int64, error) {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(recordingsPath, &stat); err != nil {
+	if err := syscall.Statfs(globals.RecordingsPath, &stat); err != nil {
 		return 0, fmt.Errorf("failed to get filesystem stats: %w", err)
 	}
 

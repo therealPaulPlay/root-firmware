@@ -6,10 +6,10 @@ import (
 	"os"
 	"sync"
 
+	"root-firmware/pkg/globals"
+
 	"github.com/gofrs/uuid"
 )
-
-const configPath = "/data/.firmware-data/config.json"
 
 type Config struct {
 	mu   sync.RWMutex
@@ -43,11 +43,11 @@ func (c *Config) load() error {
 	c.mu.Lock()
 	defer c.mu.Unlock() // Unlock after function has returned
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, err := os.Stat(globals.ConfigPath); os.IsNotExist(err) {
 		return c.createInitialConfig()
 	}
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(globals.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
@@ -60,7 +60,7 @@ func (c *Config) load() error {
 }
 
 func (c *Config) createInitialConfig() error {
-	if err := os.MkdirAll("/home/pi/.firmware-data", 0755); err != nil {
+	if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -83,7 +83,7 @@ func (c *Config) save() error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(globals.ConfigPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
