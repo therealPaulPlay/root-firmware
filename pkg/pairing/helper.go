@@ -88,8 +88,8 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 	// Invalidate code after successful pairing
 	b.code = nil
 
-	// Get camera ID
-	cameraID, _ := config.Get().GetKey("id")
+	// Get product ID
+	productID, _ := config.Get().GetKey("id")
 
 	// Get relay URL
 	relayURL, _ := config.Get().GetKey("relayUrl")
@@ -101,7 +101,7 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 	cameraPublicKeyEncoded := encryption.EncodePublicKey(cameraPublicKey.([]byte))
 
 	return map[string]any{
-		"cameraId":          cameraID,
+		"productId":         productID,
 		"cameraPublicKey":   cameraPublicKeyEncoded,
 		"wifiConnected":     wifi.Get().IsConnected(),
 		"relayUrl":          relayURL,
