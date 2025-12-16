@@ -17,8 +17,22 @@ const (
 )
 
 type Detection struct {
-	HasPerson bool
+	EventType string // "person", "pet", "car", "other"
 	Count     int
+}
+
+// decodeLabel maps COCO class IDs to event types
+func decodeLabel(classID int) string {
+	switch classID {
+	case 0:
+		return "person"
+	case 2:
+		return "car"
+	case 15, 16: // cat, dog
+		return "pet"
+	default:
+		return "other"
+	}
 }
 
 type detector struct {
@@ -77,8 +91,8 @@ func (d *detector) preprocess(img image.Image) ort.Value {
 	bounds := img.Bounds()
 
 	// Simple resize
-	for y := 0; y < modelHeight; y++ {
-		for x := 0; x < modelWidth; x++ {
+	for y := range modelHeight {
+		for x := range modelWidth {
 			srcX := x * bounds.Dx() / modelWidth
 			srcY := y * bounds.Dy() / modelHeight
 			resized.Set(x, y, img.At(bounds.Min.X+srcX, bounds.Min.Y+srcY))
@@ -93,9 +107,9 @@ func (d *detector) preprocess(img image.Image) ort.Value {
 	means := [3]float32{103.53, 116.28, 123.675}
 	scales := [3]float32{0.017429, 0.017507, 0.017125}
 
-	for c := 0; c < 3; c++ {
-		for y := 0; y < modelHeight; y++ {
-			for x := 0; x < modelWidth; x++ {
+	for c := range 3 {
+		for y := range modelHeight {
+			for x := range modelWidth {
 				r, g, b, _ := resized.At(x, y).RGBA()
 				vals := [3]float32{float32(b >> 8), float32(g >> 8), float32(r >> 8)}
 				data[idx] = (vals[c] - means[c]) * scales[c]
@@ -113,35 +127,59 @@ func (d *detector) postprocess(outputTensor *ort.Tensor[float32]) *Detection {
 	outputData := outputTensor.GetData()
 
 	// NanoDet output: [1, 2100, 84] where 84 = 4 bbox + 80 classes
-	// Flatten to process: 2100 boxes * 84 values
+	// Check classes: person(0), car(2), cat(15), dog(16)
+	classesToCheck := []int{0, 2, 15, 16}
+
 	var boxes [][4]float32
 	var scores []float32
+	var labels []int
 
-	for i := 0; i < 2100; i++ {
+	for i := range 2100 {
 		offset := i * 84
 		if offset+84 > len(outputData) {
 			break
 		}
 
-		personScore := outputData[offset+4] // class 0 = person
+		// Find best scoring class for this box
+		var bestClass int
+		var bestScore float32
 
-		if personScore >= confThresh {
-			box := [4]float32{
+		for _, classID := range classesToCheck {
+			score := outputData[offset+4+classID]
+			if score > bestScore {
+				bestScore = score
+				bestClass = classID
+			}
+		}
+
+		if bestScore >= confThresh {
+			boxes = append(boxes, [4]float32{
 				outputData[offset],
 				outputData[offset+1],
 				outputData[offset+2],
 				outputData[offset+3],
-			}
-			boxes = append(boxes, box)
-			scores = append(scores, personScore)
+			})
+			scores = append(scores, bestScore)
+			labels = append(labels, bestClass)
 		}
+	}
+
+	if len(boxes) == 0 {
+		return &Detection{EventType: "", Count: 0}
 	}
 
 	// Apply NMS
 	kept := nms(boxes, scores, nmsThresh)
 
+	if len(kept) == 0 {
+		return &Detection{EventType: "", Count: 0}
+	}
+
+	// Return event type of first kept detection
+	eventType := decodeLabel(labels[kept[0]])
+
 	return &Detection{
-		HasPerson: len(kept) > 0,
+		EventType: eventType,
 		Count:     len(kept),
 	}
 }
@@ -179,11 +217,4 @@ func nms(boxes [][4]float32, scores []float32, threshold float32) []int {
 	}
 
 	return keep
-}
-
-func (d *detector) close() error {
-	if d.session != nil {
-		return d.session.Destroy()
-	}
-	return nil
 }

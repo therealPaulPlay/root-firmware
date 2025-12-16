@@ -80,15 +80,15 @@ func (m *ML) check() {
 	}
 
 	detection, err := m.detector.detect(frame)
-	if err != nil || !detection.HasPerson {
+	if err != nil || detection.EventType == "" {
 		return
 	}
 
-	// Start recording
-	m.startRecording()
+	// Start recording with detected event type
+	m.startRecording(detection.EventType)
 }
 
-func (m *ML) startRecording() {
+func (m *ML) startRecording(eventType string) {
 	tempPath := filepath.Join("/data/recordings", fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
 	if err := record.Get().StartRecording(tempPath); err != nil {
@@ -97,6 +97,6 @@ func (m *ML) startRecording() {
 
 	time.AfterFunc(recordDuration, func() {
 		record.Get().StopRecording()
-		storage.Get().SaveRecording(tempPath, recordDuration.Seconds(), "person")
+		storage.Get().SaveRecording(tempPath, recordDuration.Seconds(), eventType)
 	})
 }
