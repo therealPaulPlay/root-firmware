@@ -224,6 +224,7 @@ func RegisterHandlers() {
 	// Storage
 	relay.On("getEvents", useEncryption("getEvents", handleGetEvents))
 	relay.On("getRecording", useEncryption("getRecording", handleGetRecording))
+	relay.On("getThumbnail", useEncryption("getThumbnail", handleGetThumbnail))
 
 	// Streaming
 	relay.On("startStream", useEncryption("startStream", handleStartStream))
@@ -340,6 +341,34 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	SendEncrypted(ctx, "recordingResult", buildResult(nil, map[string]any{
+		"data": base64.StdEncoding.EncodeToString(fileData),
+	}))
+}
+
+func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
+	var req struct {
+		DeviceID string `json:"deviceId"`
+		ID       string `json:"id"`
+	}
+
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return
+	}
+
+	filePath, err := storage.Get().GetThumbnailPath(req.ID)
+	if err != nil {
+		SendEncrypted(ctx, "thumbnailResult", buildResult(err, nil))
+		return
+	}
+
+	// Read and encode thumbnail image
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		SendEncrypted(ctx, "thumbnailResult", buildResult(fmt.Errorf("failed to read thumbnail: %w", err), nil))
+		return
+	}
+
+	SendEncrypted(ctx, "thumbnailResult", buildResult(nil, map[string]any{
 		"data": base64.StdEncoding.EncodeToString(fileData),
 	}))
 }
