@@ -91,7 +91,6 @@
             font-family: "Commit Mono", monospace;
             font-size: 14px;
             cursor: pointer;
-            margin-right: 10px;
         }
 
         button:hover {
@@ -226,17 +225,16 @@
                 <label>Pairing code</label>
                 <input type="text" id="pairing-code" placeholder="000000" maxlength="6">
             </div>
-            <button class="secondary" onclick="speakCode()">Speak code</button>
+            <button class="secondary wait-for-request" onclick="speakCode()">Speak code</button>
         </div>
 
-        <button onclick="pair()">Pair device</button>
+        <button class="wait-for-request" onclick="pair()">Pair</button>
     </div>
 
     <!-- Step 2: WiFi Setup -->
     <div class="section" id="step-wifi">
         <h2>2. Connect to WiFi</h2>
         <div id="wifi-error" class="error" style="display:none;"></div>
-        <div id="wifi-success" class="success" style="display:none;">WiFi connected successfully</div>
 
         <label>Network</label>
         <select id="wifi-network">
@@ -246,7 +244,10 @@
         <label>Password</label>
         <input type="password" id="wifi-password" placeholder="ABCD1234">
 
-        <button onclick="connectWifi()">Connect WiFi</button>
+        <div style="display: flex; gap: 10px;">
+            <button id="wifi-keep-btn" class="wait-for-request" onclick="skipWifi()" style="display:none;">Continue</button>
+            <button id="wifi-connect-btn" class="wait-for-request" onclick="connectWifi()">Connect</button>
+        </div>
     </div>
 
     <!-- Step 3: Relay Server -->
@@ -265,8 +266,8 @@
             </div>
 
             <div id="custom-relay-container" style="display:none;">
-                <label>Relay server</label>
-                <input type="text" id="relay-url">
+                <label>Relay server domain</label>
+                <input type="text" id="relay-domain" value="Default">
 
                 <div class="warning">
                     Warning: Using a custom relay server is not recommended. It is required to change it in the
@@ -275,7 +276,7 @@
                 </div>
             </div>
 
-            <button onclick="setRelay()">Set relay server</button>
+            <button class="wait-for-request" onclick="setRelay()" id="set-relay-button">Set (Default)</button>
         </div>
     </div>
 
@@ -295,7 +296,7 @@
     </div>
 
     <script>
-        const RELAY_SERVER_URL = "wss://relay.rootprivacy.com";
+        const RELAY_SERVER_DOMAIN = "relay.rootprivacy.com";
 
         const deviceId = crypto.randomUUID();
         document.getElementById("device-id").textContent = "DEVICE ID: " + deviceId;
@@ -333,20 +334,29 @@
         }
 
         async function postJSON(url, body) {
-            const res = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
+            // Disable all request buttons
+            const buttons = document.querySelectorAll('.wait-for-request');
+            buttons.forEach(btn => btn.disabled = true);
 
-            let data;
-            try { data = await res.json(); } catch {
-                throw new Error(`Request failed with status ${res.status}`);
+            try {
+                const res = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+
+                let data;
+                try { data = await res.json(); } catch {
+                    throw new Error(`Request failed with status ${res.status}`);
+                }
+
+                // If we have JSON, check success field
+                if (!data.success) throw new Error(data.error || `Request failed with status ${res.status}`);
+                return data;
+            } finally {
+                // Re-enable all request buttons
+                buttons.forEach(btn => btn.disabled = false);
             }
-
-            // If we have JSON, check success field
-            if (!data.success) throw new Error(data.error || `Request failed with status ${res.status}`);
-            return data;
         }
 
         async function speakCode() {
@@ -376,28 +386,49 @@
                 });
 
                 cameraPublicKey = data.data.cameraPublicKey;
-                const relayUrl = data.data.relayUrl || RELAY_SERVER_URL;
-                document.getElementById("relay-url").value = relayUrl;
+                const relayDomain = data.data.relayDomain || RELAY_SERVER_DOMAIN;
 
-                // Check if relay URL is already configured
-                const relayAlreadySet = data.data.relayUrl && data.data.relayUrl !== "";
+                // Update relay input state to match currently selected one
+                document.getElementById("relay-domain").value = relayDomain;
+
+                // Update checkbox state based on whether it's default or custom
+                const isDefaultRelay = relayDomain === RELAY_SERVER_DOMAIN;
+                document.getElementById("use-default-relay").checked = isDefaultRelay;
+                toggleRelayInput();
+
+                // Check if relay domain is already configured
+                const relayAlreadySet = data.data.relayDomain && data.data.relayDomain !== "";
                 if (relayAlreadySet) {
                     document.getElementById("relay-config-container").classList.add("locked");
                     document.getElementById("relay-locked-message").style.display = "block";
+                    document.getElementById("set-relay-button").textContent = "Continue";
+                } else {
+                    document.getElementById("set-relay-button").textContent = "Set";
                 }
 
                 const networks = data.data.availableNetworks || [];
+                const currentWifi = data.data.currentWifiSSID;
                 const select = document.getElementById("wifi-network");
                 select.innerHTML = "<option value=\"\">Select network...</option>";
+
                 networks.forEach(net => {
                     const option = document.createElement("option");
                     option.value = net.ssid;
                     option.textContent = `${net.ssid} (${net.signal})`;
+                    if (currentWifi && net.ssid === currentWifi) {
+                        option.selected = true;
+                    }
                     select.appendChild(option);
                 });
 
+                // Show "Keep / Continue" button if already connected
+                if (data.data.wifiConnected && currentWifi) {
+                    document.getElementById("wifi-keep-btn").style.display = "block";
+                    document.getElementById("wifi-connect-btn").classList.add("secondary");
+                }
+
                 hideError("pairing");
-                showStep(data.data.wifiConnected ? "step-relay" : "step-wifi");
+                showStep("step-wifi");
             } catch (err) {
                 showError("pairing", err.message);
             }
@@ -463,11 +494,14 @@
                 await postJSON("/set-wifi", { deviceId, encryptedPayload });
 
                 hideError("wifi");
-                document.getElementById("wifi-success").style.display = "block";
-                setTimeout(() => showStep("step-relay"), 1500);
+                showStep("step-relay");
             } catch (err) {
                 showError("wifi", err.message);
             }
+        }
+
+        function skipWifi() {
+            showStep("step-relay");
         }
 
         function toggleRelayInput() {
@@ -478,7 +512,7 @@
                 container.style.display = "none";
             } else {
                 container.style.display = "block";
-                document.getElementById("relay-url").focus();
+                document.getElementById("relay-domain").focus();
             }
         }
 
@@ -486,17 +520,17 @@
             if (document.getElementById("relay-config-container").classList.contains("locked")) return; // If locked (= already set), skip
 
             const checkbox = document.getElementById("use-default-relay");
-            const relayUrl = checkbox.checked
-                ? RELAY_SERVER_URL
-                : document.getElementById("relay-url").value.trim();
+            const relayDomain = checkbox.checked
+                ? RELAY_SERVER_DOMAIN
+                : document.getElementById("relay-domain").value.trim();
 
-            if (!relayUrl) {
-                showError("relay", "Please enter relay server URL!");
+            if (!relayDomain) {
+                showError("relay", "Please enter relay server domain!");
                 return;
             }
 
             try {
-                const encryptedPayload = await encryptPayload({ deviceId, relayUrl });
+                const encryptedPayload = await encryptPayload({ deviceId, relayDomain });
                 await postJSON("/set-relay", { deviceId, encryptedPayload });
 
                 hideError("relay");

@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// Start relay communication if configured
-	if relayURL, ok := config.Get().GetKey("relayUrl"); ok && relayURL != "" {
+	if relayDomain, ok := config.Get().GetKey("relayDomain"); ok && relayDomain != "" {
 		relaycomm.RegisterHandlers()
 		if err := relaycomm.Get().Start(); err != nil {
 			log.Printf("Failed to start relay comm: %v", err)

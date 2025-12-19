@@ -91,8 +91,8 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 	// Get product ID
 	productID, _ := config.Get().GetKey("id")
 
-	// Get relay URL
-	relayURL, _ := config.Get().GetKey("relayUrl")
+	// Get relay domain
+	relayDomain, _ := config.Get().GetKey("relayDomain")
 
 	// Scan for WiFi networks
 	networks, _ := wifi.Get().Scan()
@@ -104,7 +104,8 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 		"productId":         productID,
 		"cameraPublicKey":   cameraPublicKeyEncoded,
 		"wifiConnected":     wifi.Get().IsConnected(),
-		"relayUrl":          relayURL,
+		"currentWifiSSID":   wifi.Get().GetCurrentNetwork(),
+		"relayDomain":       relayDomain,
 		"availableNetworks": networks,
 	}, nil
 }

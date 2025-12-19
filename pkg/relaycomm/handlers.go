@@ -489,11 +489,11 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		performance["uptimeSeconds"] = uptime
 	}
 
-	// Get relay URL from config
-	relayURL := ""
-	if url, ok := config.Get().GetKey("relayUrl"); ok {
-		if urlStr, ok := url.(string); ok {
-			relayURL = urlStr
+	// Get relay domain from config
+	relayDomain := ""
+	if domain, ok := config.Get().GetKey("relayDomain"); ok {
+		if domainStr, ok := domain.(string); ok {
+			relayDomain = domainStr
 		}
 	}
 
@@ -520,7 +520,7 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		},
 		"firmwareVersion": globals.FirmwareVersion,
 		"update":          updateInfo,
-		"relayUrl":        relayURL,
+		"relayDomain":     relayDomain,
 		"logs":            logger.GetLogs(),
 		"performance":     performance,
 	}

@@ -75,9 +75,9 @@ func (u *Updater) CheckForUpdates() error {
 	u.errorMsg = ""
 	u.mu.Unlock()
 
-	relayDomain, ok := config.Get().GetKey("relayUrl")
+	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
-		log.Println("Skipping update check: relay URL not configured")
+		log.Println("Skipping update check: relay domain not configured")
 		return nil
 	}
 

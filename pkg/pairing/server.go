@@ -274,8 +274,8 @@ func (s *Server) start(port string) error {
 	// Relay server setup endpoint (requires paired device with encrypted payload)
 	mux.HandleFunc("/set-relay", limiter.middleware(withEncryption(func(w http.ResponseWriter, decrypted []byte) {
 		var relayReq struct {
-			DeviceID string `json:"deviceId"`
-			RelayURL string `json:"relayUrl"`
+			DeviceID    string `json:"deviceId"`
+			RelayDomain string `json:"relayDomain"`
 		}
 		if err := json.Unmarshal(decrypted, &relayReq); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -283,14 +283,14 @@ func (s *Server) start(port string) error {
 			return
 		}
 
-		// Check if relay URL is already set
-		if existingURL, ok := config.Get().GetKey("relayUrl"); ok && existingURL != "" {
+		// Check if relay domain is already set
+		if existingDomain, ok := config.Get().GetKey("relayDomain"); ok && existingDomain != "" {
 			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Relay URL already configured!"})
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Relay domain already configured!"})
 			return
 		}
 
-		if err := config.Get().SetKey("relayUrl", relayReq.RelayURL); err != nil {
+		if err := config.Get().SetKey("relayDomain", relayReq.RelayDomain); err != nil {
 			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			return
 		}

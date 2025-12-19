@@ -58,15 +58,15 @@ func (r *RelayComm) Start() error {
 		return fmt.Errorf("already running")
 	}
 
-	relayURL, ok := config.Get().GetKey("relayUrl")
+	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
-		return fmt.Errorf("relay URL not configured")
+		return fmt.Errorf("relay domain not configured")
 	}
 
 	r.running = true
 	r.stopChan = make(chan struct{})
 
-	go r.connectLoop(relayURL.(string))
+	go r.connectLoop(relayDomain.(string))
 	return nil
 }
 
@@ -78,13 +78,13 @@ func (r *RelayComm) Send(msg Message) error {
 	return r.conn.WriteJSON(msg)
 }
 
-func (r *RelayComm) connectLoop(relayURL string) {
+func (r *RelayComm) connectLoop(relayDomain string) {
 	for {
 		select {
 		case <-r.stopChan:
 			return
 		default:
-			if err := r.connect(relayURL); err != nil {
+			if err := r.connect(relayDomain); err != nil {
 				time.Sleep(reconnectDelay)
 				continue
 			}
@@ -98,15 +98,15 @@ func (r *RelayComm) connectLoop(relayURL string) {
 	}
 }
 
-func (r *RelayComm) connect(relayURL string) error {
+func (r *RelayComm) connect(relayDomain string) error {
 	// Get product ID for authentication
 	id, ok := config.Get().GetKey("id")
 	if !ok {
 		return fmt.Errorf("product ID not found")
 	}
 
-	// Connect to relay with product ID in query params
-	url := fmt.Sprintf("%s?product-id=%s", relayURL, id)
+	// Build WebSocket URL from domain
+	url := fmt.Sprintf("wss://%s/ws?product-id=%s", relayDomain, id)
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
