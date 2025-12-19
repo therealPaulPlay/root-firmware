@@ -21,6 +21,7 @@ import (
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/storage"
+	"root-firmware/pkg/updater"
 	"root-firmware/pkg/ups"
 	"root-firmware/pkg/wifi"
 )
@@ -223,6 +224,7 @@ func RegisterHandlers() {
 	// System
 	relay.On("getHealth", useEncryption("getHealth", handleGetHealth))
 	relay.On("getPreview", useEncryption("getPreview", handleGetPreview))
+	relay.On("startUpdate", useEncryption("startUpdate", handleStartUpdate))
 	relay.On("restart", useEncryption("restart", handleRestart))
 	relay.On("reset", useEncryption("reset", handleReset))
 }
@@ -487,20 +489,24 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		performance["uptimeSeconds"] = uptime
 	}
 
-	// Get firmware version from config
-	firmwareVersion := "1.0.0" // Default
-	if ver, ok := config.Get().GetKey("firmwareVersion"); ok {
-		if verStr, ok := ver.(string); ok {
-			firmwareVersion = verStr
-		}
-	}
-
 	// Get relay URL from config
 	relayURL := ""
 	if url, ok := config.Get().GetKey("relayUrl"); ok {
 		if urlStr, ok := url.(string); ok {
 			relayURL = urlStr
 		}
+	}
+
+	// Get update status
+	updateStatus, availableVersion, updateError := updater.Get().GetStatus()
+	updateInfo := map[string]any{
+		"status": string(updateStatus),
+	}
+	if availableVersion != "" {
+		updateInfo["availableVersion"] = availableVersion
+	}
+	if updateError != "" {
+		updateInfo["error"] = updateError
 	}
 
 	health := map[string]any{
@@ -512,8 +518,8 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 			"connected": wifi.Get().IsConnected(),
 			"ssid":      wifi.Get().GetCurrentNetwork(),
 		},
-		"firmwareVersion": firmwareVersion,
-		"updateStatus":    "up-to-date",
+		"firmwareVersion": globals.FirmwareVersion,
+		"update":          updateInfo,
 		"relayUrl":        relayURL,
 		"logs":            logger.GetLogs(),
 		"performance":     performance,
@@ -529,6 +535,7 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 	SendEncrypted(ctx, "healthResult", health)
 }
 
+// TODO: Make this use buildError (slight refactor)
 func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
 	frameData, err := record.Get().CapturePreview()
 	if err != nil {
@@ -542,6 +549,11 @@ func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
 		"success": true,
 		"image":   base64.StdEncoding.EncodeToString(frameData),
 	})
+}
+
+func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
+	err := updater.Get().StartUpdate()
+	SendEncrypted(ctx, "startUpdateResult", buildResult(err, nil))
 }
 
 func handleRestart(ctx *HandlerContext, payload json.RawMessage) {

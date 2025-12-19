@@ -2,6 +2,16 @@
 
 Firmware for ROOT camera devices. Built in Go with a focus on privacy, security, and observability.
 
+## Building
+
+To build the firmware with a specific version:
+
+```bash
+go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root-firmware cmd/main.go
+```
+
+The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`.
+
 ## Package overview
 
 ### Config

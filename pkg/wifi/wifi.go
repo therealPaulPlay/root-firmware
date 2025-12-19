@@ -103,7 +103,7 @@ func (w *WiFi) Connect(ssid, password string) error {
 	}
 
 	// Wait up to 15 seconds for connection with internet access
-	for i := 0; i < 15; i++ {
+	for range 15 {
 		time.Sleep(1 * time.Second)
 
 		// Check if connected and has internet

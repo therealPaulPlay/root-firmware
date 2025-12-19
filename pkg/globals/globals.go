@@ -1,5 +1,8 @@
 package globals
 
+// FirmwareVersion is set at build time via -ldflags
+var FirmwareVersion = "dev"
+
 // Writable data directory
 var DataDir = "/data"
 

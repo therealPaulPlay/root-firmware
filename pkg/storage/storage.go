@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,8 +53,8 @@ func Init() error {
 
 	// Create event log if it doesn't exist
 	if _, err := os.Stat(globals.EventLogPath); os.IsNotExist(err) {
-		log := EventLog{Events: []Event{}}
-		data, _ := json.Marshal(log)
+		eventLog := EventLog{Events: []Event{}}
+		data, _ := json.Marshal(eventLog)
 		if err := os.WriteFile(globals.EventLogPath, data, 0644); err != nil {
 			return fmt.Errorf("failed to create event log: %w", err)
 		}
@@ -101,7 +102,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 	thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", id.String()))
 	if err := s.generateThumbnail(finalPath, thumbnailPath); err != nil {
 		// Log error but don't fail - thumbnail is optional
-		fmt.Printf("Failed to generate thumbnail for %s: %v\n", id.String(), err)
+		log.Printf("Failed to generate thumbnail for %s: %v", id.String(), err)
 	}
 
 	// Add to event log
@@ -112,13 +113,13 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		EventType: eventType,
 	}
 
-	log, err := s.readEventLog()
+	eventLog, err := s.readEventLog()
 	if err != nil {
 		return err
 	}
 
-	log.Events = append(log.Events, event)
-	return s.writeEventLog(log)
+	eventLog.Events = append(eventLog.Events, event)
+	return s.writeEventLog(eventLog)
 }
 
 // GetEventLog returns all events sorted by timestamp (newest first)
@@ -126,15 +127,15 @@ func (s *Storage) GetEventLog() ([]Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	log, err := s.readEventLog()
+	eventLog, err := s.readEventLog()
 	if err != nil {
 		return nil, err
 	}
 
 	// Return reversed (newest first)
-	events := make([]Event, len(log.Events))
-	for i := range log.Events {
-		events[i] = log.Events[len(log.Events)-1-i]
+	events := make([]Event, len(eventLog.Events))
+	for i := range eventLog.Events {
+		events[i] = eventLog.Events[len(eventLog.Events)-1-i]
 	}
 
 	return events, nil
@@ -207,34 +208,34 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 		}
 
 		// Need to delete oldest recording
-		log, err := s.readEventLog()
+		eventLog, err := s.readEventLog()
 		if err != nil {
 			return err
 		}
 
-		if len(log.Events) == 0 {
+		if len(eventLog.Events) == 0 {
 			return fmt.Errorf("insufficient space and no recordings to delete")
 		}
 
 		// Remove oldest event (first in array)
-		oldest := log.Events[0]
+		oldest := eventLog.Events[0]
 		videoPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", oldest.ID))
 		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", oldest.ID))
 
 		// Permanently delete video file (log errors but continue)
 		if err := os.Remove(videoPath); err != nil && !os.IsNotExist(err) {
-			fmt.Printf("Failed to delete recording %s: %v\n", oldest.ID, err)
+			log.Printf("Failed to delete recording %s: %v", oldest.ID, err)
 		}
 
 		// Permanently delete thumbnail (log errors but continue)
 		if err := os.Remove(thumbnailPath); err != nil && !os.IsNotExist(err) {
-			fmt.Printf("Failed to delete thumbnail %s: %v\n", oldest.ID, err)
+			log.Printf("Failed to delete thumbnail %s: %v", oldest.ID, err)
 		}
 
-		// Remove from log and save
-		log.Events = log.Events[1:]
-		if err := s.writeEventLog(log); err != nil {
-			fmt.Printf("Failed to update event log after deleting %s: %v\n", oldest.ID, err)
+		// Remove from eventLog and save
+		eventLog.Events = eventLog.Events[1:]
+		if err := s.writeEventLog(eventLog); err != nil {
+			log.Printf("Failed to update event log after deleting %s: %v", oldest.ID, err)
 		}
 	}
 }

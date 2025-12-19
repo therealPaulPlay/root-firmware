@@ -1,7 +1,7 @@
 package ups
 
 import (
-	"fmt"
+	"log"
 	"sync"
 
 	"periph.io/x/conn/v3/i2c"
@@ -29,13 +29,13 @@ var once sync.Once
 func Init() {
 	once.Do(func() {
 		if _, err := host.Init(); err != nil {
-			fmt.Println("Failed to initialize I2C host:", err)
+			log.Printf("Failed to initialize I2C host: %v", err)
 			return
 		}
 
 		bus, err := i2creg.Open("")
 		if err != nil {
-			fmt.Println("Failed to open I2C bus:", err)
+			log.Printf("Failed to open I2C bus: %v", err)
 			return
 		}
 
@@ -43,7 +43,7 @@ func Init() {
 
 		testRead := make([]byte, 2)
 		if err := dev.Tx([]byte{regBusVoltage}, testRead); err != nil {
-			fmt.Println("No UPS detected - battery monitoring disabled")
+			log.Println("No UPS detected - battery monitoring disabled")
 			return
 		}
 
@@ -51,7 +51,7 @@ func Init() {
 			dev: dev,
 		}
 
-		fmt.Println("UPS initialized")
+		log.Println("UPS initialized")
 	})
 }
 

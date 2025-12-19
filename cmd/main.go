@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
@@ -19,6 +20,7 @@ import (
 	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/storage"
+	"root-firmware/pkg/updater"
 	"root-firmware/pkg/ups"
 	"root-firmware/pkg/wifi"
 )
@@ -29,8 +31,8 @@ var assets embed.FS
 func main() {
 	// Initialize logger first to capture all logs
 	logger.Init()
-	
-	log.Println("Starting...")
+
+	log.Println("Starting")
 
 	// Initialize config
 	if err := config.Init(); err != nil {
@@ -51,6 +53,7 @@ func main() {
 	ml.Init()
 	record.Init()
 	relaycomm.Init()
+	updater.Init()
 
 	// Initialize pairing (AP + HTTP server + helper)
 	if err := pairing.Init(); err != nil {
@@ -64,6 +67,17 @@ func main() {
 			log.Printf("Failed to start relay comm: %v", err)
 		}
 	}
+
+	// Check for updates every 5 minutes
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		updater.Get().CheckForUpdates()
+		for range ticker.C {
+			updater.Get().CheckForUpdates()
+		}
+	}()
 
 	// TODO: Play startup sound
 
