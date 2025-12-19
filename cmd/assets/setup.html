@@ -144,13 +144,6 @@
             font-size: 12px;
         }
 
-        .success {
-            padding: 10px;
-            border: 1px solid #000;
-            margin-bottom: 15px;
-            font-size: 12px;
-        }
-
         .checkbox-group {
             display: flex;
             align-items: center;
@@ -245,7 +238,8 @@
         <input type="password" id="wifi-password" placeholder="ABCD1234">
 
         <div style="display: flex; gap: 10px;">
-            <button id="wifi-keep-btn" class="wait-for-request" onclick="skipWifi()" style="display:none;">Continue</button>
+            <button id="wifi-keep-btn" class="wait-for-request" onclick="showStep('step-relay')"
+                style="display:none;">Continue</button>
             <button id="wifi-connect-btn" class="wait-for-request" onclick="connectWifi()">Connect</button>
         </div>
     </div>
@@ -388,24 +382,16 @@
                 cameraPublicKey = data.data.cameraPublicKey;
                 const relayDomain = data.data.relayDomain || RELAY_SERVER_DOMAIN;
 
-                // Update relay input state to match currently selected one
-                document.getElementById("relay-domain").value = relayDomain;
-
-                // Update checkbox state based on whether it's default or custom
-                const isDefaultRelay = relayDomain === RELAY_SERVER_DOMAIN;
-                document.getElementById("use-default-relay").checked = isDefaultRelay;
-                toggleRelayInput();
-
-                // Check if relay domain is already configured
+                // Set relay domain and button state
+                setupRelayDomain(relayDomain);
                 const relayAlreadySet = data.data.relayDomain && data.data.relayDomain !== "";
                 if (relayAlreadySet) {
                     document.getElementById("relay-config-container").classList.add("locked");
                     document.getElementById("relay-locked-message").style.display = "block";
-                    document.getElementById("set-relay-button").textContent = "Continue";
-                } else {
-                    document.getElementById("set-relay-button").textContent = "Set";
                 }
+                setRelayButtonState(relayAlreadySet);
 
+                // Setup WiFi networks
                 const networks = data.data.availableNetworks || [];
                 const currentWifi = data.data.currentWifiSSID;
                 const select = document.getElementById("wifi-network");
@@ -500,10 +486,6 @@
             }
         }
 
-        function skipWifi() {
-            showStep("step-relay");
-        }
-
         function toggleRelayInput() {
             const checkbox = document.getElementById("use-default-relay");
             const container = document.getElementById("custom-relay-container");
@@ -517,7 +499,7 @@
         }
 
         async function setRelay() {
-            if (document.getElementById("relay-config-container").classList.contains("locked")) return; // If locked (= already set), skip
+            if (document.getElementById("relay-config-container").classList.contains("locked")) return showStep("step-complete");
 
             const checkbox = document.getElementById("use-default-relay");
             const relayDomain = checkbox.checked
@@ -559,6 +541,24 @@
 
         function hideError(section) {
             document.getElementById(section + "-error").style.display = "none";
+        }
+
+        function setupRelayDomain(relayDomain) {
+            document.getElementById("relay-domain").value = relayDomain;
+            const isDefault = relayDomain === RELAY_SERVER_DOMAIN;
+            document.getElementById("use-default-relay").checked = isDefault;
+            toggleRelayInput();
+        }
+
+        function setRelayButtonState(isLocked) {
+            const button = document.getElementById("set-relay-button");
+            if (isLocked) {
+                button.textContent = "Continue";
+                button.onclick = () => showStep("step-complete");
+            } else {
+                button.textContent = "Set";
+                button.onclick = setRelay;
+            }
         }
     </script>
 </body>
