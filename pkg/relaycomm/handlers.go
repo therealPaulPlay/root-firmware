@@ -341,39 +341,53 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	stream, err := record.Get().StartStream()
-	if err != nil {
+	// Add viewer (enforces limit)
+	if err := addViewer(ctx); err != nil {
 		SendEncrypted(ctx, "startStreamResult", buildResult(err, nil))
 		return
 	}
 
-	// Stream video data in background
-	go func() {
-		if err := StreamReader(ctx, stream.Video, "streamVideoChunkResult"); err != nil {
-			SendEncrypted(ctx, "streamVideoChunkResult", map[string]any{
-				"success": false,
-				"error":   err.Error(),
-				"done":    true,
-			})
-		}
-	}()
+	// Start stream if not already running
+	stream, err := record.Get().StartStream()
+	if err != nil && err.Error() != "already streaming" {
+		removeViewer(ctx.DeviceID)
+		SendEncrypted(ctx, "startStreamResult", buildResult(err, nil))
+		return
+	}
 
-	// Stream audio data in background (if available)
-	if stream.Audio != nil {
+	// If this is the first viewer, start streaming goroutines
+	if err == nil {
 		go func() {
-			if err := StreamReader(ctx, stream.Audio, "streamAudioChunkResult"); err != nil {
-				SendEncrypted(ctx, "streamAudioChunkResult", map[string]any{
+			if err := StreamReader(stream.Video, "streamVideoChunkResult"); err != nil {
+				broadcastChunk("streamVideoChunkResult", map[string]any{
 					"success": false,
 					"error":   err.Error(),
 					"done":    true,
 				})
 			}
 		}()
+
+		if stream.Audio != nil {
+			go func() {
+				if err := StreamReader(stream.Audio, "streamAudioChunkResult"); err != nil {
+					broadcastChunk("streamAudioChunkResult", map[string]any{
+						"success": false,
+						"error":   err.Error(),
+						"done":    true,
+					})
+				}
+			}()
+		}
 	}
+
+	SendEncrypted(ctx, "startStreamResult", buildResult(nil, nil))
 }
 
 func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
-	err := record.Get().StopStream()
+	var err error
+	if removeViewer(ctx.DeviceID) {
+		err = record.Get().StopStream()
+	}
 	SendEncrypted(ctx, "stopStreamResult", buildResult(err, nil))
 }
 

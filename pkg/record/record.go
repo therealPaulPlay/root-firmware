@@ -5,6 +5,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"time"
 
 	"root-firmware/pkg/config"
 )
@@ -136,6 +137,7 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 		"-f", "h264",
 		"pipe:1",
 	)
+	videoCmd.WaitDelay = 2 * time.Second // Force pipe closure after 2s
 
 	videoOut, err := videoCmd.StdoutPipe()
 	if err != nil {
@@ -156,6 +158,7 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 			"-f", "adts",
 			"pipe:1",
 		)
+		audioCmd.WaitDelay = 2 * time.Second // Force pipe closure after 2s
 
 		audioOut, err := audioCmd.StdoutPipe()
 		if err != nil {
