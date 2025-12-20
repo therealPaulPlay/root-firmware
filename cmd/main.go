@@ -31,7 +31,6 @@ var assets embed.FS
 func main() {
 	// Initialize logger first to capture all logs
 	logger.Init()
-
 	log.Println("Starting")
 
 	// Initialize config
@@ -60,13 +59,8 @@ func main() {
 		log.Fatalf("Failed to initialize pairing: %v", err)
 	}
 
-	// Start relay communication if configured
-	if relayDomain, ok := config.Get().GetKey("relayDomain"); ok && relayDomain != "" {
-		relaycomm.RegisterHandlers()
-		if err := relaycomm.Get().Start(); err != nil {
-			log.Printf("Failed to start relay comm: %v", err)
-		}
-	}
+	// Register relay handlers and start connection (if relay domain configured)
+	relaycomm.RegisterHandlers()
 
 	// Check for updates every 5 minutes
 	go func() {

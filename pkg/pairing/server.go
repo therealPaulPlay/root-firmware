@@ -12,6 +12,7 @@ import (
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
+	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/wifi"
 )
@@ -294,6 +295,9 @@ func (s *Server) start(port string) error {
 			json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 			return
 		}
+
+		// Register relay handlers and start connection now that relay domain is set
+		relaycomm.RegisterHandlers()
 
 		json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})))

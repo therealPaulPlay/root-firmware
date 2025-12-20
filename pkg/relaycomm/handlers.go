@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"maps"
 	"os"
 	"os/exec"
@@ -194,8 +195,15 @@ func SendEncrypted(ctx *HandlerContext, messageType string, payload any) error {
 	})
 }
 
-// RegisterHandlers registers all relay message handlers with E2E encryption
+// RegisterHandlers registers all relay message handlers and starts connection if relay domain is configured
 func RegisterHandlers() {
+	// Check if relay domain is configured
+	relayDomain, ok := config.Get().GetKey("relayDomain")
+	if !ok || relayDomain == "" {
+		log.Println("Relay handlers not registered - relay domain not configured")
+		return
+	}
+
 	relay := Get()
 
 	// Device management
@@ -227,6 +235,11 @@ func RegisterHandlers() {
 	relay.On("startUpdate", useEncryption("startUpdate", handleStartUpdate))
 	relay.On("restart", useEncryption("restart", handleRestart))
 	relay.On("reset", useEncryption("reset", handleReset))
+
+	// Start the connection
+	if err := relay.Start(); err != nil {
+		log.Printf("Failed to start relay comm: %v", err)
+	}
 }
 
 func handleGetDevices(ctx *HandlerContext, payload json.RawMessage) {
