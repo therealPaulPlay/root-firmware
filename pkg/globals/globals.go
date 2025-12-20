@@ -26,3 +26,11 @@ var RecordingsPath = DataDir + "/recordings"
 
 // Event log
 var EventLogPath = RecordingsPath + "/events.json"
+
+// Firmware update paths
+var UpdateImagePath = "/tmp/firmware-update.img"      // Temporary download, cleaned on reboot
+var BootCmdlinePath = "/boot/firmware/cmdline.txt"    // Boot partition configuration
+
+// Partition configuration for A/B updates
+var PartitionA = "/dev/mmcblk0p2"
+var PartitionB = "/dev/mmcblk0p3"
