@@ -82,6 +82,10 @@
             pointer-events: none;
         }
 
+        option:disabled {
+            opacity: 0.5;
+        }
+
         button {
             padding: 10px 20px;
             border: 1px solid #000;
@@ -400,10 +404,15 @@
                 networks.forEach(net => {
                     const option = document.createElement("option");
                     option.value = net.ssid;
-                    option.textContent = `${net.ssid} (${net.signal})`;
-                    if (currentWifi && net.ssid === currentWifi) {
-                        option.selected = true;
+
+                    if (net.unsupported) {
+                        option.textContent = `${net.ssid} (${net.signal}) - 5GHz unsupported`;
+                        option.disabled = true;
+                    } else {
+                        option.textContent = `${net.ssid} (${net.signal})`;
+                        if (currentWifi && net.ssid === currentWifi) option.selected = true;
                     }
+
                     select.appendChild(option);
                 });
 

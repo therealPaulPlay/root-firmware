@@ -13,9 +13,10 @@ import (
 )
 
 type Network struct {
-	SSID    string `json:"ssid"`
-	Signal  int    `json:"signal"` // 0-100
-	Secured bool   `json:"secured"`
+	SSID        string `json:"ssid"`
+	Signal      int    `json:"signal"` // 0-100
+	Secured     bool   `json:"secured"`
+	Unsupported bool   `json:"unsupported"` // 5GHz networks (The hardware doesn't support it)
 }
 
 type WiFi struct {
@@ -160,6 +161,7 @@ func parseNetworks(output string) []Network {
 	ssidRe := regexp.MustCompile(`ESSID:"([^"]+)"`)
 	qualityRe := regexp.MustCompile(`Quality=(\d+)/(\d+)`)
 	encryptionRe := regexp.MustCompile(`Encryption key:(on|off)`)
+	frequencyRe := regexp.MustCompile(`Frequency:([\d.]+) GHz`)
 
 	for _, cell := range strings.Split(output, "Cell ")[1:] {
 		ssidMatch := ssidRe.FindStringSubmatch(cell)
@@ -182,6 +184,13 @@ func parseNetworks(output string) []Network {
 		// Parse encryption
 		if encMatch := encryptionRe.FindStringSubmatch(cell); len(encMatch) > 1 {
 			network.Secured = encMatch[1] == "on"
+		}
+
+		// Parse frequency and mark 5GHz as unsupported (Pi Zero 2W only supports 2.4GHz)
+		if freqMatch := frequencyRe.FindStringSubmatch(cell); len(freqMatch) > 1 {
+			var freq float64
+			fmt.Sscanf(freqMatch[1], "%f", &freq)
+			network.Unsupported = freq > 3.0 // 5GHz networks are in the 5.0+ GHz range
 		}
 
 		networks = append(networks, network)
