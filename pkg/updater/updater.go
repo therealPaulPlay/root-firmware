@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"sync"
 	"time"
 
@@ -16,7 +15,11 @@ import (
 	"root-firmware/pkg/globals"
 )
 
-const firmwareEndpoint = "/firmware/observer"
+const (
+	firmwareEndpoint   = "/firmware/observer"
+	updateCheckTimeout = 10 * time.Second  // Timeout for checking update availability
+	downloadTimeout    = 30 * time.Minute  // Timeout for downloading firmware
+)
 
 type UpdateStatus string
 
@@ -62,18 +65,14 @@ func (u *Updater) GetStatus() (UpdateStatus, string, string) {
 }
 
 func (u *Updater) CheckForUpdates() error {
-	u.mu.Lock()
-	u.status = StatusUpToDate
-	u.errorMsg = ""
-	u.mu.Unlock()
-
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
 		log.Println("Skipping update check: relay domain not configured")
 		return nil
 	}
 
-	resp, err := http.Get("https://" + relayDomain.(string) + firmwareEndpoint)
+	client := &http.Client{Timeout: updateCheckTimeout}
+	resp, err := client.Get("https://" + relayDomain.(string) + firmwareEndpoint)
 	if err != nil {
 		u.setError(fmt.Sprintf("failed to check for updates: %v", err))
 		return err
@@ -92,13 +91,22 @@ func (u *Updater) CheckForUpdates() error {
 		return err
 	}
 
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
 	if info.Version != globals.FirmwareVersion {
-		u.mu.Lock()
-		defer u.mu.Unlock()
 		u.status = StatusUpdateAvailable
 		u.availableVersion = info.Version
 		u.downloadURL = info.URL
+		u.errorMsg = ""
+	} else {
+		// Only clear error if we successfully checked and are up-to-date
+		if u.status != StatusUpdateAvailable {
+			u.status = StatusUpToDate
+			u.errorMsg = ""
+		}
 	}
+
 	return nil
 }
 
@@ -108,15 +116,20 @@ func (u *Updater) StartUpdate() error {
 		u.mu.Unlock()
 		return fmt.Errorf("no update available")
 	}
-	u.status = StatusDownloading
 	downloadURL := u.downloadURL
+	u.status = StatusDownloading
 	u.mu.Unlock()
 
+	log.Printf("Starting firmware update to version %s", u.availableVersion)
+
+	// Download firmware
 	if err := u.downloadFile(downloadURL, globals.UpdateImagePath); err != nil {
 		u.setError(fmt.Sprintf("download failed: %v", err))
+		os.Remove(globals.UpdateImagePath)
 		return err
 	}
 
+	// Flash to inactive partition
 	u.mu.Lock()
 	u.status = StatusInstalling
 	u.mu.Unlock()
@@ -127,20 +140,25 @@ func (u *Updater) StartUpdate() error {
 		return err
 	}
 
+	// Clean up and schedule reboot
 	os.Remove(globals.UpdateImagePath)
+	log.Println("Update successful, rebooting in 2 seconds...")
 
 	go func() {
 		time.Sleep(2 * time.Second)
-		exec.Command("sudo", "reboot").Run()
+		if err := exec.Command("sudo", "reboot").Run(); err != nil {
+			log.Printf("Failed to reboot: %v", err)
+		}
 	}()
 
 	return nil
 }
 
 func (u *Updater) downloadFile(url, destination string) error {
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: downloadTimeout}
+	resp, err := client.Get(url)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -150,20 +168,26 @@ func (u *Updater) downloadFile(url, destination string) error {
 
 	out, err := os.Create(destination)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer out.Close()
-	_, err = io.Copy(out, resp.Body)
-	return err
+
+	bytesWritten, err := io.Copy(out, resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to write firmware: %w", err)
+	}
+
+	log.Printf("Downloaded %d bytes to %s", bytesWritten, destination)
+	return nil
 }
 
 func (u *Updater) flashFirmware() error {
-	activePartition, err := u.getActivePartition()
+	activePartition, err := getActivePartition()
 	if err != nil {
 		return fmt.Errorf("failed to detect active partition: %w", err)
 	}
 
-	inactivePartition := u.getInactivePartition(activePartition)
+	inactivePartition := getInactivePartition(activePartition)
 	log.Printf("Flashing firmware to %s (active: %s)", inactivePartition, activePartition)
 
 	// Flash firmware to inactive partition
@@ -173,57 +197,16 @@ func (u *Updater) flashFirmware() error {
 	}
 
 	// Switch boot partition
-	if err := u.switchBootPartition(inactivePartition); err != nil {
+	if err := switchBootPartition(inactivePartition); err != nil {
 		return fmt.Errorf("boot switch failed: %w", err)
 	}
 
+	// Set boot counter for automatic rollback if new firmware fails
+	if err := setBootCounter(); err != nil {
+		log.Printf("Warning: failed to set boot counter: %v", err)
+	}
+
 	log.Println("Firmware flashed and boot partition switched successfully")
-	return nil
-}
-
-func (u *Updater) getActivePartition() (string, error) {
-	data, err := os.ReadFile("/proc/cmdline")
-	if err != nil {
-		return "", fmt.Errorf("failed to read /proc/cmdline: %w", err)
-	}
-
-	matches := regexp.MustCompile(`root=(/dev/\S+)`).FindStringSubmatch(string(data))
-	if len(matches) < 2 {
-		return "", fmt.Errorf("could not detect root partition in cmdline")
-	}
-
-	partition := matches[1]
-
-	// Validate it's one of our configured partitions
-	if partition != globals.PartitionA && partition != globals.PartitionB {
-		return "", fmt.Errorf("active partition %s is not one of configured partitions (%s, %s)",
-			partition, globals.PartitionA, globals.PartitionB)
-	}
-
-	return partition, nil
-}
-
-func (u *Updater) getInactivePartition(active string) string {
-	// Toggle between configured partitions
-	if active == globals.PartitionA {
-		return globals.PartitionB
-	}
-	return globals.PartitionA
-}
-
-func (u *Updater) switchBootPartition(newRoot string) error {
-	data, err := os.ReadFile(globals.BootCmdlinePath)
-	if err != nil {
-		return fmt.Errorf("failed to read boot config: %w", err)
-	}
-
-	newCmdline := regexp.MustCompile(`root=/dev/\S+`).ReplaceAllString(string(data), "root="+newRoot)
-
-	if err := os.WriteFile(globals.BootCmdlinePath, []byte(newCmdline), 0644); err != nil {
-		return fmt.Errorf("failed to write boot config: %w", err)
-	}
-
-	log.Printf("Boot partition switched to %s", newRoot)
 	return nil
 }
 

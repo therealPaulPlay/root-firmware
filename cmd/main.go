@@ -62,6 +62,11 @@ func main() {
 	// Register relay handlers and start connection (if relay domain configured)
 	relaycomm.RegisterHandlers()
 
+	// Confirm successful boot (removes boot counter for automatic rollback)
+	if err := updater.ConfirmSuccessfulBoot(); err != nil {
+		log.Printf("Warning: failed to confirm boot: %v", err)
+	}
+
 	// Check for updates every 5 minutes
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
