@@ -2,6 +2,7 @@ package wifi
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"regexp"
@@ -20,7 +21,8 @@ type Network struct {
 }
 
 type WiFi struct {
-	mu sync.Mutex
+	mu           sync.Mutex
+	supports5GHz bool
 }
 
 var instance *WiFi
@@ -29,6 +31,7 @@ var once sync.Once
 func Init() {
 	once.Do(func() {
 		instance = &WiFi{}
+		instance.detectCapabilities()
 	})
 }
 
@@ -51,7 +54,7 @@ func (w *WiFi) Scan() ([]Network, error) {
 		return nil, fmt.Errorf("scan failed: %w", err)
 	}
 
-	return parseNetworks(string(output)), nil
+	return w.parseNetworks(string(output)), nil
 }
 
 // Connect connects to a WiFi network and verifies internet access
@@ -140,6 +143,30 @@ func (w *WiFi) GetCurrentNetwork() string {
 	return strings.TrimSpace(string(output))
 }
 
+// detectCapabilities detects if the WiFi hardware supports 5GHz
+func (w *WiFi) detectCapabilities() {
+	output, err := exec.Command("iwlist", "wlan0", "freq").Output()
+	if err != nil {
+		w.supports5GHz = false
+		log.Println("WiFi initialized - 5GHz support: unknown (detection failed)")
+		return
+	}
+
+	freqRe := regexp.MustCompile(`:\s*([\d.]+)\s*GHz`)
+	for _, match := range freqRe.FindAllStringSubmatch(string(output), -1) {
+		var freq float64
+		fmt.Sscanf(match[1], "%f", &freq)
+		if freq > 5.0 {
+			w.supports5GHz = true
+			log.Println("WiFi initialized - 5GHz support: yes")
+			return
+		}
+	}
+
+	w.supports5GHz = false
+	log.Println("WiFi initialized - 5GHz support: no")
+}
+
 // sanitizeSSID escapes special characters in SSID for safe use in wpa_supplicant.conf
 // According to wpa_supplicant.conf spec, SSIDs with special chars should use backslash escaping
 func sanitizeSSID(ssid string) string {
@@ -155,7 +182,7 @@ func sanitizeSSID(ssid string) string {
 	return result
 }
 
-func parseNetworks(output string) []Network {
+func (w *WiFi) parseNetworks(output string) []Network {
 	var networks []Network
 
 	ssidRe := regexp.MustCompile(`ESSID:"([^"]+)"`)
@@ -186,11 +213,12 @@ func parseNetworks(output string) []Network {
 			network.Secured = encMatch[1] == "on"
 		}
 
-		// Parse frequency and mark 5GHz as unsupported (Pi Zero 2W only supports 2.4GHz)
+		// Parse frequency and mark as unsupported if hardware doesn't support it
 		if freqMatch := frequencyRe.FindStringSubmatch(cell); len(freqMatch) > 1 {
 			var freq float64
 			fmt.Sscanf(freqMatch[1], "%f", &freq)
-			network.Unsupported = freq > 3.0 // 5GHz networks are in the 5.0+ GHz range
+			// Mark 5GHz networks as unsupported if hardware doesn't support 5GHz
+			network.Unsupported = freq > 3.0 && !w.supports5GHz
 		}
 
 		networks = append(networks, network)
