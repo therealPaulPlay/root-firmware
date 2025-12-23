@@ -1,0 +1,14 @@
+[Unit]
+Description=ROOT Firmware
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/observer
+ExecStart=/home/observer/root-firmware
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
