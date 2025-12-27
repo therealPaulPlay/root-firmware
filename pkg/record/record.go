@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"root-firmware/pkg/config"
+	"root-firmware/pkg/sfx"
 )
 
 type Recorder struct {
@@ -91,7 +92,11 @@ func (r *Recorder) StartRecording(outputPath string) error {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
-	// TODO: Play sound effect if play_active_camera_sound is true
+	// Play sound effect if play_active_camera_sound is true
+	val, ok := config.Get().GetKey("play_active_camera_sound")
+	if !ok || (ok && val.(bool)) {
+		sfx.Get().PlayRecording()
+	}
 
 	r.recording = true
 	r.recordCmd = cmd

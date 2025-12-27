@@ -18,6 +18,7 @@ import (
 	"root-firmware/pkg/pairing"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/relaycomm"
+	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/updater"
 	"root-firmware/pkg/ups"
@@ -55,6 +56,11 @@ func main() {
 	relaycomm.Init()
 	updater.Init()
 
+	// Initialize SFX
+	if err := sfx.Init(); err != nil {
+		log.Printf("Warning: failed to initialize SFX: %v", err)
+	}
+
 	// Initialize ML
 	if err := ml.Init(); err != nil {
 		log.Fatalf("Failed to initialize ML: %v", err)
@@ -84,7 +90,8 @@ func main() {
 		}
 	}()
 
-	// TODO: Play startup sound
+	// Play startup sound
+	sfx.Get().PlayStartup()
 
 	// Wait for interrupt signal, keep everything alive until then
 	sigChan := make(chan os.Signal, 1)
