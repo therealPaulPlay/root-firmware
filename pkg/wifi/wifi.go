@@ -3,14 +3,13 @@ package wifi
 import (
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"root-firmware/pkg/globals"
+	"root-firmware/pkg/config"
 )
 
 type Network struct {
@@ -32,6 +31,7 @@ func Init() {
 	once.Do(func() {
 		instance = &WiFi{}
 		instance.detectCapabilities()
+		instance.applyStoredWiFiConfig()
 	})
 }
 
@@ -57,9 +57,59 @@ func (w *WiFi) Scan() ([]Network, error) {
 	return w.parseNetworks(string(output)), nil
 }
 
+// applyStoredWiFiConfig applies WiFi configuration from config.json on boot
+func (w *WiFi) applyStoredWiFiConfig() {
+	ssidVal, hasSSID := config.Get().GetKey("wifiSSID")
+	passwordVal, hasPassword := config.Get().GetKey("wifiPassword")
+
+	if !hasSSID || !hasPassword {
+		return // No WiFi configured
+	}
+
+	ssid, ok1 := ssidVal.(string)
+	password, ok2 := passwordVal.(string)
+	if !ok1 || !ok2 {
+		log.Println("WiFi: Invalid WiFi config format")
+		return
+	}
+
+	// Apply country code if set
+	if countryCodeVal, ok := config.Get().GetKey("wifiCountryCode"); ok {
+		if code, ok := countryCodeVal.(string); ok && len(code) == 2 {
+			if err := w.setCountryCode(code); err != nil {
+				log.Printf("WiFi: Failed to set country code: %v", err)
+			}
+		}
+	}
+
+	// Configure stored WiFi (wpa_supplicant will auto-reconnect)
+	go func() {
+		if err := w.configureNetwork(ssid, password); err != nil {
+			log.Printf("WiFi: Failed to configure network: %v", err)
+		}
+	}()
+}
+
+// setCountryCode sets the WiFi regulatory domain country code
+// countryCode should be ISO 3166-1 alpha-2 format (e.g., "US", "GB", "DE")
+func (w *WiFi) setCountryCode(countryCode string) error {
+	if len(countryCode) != 2 {
+		return fmt.Errorf("invalid country code format (must be 2 letters)")
+	}
+	countryCode = strings.ToUpper(countryCode)
+
+	if err := exec.Command("sudo", "iw", "reg", "set", countryCode).Run(); err != nil {
+		return fmt.Errorf("failed to set country code: %w", err)
+	}
+
+	log.Printf("WiFi: Country code set to %s", countryCode)
+	return nil
+}
+
 // Connect connects to a WiFi network and verifies internet access
 // password should be empty string for unsecured networks
-func (w *WiFi) Connect(ssid, password string) error {
+// countryCode is optional ISO 3166-1 alpha-2 code
+func (w *WiFi) Connect(ssid, password, countryCode string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -68,49 +118,79 @@ func (w *WiFi) Connect(ssid, password string) error {
 		return fmt.Errorf("invalid SSID length (must be 1-32 bytes)")
 	}
 
-	var config []byte
-	var err error
-
-	if password == "" {
-		// Unsecured network - write config directly without shell escaping
-		// SSID is written as hex string to avoid any injection issues
-		config = []byte(fmt.Sprintf(`network={
-	ssid="%s"
-	key_mgmt=NONE
-}
-`, sanitizeSSID(ssid)))
-	} else {
-		// Secured network - use wpa_passphrase which properly escapes everything
-		// Both SSID and password are passed safely (no shell interpretation)
-		cmd := exec.Command("wpa_passphrase", ssid)
-		cmd.Stdin = strings.NewReader(password)
-		config, err = cmd.Output()
-		if err != nil {
-			return fmt.Errorf("failed to generate config: %w", err)
+	// Set country code if provided
+	if countryCode != "" {
+		if err := w.setCountryCode(countryCode); err != nil {
+			log.Printf("WiFi: Warning - failed to set country code: %v", err)
+		}
+		// Save to config
+		if err := config.Get().SetKey("wifiCountryCode", countryCode); err != nil {
+			log.Printf("WiFi: Warning - failed to save country code: %v", err)
 		}
 	}
 
-	// Append to wpa_supplicant.conf
-	f, err := os.OpenFile(globals.WpaSupplicantPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	// Save WiFi credentials to config
+	if err := config.Get().SetKey("wifiSSID", ssid); err != nil {
+		return fmt.Errorf("failed to save WiFi SSID: %w", err)
+	}
+	if err := config.Get().SetKey("wifiPassword", password); err != nil {
+		return fmt.Errorf("failed to save WiFi password: %w", err)
+	}
+
+	// Configure network
+	if err := w.configureNetwork(ssid, password); err != nil {
+		return err
+	}
+
+	// Wait for connection and verify internet access
+	return w.waitForInternet(ssid, 15*time.Second)
+}
+
+// configureNetwork configures a WiFi network using wpa_cli
+func (w *WiFi) configureNetwork(ssid, password string) error {
+	// Add network via wpa_cli
+	output, err := exec.Command("wpa_cli", "-i", "wlan0", "add_network").Output()
 	if err != nil {
-		return fmt.Errorf("failed to open wpa_supplicant.conf: %w", err)
+		return fmt.Errorf("failed to add network: %w", err)
 	}
-	defer f.Close()
+	networkID := strings.TrimSpace(string(output))
 
-	if _, err := f.Write(config); err != nil {
-		return fmt.Errorf("failed to write wpa config: %w", err)
-	}
-
-	// Reconfigure wpa_supplicant
-	if err := exec.Command("wpa_cli", "-i", "wlan0", "reconfigure").Run(); err != nil {
-		return fmt.Errorf("failed to reconfigure: %w", err)
+	// Set SSID
+	if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "ssid", fmt.Sprintf(`"%s"`, ssid)).Run(); err != nil {
+		return fmt.Errorf("failed to set SSID: %w", err)
 	}
 
-	// Wait up to 15 seconds for connection with internet access
-	for range 15 {
+	// Set password or key_mgmt=NONE for open networks
+	if password == "" {
+		if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "key_mgmt", "NONE").Run(); err != nil {
+			return fmt.Errorf("failed to set key_mgmt: %w", err)
+		}
+	} else {
+		if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "psk", fmt.Sprintf(`"%s"`, password)).Run(); err != nil {
+			return fmt.Errorf("failed to set password: %w", err)
+		}
+	}
+
+	// Enable the network
+	if err := exec.Command("wpa_cli", "-i", "wlan0", "enable_network", networkID).Run(); err != nil {
+		return fmt.Errorf("failed to enable network: %w", err)
+	}
+
+	// Select this network
+	if err := exec.Command("wpa_cli", "-i", "wlan0", "select_network", networkID).Run(); err != nil {
+		return fmt.Errorf("failed to select network: %w", err)
+	}
+
+	return nil
+}
+
+// waitForInternet waits for internet connectivity up to the specified timeout
+func (w *WiFi) waitForInternet(ssid string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
 		time.Sleep(1 * time.Second)
 
-		// Check if connected and has internet
+		// Check if connected
 		output, err := exec.Command("iwgetid", "-r").Output()
 		if err != nil || len(strings.TrimSpace(string(output))) == 0 {
 			continue // Not connected yet
@@ -118,7 +198,8 @@ func (w *WiFi) Connect(ssid, password string) error {
 
 		// Ping Google DNS to verify internet
 		if exec.Command("ping", "-c", "1", "-W", "2", "8.8.8.8").Run() == nil {
-			return nil // Success!
+			log.Printf("WiFi: Connected to %s", ssid)
+			return nil
 		}
 	}
 
@@ -165,21 +246,6 @@ func (w *WiFi) detectCapabilities() {
 
 	w.supports5GHz = false
 	log.Println("WiFi initialized - 5GHz support: no")
-}
-
-// sanitizeSSID escapes special characters in SSID for safe use in wpa_supplicant.conf
-// According to wpa_supplicant.conf spec, SSIDs with special chars should use backslash escaping
-func sanitizeSSID(ssid string) string {
-	// Replace backslash first to avoid double-escaping
-	result := strings.ReplaceAll(ssid, `\`, `\\`)
-	// Escape double quotes
-	result = strings.ReplaceAll(result, `"`, `\"`)
-	// Escape newlines (would break config file format)
-	result = strings.ReplaceAll(result, "\n", `\n`)
-	result = strings.ReplaceAll(result, "\r", `\r`)
-	// Escape tab
-	result = strings.ReplaceAll(result, "\t", `\t`)
-	return result
 }
 
 func (w *WiFi) parseNetworks(output string) []Network {

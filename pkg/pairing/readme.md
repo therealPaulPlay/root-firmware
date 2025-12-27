@@ -127,9 +127,12 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 ```json
 {
   "ssid": "MyWiFi",
-  "password": "wifi-password"
+  "password": "wifi-password",
+  "countryCode": "US"
 }
 ```
+
+**Note**: `countryCode` is optional but recommended for regulatory compliance. It should be an ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "DE"). The client can obtain this from the browser's locale or geolocation.
 
 **Response**:
 ```json

@@ -210,10 +210,6 @@ func RegisterHandlers() {
 	relay.On("removeDevice", useEncryption("removeDevice", handleRemoveDevice))
 	relay.On("kickDevice", useEncryption("kickDevice", handleKickDevice))
 
-	// WiFi
-	relay.On("wifiScan", useEncryption("wifiScan", handleWiFiScan))
-	relay.On("wifiConnect", useEncryption("wifiConnect", handleWiFiConnect))
-
 	// Storage
 	relay.On("getEvents", useEncryption("getEvents", handleGetEvents))
 	relay.On("getRecording", useEncryption("getRecording", handleGetRecording))
@@ -272,28 +268,6 @@ func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
 
 	err := devices.Get().ScheduleKick(req.TargetDeviceID)
 	SendEncrypted(ctx, "kickDeviceResult", buildResult(err, nil))
-}
-
-func handleWiFiScan(ctx *HandlerContext, payload json.RawMessage) {
-	networks, err := wifi.Get().Scan()
-	SendEncrypted(ctx, "wifiScanResult", buildResult(err, map[string]any{
-		"networks": networks,
-	}))
-}
-
-func handleWiFiConnect(ctx *HandlerContext, payload json.RawMessage) {
-	var req struct {
-		SSID     string `json:"ssid"`
-		Password string `json:"password"`
-	}
-
-	if err := json.Unmarshal(payload, &req); err != nil {
-		SendEncrypted(ctx, "wifiConnectResult", buildResult(fmt.Errorf("invalid payload"), nil))
-		return
-	}
-
-	err := wifi.Get().Connect(req.SSID, req.Password)
-	SendEncrypted(ctx, "wifiConnectResult", buildResult(err, nil))
 }
 
 func handleGetEvents(ctx *HandlerContext, payload json.RawMessage) {
@@ -434,7 +408,7 @@ func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 		return
 	}
 
-	err := config.Get().SetKey("play_active_camera_sound", req.Enabled)
+	err := config.Get().SetKey("playActiveCameraSound", req.Enabled)
 	SendEncrypted(ctx, "recordingSoundResult", buildResult(err, map[string]any{
 		"enabled": req.Enabled,
 	}))

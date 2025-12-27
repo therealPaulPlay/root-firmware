@@ -177,8 +177,9 @@ func initBLE() error {
 		}
 
 		var wifiReq struct {
-			SSID     string `json:"ssid"`
-			Password string `json:"password"`
+			SSID        string `json:"ssid"`
+			Password    string `json:"password"`
+			CountryCode string `json:"countryCode"` // Optional ISO 3166-1 alpha-2 code
 		}
 		if err := json.Unmarshal(decrypted, &wifiReq); err != nil {
 			log.Printf("BLE: WiFi parse failed: %v", err)
@@ -186,7 +187,7 @@ func initBLE() error {
 			return
 		}
 
-		if err := wifi.Get().Connect(wifiReq.SSID, wifiReq.Password); err != nil {
+		if err := wifi.Get().Connect(wifiReq.SSID, wifiReq.Password, wifiReq.CountryCode); err != nil {
 			log.Printf("BLE: WiFi connect failed: %v", err)
 			writeError(rsp, "Failed to connect to WiFi")
 			return

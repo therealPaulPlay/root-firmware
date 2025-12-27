@@ -92,8 +92,8 @@ func (r *Recorder) StartRecording(outputPath string) error {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
-	// Play sound effect if play_active_camera_sound is true
-	val, ok := config.Get().GetKey("play_active_camera_sound")
+	// Play sound effect if key is true
+	val, ok := config.Get().GetKey("playActiveCameraSound")
 	if !ok || (ok && val.(bool)) {
 		sfx.Get().PlayRecording()
 	}

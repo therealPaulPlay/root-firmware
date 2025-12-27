@@ -18,9 +18,6 @@ var ConfigPath = FirmwareDataDir + "/config.json"
 // Logs
 var LogsPath = FirmwareDataDir + "/logs.json"
 
-// WpaSupplicantPath for WiFi credentials
-var WpaSupplicantPath = "/etc/wpa_supplicant/wpa_supplicant.conf"
-
 // Recordings
 var RecordingsPath = DataDir + "/recordings"
 
@@ -28,9 +25,9 @@ var RecordingsPath = DataDir + "/recordings"
 var EventLogPath = RecordingsPath + "/events.json"
 
 // Firmware update paths
-var UpdateImagePath = "/tmp/firmware-update.img"      // Temporary download, cleaned on reboot
-var BootCmdlinePath = "/boot/firmware/cmdline.txt"    // Boot partition configuration
-var BootCountPath = "/boot/firmware/bootcount.txt"    // Boot attempt counter for rollback
+var UpdateImagePath = "/tmp/firmware-update.img"   // Temporary download, cleaned on reboot
+var BootCmdlinePath = "/boot/firmware/cmdline.txt" // Boot partition configuration
+var BootCountPath = "/boot/firmware/bootcount.txt" // Boot attempt counter for rollback
 
 // Partition configuration for A/B updates
 var PartitionA = "/dev/mmcblk0p2"
