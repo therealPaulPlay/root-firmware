@@ -219,7 +219,11 @@ func (u *Updater) flashFirmware() error {
 		return fmt.Errorf("failed to detect active partition: %w", err)
 	}
 
-	inactivePartition := getInactivePartition(activePartition)
+	inactivePartition, err := getInactivePartition(activePartition)
+	if err != nil {
+		return fmt.Errorf("failed to determine inactive partition: %w", err)
+	}
+
 	log.Printf("Flashing firmware to %s (active: %s)", inactivePartition, activePartition)
 
 	// Flash firmware to inactive partition

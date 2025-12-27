@@ -1,6 +1,7 @@
 package relaycomm
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -531,16 +534,31 @@ func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleReset(ctx *HandlerContext, payload json.RawMessage) {
-	// Send success response before resetting
-	SendEncrypted(ctx, "resetResult", map[string]any{
-		"success": true,
-	})
+	SendEncrypted(ctx, "resetResult", map[string]any{"success": true})
 
-	// Remove all contents of data partition, then reboot
 	go func() {
-		// Note: Using wildcard requires shell expansion, so use sh -c
-		exec.Command("sh", "-c", "rm -rf "+globals.DataDir+"/*").Run()
-		// Reboot the system after deletion completes
-		exec.Command("sudo", "reboot").Run()
+		time.Sleep(500 * time.Millisecond)
+
+		// Find data partition device from /proc/mounts
+		var partition string
+		if file, err := os.Open("/proc/mounts"); err == nil {
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				fields := strings.Fields(scanner.Text())
+				if len(fields) >= 2 && fields[1] == globals.DataDir {
+					partition = fields[0]
+					break
+				}
+			}
+			file.Close()
+		}
+
+		if partition != "" {
+			exec.Command("umount", globals.DataDir).Run()
+			exec.Command("mkfs.ext4", "-F", partition).Run()
+			exec.Command("sudo", "reboot").Run()
+		} else {
+			log.Printf("Failed to find data partition for reset")
+		}
 	}()
 }

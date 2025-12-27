@@ -30,8 +30,6 @@ func InstallBootWatchdog() error {
 	script := `#!/bin/bash
 BOOTCOUNT_FILE="` + globals.BootCountPath + `"
 CMDLINE_FILE="` + globals.BootCmdlinePath + `"
-PARTITION_A="` + globals.PartitionA + `"
-PARTITION_B="` + globals.PartitionB + `"
 
 if [ ! -f "$BOOTCOUNT_FILE" ]; then
     # No boot counter, stable boot
@@ -53,11 +51,15 @@ if [ "$NEW_COUNT" -le 0 ]; then
     # Get current root partition
     CURRENT_ROOT=$(grep -o 'root=/dev/[^ ]*' /proc/cmdline | cut -d'=' -f2)
 
-    # Switch to other partition
-    if [ "$CURRENT_ROOT" = "$PARTITION_A" ]; then
-        NEW_ROOT="$PARTITION_B"
+    # Toggle between partition 2 and 3
+    LAST_CHAR="${CURRENT_ROOT: -1}"
+    if [ "$LAST_CHAR" = "2" ]; then
+        NEW_ROOT="${CURRENT_ROOT%?}3"
+    elif [ "$LAST_CHAR" = "3" ]; then
+        NEW_ROOT="${CURRENT_ROOT%?}2"
     else
-        NEW_ROOT="$PARTITION_A"
+        echo "Error: Unexpected partition number: $LAST_CHAR"
+        exit 1
     fi
 
     # Update cmdline.txt
@@ -119,23 +121,23 @@ func getActivePartition() (string, error) {
 		return "", fmt.Errorf("could not detect root partition in cmdline")
 	}
 
-	partition := matches[1]
-
-	// Validate it's one of our configured partitions
-	if partition != globals.PartitionA && partition != globals.PartitionB {
-		return "", fmt.Errorf("active partition %s is not one of configured partitions (%s, %s)",
-			partition, globals.PartitionA, globals.PartitionB)
-	}
-
-	return partition, nil
+	return matches[1], nil
 }
 
-// Returns the partition that is NOT currently active
-func getInactivePartition(active string) string {
-	if active == globals.PartitionA {
-		return globals.PartitionB
+// Returns the partition that is NOT currently active (toggles 2 <-> 3)
+func getInactivePartition(active string) (string, error) {
+	if len(active) == 0 {
+		return "", fmt.Errorf("empty partition name")
 	}
-	return globals.PartitionA
+
+	switch active[len(active)-1] {
+	case '2':
+		return active[:len(active)-1] + "3", nil
+	case '3':
+		return active[:len(active)-1] + "2", nil
+	default:
+		return "", fmt.Errorf("unexpected partition number: %c", active[len(active)-1])
+	}
 }
 
 // Updates cmdline.txt to boot from a different partition
