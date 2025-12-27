@@ -1,6 +1,8 @@
 package updater
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,6 +36,7 @@ const (
 type FirmwareInfo struct {
 	Version string `json:"version"`
 	URL     string `json:"url"`
+	SHA256  string `json:"sha256"`
 }
 
 type Updater struct {
@@ -41,6 +44,7 @@ type Updater struct {
 	status           UpdateStatus
 	availableVersion string
 	downloadURL      string
+	downloadSHA256   string
 	errorMsg         string
 }
 
@@ -91,6 +95,17 @@ func (u *Updater) CheckForUpdates() error {
 		return err
 	}
 
+	// Validate SHA256 format (64 hex chars)
+	if len(info.SHA256) != 64 {
+		err := fmt.Errorf("invalid SHA256 length: %d", len(info.SHA256))
+		u.setError(err.Error())
+		return err
+	}
+	if _, err := hex.DecodeString(info.SHA256); err != nil {
+		u.setError(fmt.Sprintf("invalid SHA256 format: %v", err))
+		return err
+	}
+
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -98,13 +113,11 @@ func (u *Updater) CheckForUpdates() error {
 		u.status = StatusUpdateAvailable
 		u.availableVersion = info.Version
 		u.downloadURL = info.URL
+		u.downloadSHA256 = info.SHA256
 		u.errorMsg = ""
 	} else {
-		// Only clear error if we successfully checked and are up-to-date
-		if u.status != StatusUpdateAvailable {
-			u.status = StatusUpToDate
-			u.errorMsg = ""
-		}
+		u.status = StatusUpToDate
+		u.errorMsg = ""
 	}
 
 	return nil
@@ -117,13 +130,13 @@ func (u *Updater) StartUpdate() error {
 		return fmt.Errorf("no update available")
 	}
 	downloadURL := u.downloadURL
+	expectedSHA256 := u.downloadSHA256
+	log.Printf("Starting firmware update to version %s", u.availableVersion)
 	u.status = StatusDownloading
 	u.mu.Unlock()
 
-	log.Printf("Starting firmware update to version %s", u.availableVersion)
-
-	// Download firmware
-	if err := u.downloadFile(downloadURL, globals.UpdateImagePath); err != nil {
+	// Download and verify firmware
+	if err := u.downloadFile(downloadURL, globals.UpdateImagePath, expectedSHA256); err != nil {
 		u.setError(fmt.Sprintf("download failed: %v", err))
 		os.Remove(globals.UpdateImagePath)
 		return err
@@ -154,7 +167,7 @@ func (u *Updater) StartUpdate() error {
 	return nil
 }
 
-func (u *Updater) downloadFile(url, destination string) error {
+func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 	client := &http.Client{Timeout: downloadTimeout}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -166,18 +179,37 @@ func (u *Updater) downloadFile(url, destination string) error {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	out, err := os.Create(destination)
+	// Download to temp file first
+	tmp, err := os.CreateTemp("", "firmware-*.img")
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer out.Close()
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
 
-	bytesWritten, err := io.Copy(out, resp.Body)
+	// Download and hash simultaneously
+	hash := sha256.New()
+	writer := io.MultiWriter(tmp, hash)
+
+	bytesWritten, err := io.Copy(writer, resp.Body)
 	if err != nil {
+		tmp.Close()
 		return fmt.Errorf("failed to write firmware: %w", err)
 	}
+	tmp.Close()
 
-	log.Printf("Downloaded %d bytes to %s", bytesWritten, destination)
+	// Verify checksum
+	actualSHA256 := hex.EncodeToString(hash.Sum(nil))
+	if actualSHA256 != expectedSHA256 {
+		return fmt.Errorf("checksum mismatch: got %s, want %s", actualSHA256, expectedSHA256)
+	}
+
+	// Move verified file to destination
+	if err := os.Rename(tmpPath, destination); err != nil {
+		return fmt.Errorf("failed to move firmware: %w", err)
+	}
+
+	log.Printf("Downloaded and verified %d bytes (SHA256: %s)", bytesWritten, actualSHA256)
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 
+	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
 )
 
@@ -146,7 +147,7 @@ func switchBootPartition(newRoot string) error {
 
 	newCmdline := regexp.MustCompile(`root=/dev/\S+`).ReplaceAllString(string(data), "root="+newRoot)
 
-	if err := os.WriteFile(globals.BootCmdlinePath, []byte(newCmdline), 0644); err != nil {
+	if err := fsutil.AtomicWrite(globals.BootCmdlinePath, []byte(newCmdline), 0644); err != nil {
 		return fmt.Errorf("failed to write boot config: %w", err)
 	}
 
@@ -157,7 +158,7 @@ func switchBootPartition(newRoot string) error {
 // Ssets the boot attempt counter for automatic rollback
 func setBootCounter() error {
 	counter := fmt.Sprintf("%d\n", globals.MaxBootAttempts)
-	if err := os.WriteFile(globals.BootCountPath, []byte(counter), 0644); err != nil {
+	if err := fsutil.AtomicWrite(globals.BootCountPath, []byte(counter), 0644); err != nil {
 		return fmt.Errorf("failed to write boot counter: %w", err)
 	}
 	log.Printf("Boot counter set to %d attempts", globals.MaxBootAttempts)
