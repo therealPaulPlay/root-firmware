@@ -1,27 +1,38 @@
 package pairing
 
 import (
-	"crypto/rand"
+	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/gofrs/uuid"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
+	"root-firmware/pkg/qr"
+	"root-firmware/pkg/record"
 	"root-firmware/pkg/wifi"
 )
 
-const codeExpiry = 5 * time.Minute
+const (
+	codeExpiry     = 5 * time.Minute
+	rateLimitDelay = 1 * time.Second
+)
 
 type PairingCode struct {
-	Code      string
-	ExpiresAt time.Time
+	Code         string
+	ExpiresAt    time.Time
+	CodeVerified bool
 }
 
 type Pairing struct {
-	mu   sync.Mutex
-	code *PairingCode
+	mu              sync.Mutex
+	code            *PairingCode
+	lastScanAttempt time.Time
+	qrScanner       *qr.Scanner
 }
 
 var helperInstance *Pairing
@@ -29,7 +40,9 @@ var helperOnce sync.Once
 
 func InitHelper() {
 	helperOnce.Do(func() {
-		helperInstance = &Pairing{}
+		helperInstance = &Pairing{
+			qrScanner: qr.NewScanner(),
+		}
 	})
 }
 
@@ -47,24 +60,82 @@ func (b *Pairing) GetCode() string {
 
 	// Generate new code if expired or not set
 	if b.code == nil || time.Now().After(b.code.ExpiresAt) {
-		code := fmt.Sprintf("%06d", randomInt(0, 999999))
+		// Generate UUID for pairing code
+		id, err := uuid.NewV4()
+		if err != nil {
+			log.Printf("Pairing: Failed to generate UUID: %v", err)
+			return ""
+		}
 		b.code = &PairingCode{
-			Code:      code,
-			ExpiresAt: time.Now().Add(codeExpiry),
+			Code:         id.String(),
+			ExpiresAt:    time.Now().Add(codeExpiry),
+			CodeVerified: false, // Reset verification when new code is generated
 		}
 	}
 
 	return b.code.Code
 }
 
-// PairDevice pairs a device using the pairing code
-func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey []byte) (map[string]any, error) {
+// ScanQRCode captures a frame and attempts to read a QR code
+// Verifies it matches the expected code and marks it as verified
+func (b *Pairing) ScanQRCode() error {
+	b.mu.Lock()
+
+	// Rate limiting
+	if time.Since(b.lastScanAttempt) < rateLimitDelay {
+		b.mu.Unlock()
+		return fmt.Errorf("rate limited: wait %v between scans", rateLimitDelay)
+	}
+	b.lastScanAttempt = time.Now()
+
+	// Check if code exists and hasn't expired
+	if b.code == nil || time.Now().After(b.code.ExpiresAt) {
+		b.mu.Unlock()
+		return fmt.Errorf("no active pairing code")
+	}
+
+	expectedCode := b.code.Code
+	b.mu.Unlock()
+
+	// Capture frame
+	frame, err := record.Get().CapturePreview()
+	if err != nil {
+		return fmt.Errorf("failed to capture frame: %w", err)
+	}
+
+	// Scan for QR code
+	scannedCode, err := b.qrScanner.Scan(frame)
+	if err != nil {
+		return fmt.Errorf("no QR code found: %w", err)
+	}
+
+	// Verify code matches and mark as verified
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Verify code
-	if b.code == nil || b.code.Code != code || time.Now().After(b.code.ExpiresAt) {
-		return nil, fmt.Errorf("invalid or expired code")
+	// Re-check code still exists and matches what we read earlier
+	if b.code == nil || b.code.Code != expectedCode {
+		return fmt.Errorf("pairing code changed during scan")
+	}
+
+	if scannedCode != expectedCode {
+		return fmt.Errorf("code mismatch")
+	}
+
+	// Mark code as verified
+	b.code.CodeVerified = true
+	log.Printf("Pairing: QR code verified successfully")
+	return nil
+}
+
+// PairDevice pairs a device after QR code verification
+func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte) (map[string]any, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Verify code was scanned and verified via QR
+	if b.code == nil || !b.code.CodeVerified || time.Now().After(b.code.ExpiresAt) {
+		return nil, fmt.Errorf("code not verified or expired")
 	}
 
 	// Get or generate camera keypair (single keypair for all devices)
@@ -94,11 +165,52 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 	// Get relay domain
 	relayDomain, _ := config.Get().GetKey("relayDomain")
 
-	// Scan for WiFi networks
-	networks, _ := wifi.Get().Scan()
+	// Scan for WiFi networks with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	type scanResult struct {
+		networks []wifi.Network
+		err      error
+	}
+	resultChan := make(chan scanResult, 1)
+	go func() {
+		networks, err := wifi.Get().Scan()
+		select {
+		case resultChan <- scanResult{networks, err}:
+		case <-ctx.Done():
+			// Context cancelled, don't send result
+		}
+	}()
+
+	// Wait for scan result or timeout
+	var result scanResult
+	select {
+	case result = <-resultChan:
+		if result.err != nil {
+			return nil, fmt.Errorf("failed to scan WiFi networks: %w", result.err)
+		}
+	case <-ctx.Done():
+		return nil, fmt.Errorf("WiFi scan timed out after 15 seconds")
+	}
+
+	// Convert to map format
+	networks := make([]map[string]any, len(result.networks))
+	for i, net := range result.networks {
+		networks[i] = map[string]any{
+			"ssid":        net.SSID,
+			"signal":      net.Signal,
+			"secured":     net.Secured,
+			"unsupported": net.Unsupported,
+		}
+	}
 
 	// Encode camera public key to base64 for JSON transmission
-	cameraPublicKeyEncoded := encryption.EncodePublicKey(cameraPublicKey.([]byte))
+	pubKey, ok := cameraPublicKey.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("camera public key has invalid type")
+	}
+	cameraPublicKeyEncoded := encryption.EncodePublicKey(pubKey)
 
 	return map[string]any{
 		"productId":         productID,
@@ -110,12 +222,3 @@ func (b *Pairing) PairDevice(deviceID, deviceName, code string, devicePublicKey 
 	}, nil
 }
 
-func randomInt(min, max int) int {
-	b := make([]byte, 4)
-	rand.Read(b)
-	n := int(b[0]) | int(b[1])<<8 | int(b[2])<<16 | int(b[3])<<24
-	if n < 0 {
-		n = -n
-	}
-	return min + (n % (max - min + 1))
-}

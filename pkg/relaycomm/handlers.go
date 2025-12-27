@@ -40,7 +40,7 @@ Device → Relay Server → Camera:
 		"target": "product",
 		"productId": "camera-uuid-123",    // ← Which camera should handle this
 		"deviceId": "device-uuid-456",     // ← Which device sent this
-		"encryptedPayload": "base64..." // { deviceId: "device-uuid-456", field1: ..., field 2:... } (Device ID is included here again to verify this payload was encrypted by this device)
+		"encryptedPayload": "base64..." // { ssid: "...", password: "..." } (No deviceId needed - if wrong device sent it, decryption would fail)
 	}
 
 Camera → Relay Server → Device:
@@ -49,7 +49,7 @@ Camera → Relay Server → Device:
 		"target": "device",
 		"productId": "camera-uuid-123",    // ← Which camera sent this
 		"deviceId": "device-uuid-456",     // ← Which device should receive this
-		"encryptedPayload": "base64..." // { productId: "camera-uuid-123", success: true, networks: [...] } (Product ID is included here to verify this payload was encrypted by this camera)
+		"encryptedPayload": "base64..." // { success: true, networks: [...] } (No productId needed - if wrong camera sent it, decryption would fail)
 	}
 */
 
@@ -70,8 +70,15 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 			return
 		}
 
+		privKey, ok := cameraPrivateKey.([]byte)
+		if !ok {
+			log.Printf("RelayComm: Camera private key has invalid type")
+			sendError(msg.DeviceID, messageType+"Result", "Camera encryption key invalid!")
+			return
+		}
+
 		// Derive shared secret using camera's private key and device's public key
-		sharedSecret, err := encryption.DeriveSharedSecret(cameraPrivateKey.([]byte), device.PublicKey)
+		sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 		if err != nil {
 			sendError(msg.DeviceID, messageType+"Result", "Failed to derive encryption key!")
 			return
@@ -91,20 +98,6 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 			return
 		}
 
-		// Verify deviceID inside encrypted payload matches the outer claim
-		var payloadCheck struct {
-			DeviceID string `json:"deviceId"`
-		}
-		if err := json.Unmarshal(decrypted, &payloadCheck); err != nil {
-			sendError(msg.DeviceID, messageType+"Result", "Invalid payload format!")
-			return
-		}
-
-		if payloadCheck.DeviceID != msg.DeviceID {
-			sendError(msg.DeviceID, messageType+"Result", "Device ID mismatch!")
-			return
-		}
-
 		// Create handler context with encryption info
 		ctx := &HandlerContext{
 			DeviceID:          msg.DeviceID,
@@ -121,18 +114,28 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 func sendError(deviceID, messageType, errorMsg string) {
 	productID, _ := config.Get().GetKey("id")
 
+	prodIDStr, ok := productID.(string)
+	if !ok {
+		log.Printf("RelayComm: Cannot send error - product ID has invalid type")
+		return
+	}
+
 	// Create error payload
 	errorPayload := map[string]any{
-		"productId": productID,
+		"productId": prodIDStr,
 		"success":   false,
 		"error":     errorMsg,
 	}
-	payloadJSON, _ := json.Marshal(errorPayload)
+	payloadJSON, err := json.Marshal(errorPayload)
+	if err != nil {
+		log.Printf("RelayComm: Failed to marshal error payload: %v", err)
+		return
+	}
 
 	Get().Send(Message{
 		Type:             messageType,
 		Target:           "device",
-		ProductID:        productID.(string),
+		ProductID:        prodIDStr,
 		DeviceID:         deviceID,
 		EncryptedPayload: string(payloadJSON), // Send as unencrypted JSON for errors
 	})
@@ -158,22 +161,19 @@ func SendEncrypted(ctx *HandlerContext, messageType string, payload any) error {
 		return fmt.Errorf("product ID missing from config (trying to send encrypted WS message)")
 	}
 
+	prodIDStr, ok := productID.(string)
+	if !ok {
+		return fmt.Errorf("product ID has invalid type")
+	}
+
 	// Payload must be a map for valid JSON
 	payloadMap, ok := payload.(map[string]any)
 	if !ok {
 		return fmt.Errorf("payload must be a map[string]any")
 	}
 
-	// Wrap payload with product ID for verification
-	wrappedPayload := map[string]any{
-		"productId": productID,
-	}
-
-	// Merge the actual payload into the wrapped payload
-	maps.Copy(wrappedPayload, payloadMap)
-
-	// Marshal wrapped payload to JSON
-	payloadJSON, err := json.Marshal(wrappedPayload)
+	// Marshal payload to JSON
+	payloadJSON, err := json.Marshal(payloadMap)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func SendEncrypted(ctx *HandlerContext, messageType string, payload any) error {
 	return Get().Send(Message{
 		Type:             messageType,
 		Target:           "device",
-		ProductID:        productID.(string),
+		ProductID:        prodIDStr,
 		DeviceID:         ctx.DeviceID,
 		EncryptedPayload: encryptedPayload,
 	})
@@ -260,6 +260,7 @@ func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncrypted(ctx, "kickDeviceResult", buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
@@ -287,6 +288,7 @@ func handleWiFiConnect(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncrypted(ctx, "wifiConnectResult", buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
@@ -307,6 +309,7 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncrypted(ctx, "recordingResult", buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
@@ -333,6 +336,7 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncrypted(ctx, "thumbnailResult", buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
@@ -410,6 +414,7 @@ func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncrypted(ctx, "microphoneResult", buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
@@ -425,6 +430,7 @@ func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncrypted(ctx, "recordingSoundResult", buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
@@ -521,20 +527,16 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 	SendEncrypted(ctx, "healthResult", health)
 }
 
-// TODO: Make this use buildError (slight refactor)
 func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
 	frameData, err := record.Get().CapturePreview()
 	if err != nil {
-		SendEncrypted(ctx, "previewResult", map[string]any{
-			"success": false,
-		})
+		SendEncrypted(ctx, "previewResult", buildResult(err, nil))
 		return
 	}
 
-	SendEncrypted(ctx, "previewResult", map[string]any{
-		"success": true,
-		"image":   base64.StdEncoding.EncodeToString(frameData),
-	})
+	SendEncrypted(ctx, "previewResult", buildResult(nil, map[string]any{
+		"image": base64.StdEncoding.EncodeToString(frameData),
+	}))
 }
 
 func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {

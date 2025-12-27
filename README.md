@@ -116,9 +116,9 @@ Handles recording video and audio via the camera and microphone components.
 
 Communication with the device the firmware runs on happens via a relay. In the `relaycomm` package, the WebSocket connection is being handled.
 
-### Speaker
+### SFX
 
-Play sound via the speaker component and stream audio for two-way-audio.
+Play sound effects.
 
 ### Storage
 

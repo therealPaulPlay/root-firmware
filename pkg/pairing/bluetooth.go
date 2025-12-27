@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"time"
+	"sync"
 
 	"github.com/go-ble/ble"
 	"github.com/go-ble/ble/linux"
@@ -22,6 +22,7 @@ import (
 var (
 	serviceUUID     = ble.MustParse("a07498ca-ad5b-474e-940d-16f1fbe7e8cd")
 	getCodeCharUUID = ble.MustParse("51ff12bb-3ed8-46e5-b4f9-d64e2fec021b")
+	scanQRCharUUID  = ble.MustParse("2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e")
 	pairCharUUID    = ble.MustParse("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
 	wifiCharUUID    = ble.MustParse("beb5483e-36e1-4688-b7f5-ea07361b26a8")
 	relayCharUUID   = ble.MustParse("cba1d466-344c-4be3-ab3f-189f80dd7518")
@@ -30,19 +31,25 @@ var (
 
 var bleDevice ble.Device
 var lastPairingResult map[string]any
+var lastPairingResultMu sync.Mutex
+
+// writeError writes a JSON error response to the BLE response writer
+func writeError(rsp ble.ResponseWriter, message string) {
+	fmt.Fprintf(rsp, `{"success":false,"error":"%s"}`, message)
+}
+
+// writeSuccess writes a JSON success response to the BLE response writer
+func writeSuccess(rsp ble.ResponseWriter) {
+	rsp.Write([]byte(`{"success":true}`))
+}
 
 // Init initializes the pairing system (BLE + helper)
 func Init() error {
 	InitHelper()
-
-	if err := InitBLE(); err != nil {
-		return fmt.Errorf("failed to start BLE: %w", err)
-	}
-
-	return nil
+	return initBLE()
 }
 
-func InitBLE() error {
+func initBLE() error {
 	// Get device name for advertising
 	deviceName := "ROOT-Observer"
 	if ssid, ok := config.Get().GetKey("apSSID"); ok {
@@ -63,8 +70,24 @@ func InitBLE() error {
 	svc := ble.NewService(serviceUUID)
 
 	// Get Code characteristic (read to get pairing code)
-	// TODO: Handle this differently
-	// getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
+	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
+	getCodeChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		code := GetHelper().GetCode()
+		rsp.Write([]byte(code))
+	}))
+
+	// Scan QR characteristic (write to trigger QR scan and verification)
+	scanQRChar := svc.NewCharacteristic(scanQRCharUUID)
+	scanQRChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		err := GetHelper().ScanQRCode()
+		if err != nil {
+			log.Printf("BLE: QR scan/verification failed: %v", err)
+			writeError(rsp, err.Error())
+			return
+		}
+		log.Printf("BLE: QR code verified successfully")
+		writeSuccess(rsp)
+	}))
 
 	// Pair Device characteristic (write to pair, read to get result)
 	pairChar := svc.NewCharacteristic(pairCharUUID)
@@ -72,37 +95,51 @@ func InitBLE() error {
 		var pairReq struct {
 			DeviceID        string `json:"deviceId"`
 			DeviceName      string `json:"deviceName"`
-			Code            string `json:"code"`
 			DevicePublicKey string `json:"devicePublicKey"`
 		}
 
 		if err := json.Unmarshal(req.Data(), &pairReq); err != nil {
 			log.Printf("BLE: Failed to parse pair request: %v", err)
+			writeError(rsp, "Invalid JSON")
 			return
 		}
 
 		devicePublicKey, err := encryption.DecodePublicKey(pairReq.DevicePublicKey)
 		if err != nil {
 			log.Printf("BLE: Invalid public key: %v", err)
+			writeError(rsp, "Invalid public key")
 			return
 		}
 
-		result, err := GetHelper().PairDevice(pairReq.DeviceID, pairReq.DeviceName, pairReq.Code, devicePublicKey)
+		result, err := GetHelper().PairDevice(pairReq.DeviceID, pairReq.DeviceName, devicePublicKey)
 		if err != nil {
 			log.Printf("BLE: Pairing failed: %v", err)
+			writeError(rsp, err.Error())
 			return
 		}
 
 		// Store result for subsequent read
+		lastPairingResultMu.Lock()
 		lastPairingResult = result
+		lastPairingResultMu.Unlock()
+
 		log.Printf("BLE: Device paired: %s (%s)", pairReq.DeviceName, pairReq.DeviceID)
+		writeSuccess(rsp)
 	}))
 	pairChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		lastPairingResultMu.Lock()
+		defer lastPairingResultMu.Unlock()
+
 		if lastPairingResult == nil {
 			rsp.Write([]byte(`{"error":"No pairing result available"}`))
 			return
 		}
-		data, _ := json.Marshal(map[string]any{"success": true, "data": lastPairingResult})
+		data, err := json.Marshal(map[string]any{"success": true, "data": lastPairingResult})
+		if err != nil {
+			log.Printf("BLE: Failed to marshal pairing result: %v", err)
+			writeError(rsp, "Internal error")
+			return
+		}
 		rsp.Write(data)
 	}))
 
@@ -112,6 +149,7 @@ func InitBLE() error {
 		decrypted, err := decryptAndVerify(req.Data())
 		if err != nil {
 			log.Printf("BLE: WiFi decrypt failed: %v", err)
+			writeError(rsp, err.Error())
 			return
 		}
 
@@ -121,15 +159,18 @@ func InitBLE() error {
 		}
 		if err := json.Unmarshal(decrypted, &wifiReq); err != nil {
 			log.Printf("BLE: WiFi parse failed: %v", err)
+			writeError(rsp, "Invalid payload")
 			return
 		}
 
 		if err := wifi.Get().Connect(wifiReq.SSID, wifiReq.Password); err != nil {
 			log.Printf("BLE: WiFi connect failed: %v", err)
+			writeError(rsp, "Failed to connect to WiFi")
 			return
 		}
 
 		log.Printf("BLE: WiFi configured: %s", wifiReq.SSID)
+		writeSuccess(rsp)
 	}))
 
 	// Set Relay characteristic
@@ -138,19 +179,22 @@ func InitBLE() error {
 		decrypted, err := decryptAndVerify(req.Data())
 		if err != nil {
 			log.Printf("BLE: Relay decrypt failed: %v", err)
+			writeError(rsp, err.Error())
 			return
 		}
 
 		var relayReq struct {
-			URL string `json:"url"`
+			RelayDomain string `json:"relayDomain"`
 		}
 		if err := json.Unmarshal(decrypted, &relayReq); err != nil {
 			log.Printf("BLE: Relay parse failed: %v", err)
+			writeError(rsp, "Invalid payload")
 			return
 		}
 
-		if err := config.Get().SetKey("relayDomain", relayReq.URL); err != nil {
+		if err := config.Get().SetKey("relayDomain", relayReq.RelayDomain); err != nil {
 			log.Printf("BLE: Failed to save relay config: %v", err)
+			writeError(rsp, "Failed to save relay configuration")
 			return
 		}
 
@@ -158,7 +202,8 @@ func InitBLE() error {
 		if err := relaycomm.Get().Start(); err != nil {
 			log.Printf("BLE: Failed to restart relay: %v", err)
 		}
-		log.Printf("BLE: Relay configured: %s", relayReq.URL)
+		log.Printf("BLE: Relay configured: %s", relayReq.RelayDomain)
+		writeSuccess(rsp)
 	}))
 
 	// Get Status characteristic (read to get device status)
@@ -170,7 +215,12 @@ func InitBLE() error {
 			"wifiConnected": wifi.Get().IsConnected(),
 			"relayDomain":   relayDomain,
 		}
-		data, _ := json.Marshal(status)
+		data, err := json.Marshal(status)
+		if err != nil {
+			log.Printf("BLE: Failed to marshal status: %v", err)
+			writeError(rsp, "Internal error")
+			return
+		}
 		rsp.Write(data)
 	}))
 
@@ -192,16 +242,14 @@ func InitBLE() error {
 		}
 	}()
 
-	// Give advertising a moment to start
-	time.Sleep(100 * time.Millisecond)
 	log.Printf("BLE: Initialization complete")
 	return nil
 }
 
 func decryptAndVerify(data []byte) ([]byte, error) {
 	var payload struct {
-		DeviceID string `json:"deviceId"`
-		Data     string `json:"data"`
+		DeviceID         string `json:"deviceId"`
+		EncryptedPayload string `json:"encryptedPayload"`
 	}
 
 	if err := json.Unmarshal(data, &payload); err != nil {
@@ -219,7 +267,12 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("camera private key not found")
 	}
 
-	sharedSecret, err := encryption.DeriveSharedSecret(cameraPrivateKey.([]byte), device.PublicKey)
+	privKey, ok := cameraPrivateKey.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("camera private key has invalid type")
+	}
+
+	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive shared secret: %w", err)
 	}
@@ -229,7 +282,7 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	decrypted, err := session.Decrypt(payload.Data)
+	decrypted, err := session.Decrypt(payload.EncryptedPayload)
 	if err != nil {
 		return nil, fmt.Errorf("decryption failed: %w", err)
 	}
