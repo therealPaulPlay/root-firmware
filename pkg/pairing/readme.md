@@ -24,7 +24,12 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 **Properties**: Read
 **Description**: Returns a UUID-based pairing code. Code expires after 5 minutes.
 
-**Response**: `"550e8400-e29b-41d4-a716-446655440000"` (UUID string)
+**Response**:
+```json
+{
+  "code": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
 
 ---
 

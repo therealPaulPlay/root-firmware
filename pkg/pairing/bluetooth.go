@@ -76,7 +76,8 @@ func initBLE() error {
 	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
 	getCodeChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		code := GetHelper().GetCode()
-		rsp.Write([]byte(code))
+		data, _ := json.Marshal(map[string]string{"code": code})
+		rsp.Write(data)
 	}))
 
 	// Scan QR characteristic (write to trigger QR scan and verification)
