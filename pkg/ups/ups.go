@@ -29,13 +29,13 @@ var once sync.Once
 func Init() {
 	once.Do(func() {
 		if _, err := host.Init(); err != nil {
-			log.Printf("Failed to initialize I2C host: %v", err)
+			log.Printf("UPS: Failed to initialize I2C host: %v", err)
 			return
 		}
 
 		bus, err := i2creg.Open("")
 		if err != nil {
-			log.Printf("Failed to open I2C bus: %v", err)
+			log.Printf("UPS: Failed to open I2C bus: %v", err)
 			return
 		}
 
@@ -43,15 +43,13 @@ func Init() {
 
 		testRead := make([]byte, 2)
 		if err := dev.Tx([]byte{regBusVoltage}, testRead); err != nil {
-			log.Println("No UPS detected - battery monitoring disabled")
+			log.Println("UPS: No UPS detected - battery monitoring disabled")
 			return
 		}
 
 		instance = &UPS{
 			dev: dev,
 		}
-
-		log.Println("UPS initialized")
 	})
 }
 

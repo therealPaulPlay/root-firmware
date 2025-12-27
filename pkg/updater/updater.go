@@ -19,8 +19,8 @@ import (
 
 const (
 	firmwareEndpoint   = "/firmware/observer"
-	updateCheckTimeout = 10 * time.Second  // Timeout for checking update availability
-	downloadTimeout    = 30 * time.Minute  // Timeout for downloading firmware
+	updateCheckTimeout = 10 * time.Second // Timeout for checking update availability
+	downloadTimeout    = 30 * time.Minute // Timeout for downloading firmware
 )
 
 type UpdateStatus string
@@ -71,7 +71,7 @@ func (u *Updater) GetStatus() (UpdateStatus, string, string) {
 func (u *Updater) CheckForUpdates() error {
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
-		log.Println("Skipping update check: relay domain not configured")
+		log.Println("Updater: Skipping update check: relay domain not configured")
 		return nil
 	}
 
@@ -131,7 +131,7 @@ func (u *Updater) StartUpdate() error {
 	}
 	downloadURL := u.downloadURL
 	expectedSHA256 := u.downloadSHA256
-	log.Printf("Starting firmware update to version %s", u.availableVersion)
+	log.Printf("Updater: Starting firmware update to version %s", u.availableVersion)
 	u.status = StatusDownloading
 	u.mu.Unlock()
 
@@ -155,12 +155,12 @@ func (u *Updater) StartUpdate() error {
 
 	// Clean up and schedule reboot
 	os.Remove(globals.UpdateImagePath)
-	log.Println("Update successful, rebooting in 2 seconds...")
+	log.Println("Updater: Update successful, rebooting in 2 seconds...")
 
 	go func() {
 		time.Sleep(2 * time.Second)
 		if err := exec.Command("sudo", "reboot").Run(); err != nil {
-			log.Printf("Failed to reboot: %v", err)
+			log.Printf("Updater: Failed to reboot: %v", err)
 		}
 	}()
 
@@ -209,7 +209,7 @@ func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 		return fmt.Errorf("failed to move firmware: %w", err)
 	}
 
-	log.Printf("Downloaded and verified %d bytes (SHA256: %s)", bytesWritten, actualSHA256)
+	log.Printf("Updater: Downloaded and verified %d bytes (SHA256: %s)", bytesWritten, actualSHA256)
 	return nil
 }
 
@@ -224,7 +224,7 @@ func (u *Updater) flashFirmware() error {
 		return fmt.Errorf("failed to determine inactive partition: %w", err)
 	}
 
-	log.Printf("Flashing firmware to %s (active: %s)", inactivePartition, activePartition)
+	log.Printf("Updater: Flashing firmware to %s (active: %s)", inactivePartition, activePartition)
 
 	// Flash firmware to inactive partition
 	cmd := exec.Command("sudo", "dd", "if="+globals.UpdateImagePath, "of="+inactivePartition, "bs=4M", "conv=fsync")
@@ -239,10 +239,10 @@ func (u *Updater) flashFirmware() error {
 
 	// Set boot counter for automatic rollback if new firmware fails
 	if err := setBootCounter(); err != nil {
-		log.Printf("Warning: failed to set boot counter: %v", err)
+		log.Printf("Updater: Failed to set boot counter: %v", err)
 	}
 
-	log.Println("Firmware flashed and boot partition switched successfully")
+	log.Println("Updater: Firmware flashed and boot partition switched successfully")
 	return nil
 }
 

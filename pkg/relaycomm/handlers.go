@@ -202,7 +202,7 @@ func RegisterHandlers() {
 	// Check if relay domain is configured
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok || relayDomain == "" {
-		log.Println("Relay handlers not registered - relay domain not configured")
+		log.Println("Relaycomm: Relay handlers not registered - relay domain not configured")
 		return
 	}
 

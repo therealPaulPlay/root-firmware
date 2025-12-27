@@ -117,7 +117,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 	thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", id.String()))
 	if err := s.generateThumbnail(finalPath, thumbnailPath); err != nil {
 		// Log error but don't fail - thumbnail is optional
-		log.Printf("Failed to generate thumbnail for %s: %v", id.String(), err)
+		log.Printf("Storage: Failed to generate thumbnail for %s: %v", id.String(), err)
 	}
 
 	// Add to event log
@@ -235,18 +235,18 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 
 		// Permanently delete video file (log errors but continue)
 		if err := os.Remove(videoPath); err != nil && !os.IsNotExist(err) {
-			log.Printf("Failed to delete recording %s: %v", oldest.ID, err)
+			log.Printf("Storage: Failed to delete recording %s: %v", oldest.ID, err)
 		}
 
 		// Permanently delete thumbnail (log errors but continue)
 		if err := os.Remove(thumbnailPath); err != nil && !os.IsNotExist(err) {
-			log.Printf("Failed to delete thumbnail %s: %v", oldest.ID, err)
+			log.Printf("Storage: Failed to delete thumbnail %s: %v", oldest.ID, err)
 		}
 
 		// Remove from eventLog and save
 		eventLog.Events = eventLog.Events[1:]
 		if err := s.writeEventLog(eventLog); err != nil {
-			log.Printf("Failed to update event log after deleting %s: %v", oldest.ID, err)
+			log.Printf("Storage: Failed to update event log after deleting %s: %v", oldest.ID, err)
 		}
 	}
 }

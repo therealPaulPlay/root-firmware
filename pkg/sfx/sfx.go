@@ -31,7 +31,7 @@ func Init() error {
 		// Get GPIO pin (using GPIO18 / Pin 12 by default)
 		pin := gpioreg.ByName("GPIO18")
 		if pin == nil {
-			log.Println("Warning: GPIO18 not found - SFX disabled")
+			log.Println("SFX: GPIO18 not found - SFX disabled")
 			instance = &SFX{pin: nil}
 			return
 		}

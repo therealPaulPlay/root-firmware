@@ -229,7 +229,7 @@ func (w *WiFi) detectCapabilities() {
 	output, err := exec.Command("iwlist", "wlan0", "freq").Output()
 	if err != nil {
 		w.supports5GHz = false
-		log.Println("WiFi initialized - 5GHz support: unknown (detection failed)")
+		log.Println("WiFi: 5GHz support is unknown (detection failed)")
 		return
 	}
 
@@ -239,13 +239,13 @@ func (w *WiFi) detectCapabilities() {
 		fmt.Sscanf(match[1], "%f", &freq)
 		if freq > 5.0 {
 			w.supports5GHz = true
-			log.Println("WiFi initialized - 5GHz support: yes")
+			log.Println("WiFi: 5GHz is supported")
 			return
 		}
 	}
 
 	w.supports5GHz = false
-	log.Println("WiFi initialized - 5GHz support: no")
+	log.Println("WiFi: 5GHz is not supported")
 }
 
 func (w *WiFi) parseNetworks(output string) []Network {

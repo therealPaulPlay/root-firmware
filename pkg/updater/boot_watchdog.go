@@ -18,7 +18,7 @@ func ConfirmSuccessfulBoot() error {
 			return fmt.Errorf("failed to remove boot counter: %w", err)
 		}
 	}
-	log.Println("Boot confirmed successfully")
+	log.Println("Updater: Boot confirmed successfully")
 	return nil
 }
 
@@ -105,7 +105,7 @@ WantedBy=sysinit.target
 		return fmt.Errorf("failed to enable boot watchdog: %w", err)
 	}
 
-	log.Println("Boot watchdog installed and enabled")
+	log.Println("Updater: Boot watchdog installed and enabled")
 	return nil
 }
 
@@ -153,7 +153,7 @@ func switchBootPartition(newRoot string) error {
 		return fmt.Errorf("failed to write boot config: %w", err)
 	}
 
-	log.Printf("Boot partition switched to %s", newRoot)
+	log.Printf("Updater: Boot partition switched to %s", newRoot)
 	return nil
 }
 
@@ -163,6 +163,6 @@ func setBootCounter() error {
 	if err := fsutil.AtomicWrite(globals.BootCountPath, []byte(counter), 0644); err != nil {
 		return fmt.Errorf("failed to write boot counter: %w", err)
 	}
-	log.Printf("Boot counter set to %d attempts", globals.MaxBootAttempts)
+	log.Printf("Updater: Boot counter set to %d attempts", globals.MaxBootAttempts)
 	return nil
 }
