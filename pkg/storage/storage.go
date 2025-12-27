@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
 
 	"github.com/gofrs/uuid"
@@ -51,13 +52,27 @@ func Init() error {
 	// Run fsck on data partition (non-blocking, best effort)
 	exec.Command("fsck", "-p", globals.DataDir).Run()
 
-	// Create event log if it doesn't exist
-	if _, err := os.Stat(globals.EventLogPath); os.IsNotExist(err) {
-		eventLog := EventLog{Events: []Event{}}
-		data, _ := json.Marshal(eventLog)
-		if err := os.WriteFile(globals.EventLogPath, data, 0644); err != nil {
-			return fmt.Errorf("failed to create event log: %w", err)
-		}
+	// Create or recover event log
+	if err := recoverEventLog(); err != nil {
+		return fmt.Errorf("failed to initialize event log: %w", err)
+	}
+
+	return nil
+}
+
+func recoverEventLog() error {
+	data, err := os.ReadFile(globals.EventLogPath)
+	if os.IsNotExist(err) {
+		data, _ := json.Marshal(EventLog{Events: []Event{}})
+		return fsutil.AtomicWrite(globals.EventLogPath, data, 0644)
+	}
+
+	var test EventLog
+	if json.Unmarshal(data, &test) != nil {
+		log.Printf("Storage: Corrupted event log, resetting")
+		os.Rename(globals.EventLogPath, globals.EventLogPath+".corrupted")
+		data, _ := json.Marshal(EventLog{Events: []Event{}})
+		return fsutil.AtomicWrite(globals.EventLogPath, data, 0644)
 	}
 
 	return nil
@@ -179,11 +194,7 @@ func (s *Storage) writeEventLog(log *EventLog) error {
 		return fmt.Errorf("failed to marshal event log: %w", err)
 	}
 
-	if err := os.WriteFile(globals.EventLogPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write event log: %w", err)
-	}
-
-	return nil
+	return fsutil.AtomicWrite(globals.EventLogPath, data, 0644)
 }
 
 // cleanupForRecording deletes old recordings until we have enough space

@@ -3,9 +3,11 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
+	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
 
 	"github.com/gofrs/uuid"
@@ -41,7 +43,7 @@ func Get() *Config {
 
 func (c *Config) load() error {
 	c.mu.Lock()
-	defer c.mu.Unlock() // Unlock after function has returned
+	defer c.mu.Unlock()
 
 	if _, err := os.Stat(globals.ConfigPath); os.IsNotExist(err) {
 		return c.createInitialConfig()
@@ -53,7 +55,11 @@ func (c *Config) load() error {
 	}
 
 	if err := json.Unmarshal(data, &c.data); err != nil {
-		return fmt.Errorf("failed to parse config: %w", err)
+		// Corrupted config - backup and recreate
+		log.Printf("Config: Corrupted config detected, recreating")
+		os.Rename(globals.ConfigPath, globals.ConfigPath+".corrupted")
+		c.data = make(map[string]any)
+		return c.createInitialConfig()
 	}
 
 	return nil
@@ -83,11 +89,7 @@ func (c *Config) save() error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(globals.ConfigPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
-	}
-
-	return nil
+	return fsutil.AtomicWrite(globals.ConfigPath, data, 0644)
 }
 
 // SetKey sets a config value and persists to disk
