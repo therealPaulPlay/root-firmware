@@ -20,7 +20,6 @@ import (
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/logger"
 	"root-firmware/pkg/record"
-	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/updater"
 	"root-firmware/pkg/ups"
@@ -223,7 +222,6 @@ func RegisterHandlers() {
 	// Streaming
 	relay.On("startStream", useEncryption("startStream", handleStartStream))
 	relay.On("stopStream", useEncryption("stopStream", handleStopStream))
-	relay.On("sendAudioChunk", useEncryption("sendAudioChunk", handleSendAudioChunk))
 
 	// Settings
 	relay.On("setMicrophone", useEncryption("setMicrophone", handleSetMicrophone))
@@ -404,31 +402,6 @@ func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
 		err = record.Get().StopStream()
 	}
 	SendEncrypted(ctx, "stopStreamResult", buildResult(err, nil))
-}
-
-func handleSendAudioChunk(ctx *HandlerContext, payload json.RawMessage) {
-	var req struct {
-		Chunk string `json:"chunk"` // Base64-encoded AAC audio data (ADTS format)
-		Done  bool   `json:"done"`  // Indicates end of audio stream
-	}
-
-	if err := json.Unmarshal(payload, &req); err != nil {
-		return
-	}
-
-	// Handle stream end
-	if req.Done {
-		speaker.Get().StopStream()
-		return
-	}
-
-	// Decode and play audio chunk
-	audioData, err := base64.StdEncoding.DecodeString(req.Chunk)
-	if err != nil {
-		return
-	}
-
-	speaker.Get().WriteChunk(audioData)
 }
 
 func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {

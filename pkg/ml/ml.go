@@ -9,14 +9,13 @@ import (
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/storage"
-	"root-firmware/pkg/ups"
 )
 
 const (
-	checkInterval    = 1 * time.Second // Check frequently for motion
+	checkInterval    = 1 * time.Second  // Check frequently for motion
 	recordDuration   = 10 * time.Second // Fixed recording chunks
-	cooldownDuration = 5 * time.Second // Wait after recording stops
-	motionTimeout    = 3 * time.Second // Stop recording if no motion
+	cooldownDuration = 5 * time.Second  // Wait after recording stops
+	motionTimeout    = 3 * time.Second  // Stop recording if no motion
 )
 
 var modelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
@@ -76,11 +75,6 @@ func (m *ML) loop() {
 }
 
 func (m *ML) check() {
-	// Skip if low power
-	if ups.Get() != nil && ups.Get().IsLowPower() {
-		return
-	}
-
 	// Check recording state and cooldown (need lock for timestamps)
 	m.mu.Lock()
 	isRecording := record.Get().IsStreamingOrRecording()

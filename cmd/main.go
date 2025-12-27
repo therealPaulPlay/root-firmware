@@ -18,7 +18,6 @@ import (
 	"root-firmware/pkg/pairing"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/relaycomm"
-	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/updater"
 	"root-firmware/pkg/ups"
@@ -51,7 +50,6 @@ func main() {
 	// Initialize packages where init() cannot return errors
 	devices.Init()
 	wifi.Init()
-	speaker.Init()
 	ups.Init()
 	record.Init()
 	relaycomm.Init()

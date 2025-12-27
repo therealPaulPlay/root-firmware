@@ -91,6 +91,8 @@ func (r *Recorder) StartRecording(outputPath string) error {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
+	// TODO: Play sound effect if play_active_camera_sound is true
+
 	r.recording = true
 	r.recordCmd = cmd
 	return nil

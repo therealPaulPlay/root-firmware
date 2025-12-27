@@ -3,17 +3,16 @@ package speaker
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"sync"
 )
 
 type Speaker struct {
-	streaming bool
+	streaming  bool
 	streamPipe io.WriteCloser
-	streamCmd *exec.Cmd
-	playCmd   *exec.Cmd
-	mu        sync.Mutex
+	streamCmd  *exec.Cmd
+	playCmd    *exec.Cmd
+	mu         sync.Mutex
 }
 
 var instance *Speaker
@@ -30,30 +29,6 @@ func Get() *Speaker {
 		panic("speaker not initialized - call Init() first")
 	}
 	return instance
-}
-
-// PlayFile plays an audio file (WAV format)
-func (s *Speaker) PlayFile(filePath string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return fmt.Errorf("audio file not found: %s", filePath)
-	}
-
-	cmd := exec.Command("aplay", "-D", "default", filePath)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to play audio: %w", err)
-	}
-
-	return nil
-}
-
-// IsStreaming returns whether audio streaming is currently active
-func (s *Speaker) IsStreaming() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.streaming
 }
 
 // WriteChunk writes an AAC audio chunk (ADTS format) to the speaker

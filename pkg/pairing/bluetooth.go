@@ -15,7 +15,6 @@ import (
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/relaycomm"
-	"root-firmware/pkg/speaker"
 	"root-firmware/pkg/wifi"
 )
 
@@ -64,26 +63,8 @@ func InitBLE() error {
 	svc := ble.NewService(serviceUUID)
 
 	// Get Code characteristic (read to get pairing code)
-	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
-	getCodeChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
-		code := GetHelper().GetCode()
-
-		// Play sound for each digit in the code
-		go func() {
-			if speaker.Get() != nil {
-				for _, digit := range code {
-					soundFile := fmt.Sprintf("%s/sounds/numbers/%c.mp3", globals.AssetsPath, digit)
-					if err := speaker.Get().PlayFile(soundFile); err != nil {
-						log.Printf("BLE: Failed to play sound: %v", err)
-						break
-					}
-					time.Sleep(200 * time.Millisecond)
-				}
-			}
-		}()
-
-		rsp.Write([]byte(code))
-	}))
+	// TODO: Handle this differently
+	// getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
 
 	// Pair Device characteristic (write to pair, read to get result)
 	pairChar := svc.NewCharacteristic(pairCharUUID)

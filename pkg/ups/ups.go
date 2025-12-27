@@ -90,7 +90,7 @@ func (u *UPS) OnACPower() bool {
 // GetBatteryPercent returns battery percentage (0-100)
 func (u *UPS) GetBatteryPercent() int {
 	if u == nil {
-		return 100
+		return -1
 	}
 
 	value := u.readRegister(regBusVoltage)
@@ -104,13 +104,4 @@ func (u *UPS) GetBatteryPercent() int {
 		return 0
 	}
 	return percent
-}
-
-// IsLowPower returns true if in low-power mode (≤10% and no external power)
-// When true: Stops event detection (and automatic recordings)
-func (u *UPS) IsLowPower() bool {
-	if u == nil {
-		return false
-	}
-	return u.GetBatteryPercent() <= lowPowerLevel && !u.OnACPower()
 }
