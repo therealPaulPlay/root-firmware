@@ -75,21 +75,42 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
     "cameraPublicKey": "base64-encoded-public-key",
     "wifiConnected": true,
     "currentWifiSSID": "MyNetwork",
-    "relayDomain": "relay.example.com",
-    "availableNetworks": [
-      {
-        "ssid": "Network1",
-        "signal": -45,
-        "encrypted": true
-      }
-    ]
+    "relayDomain": "relay.example.com"
   }
 }
 ```
 
 ---
 
-### 4. Set WiFi
+### 4. Get WiFi Networks
+**UUID**: `c2be2bc9-cee3-40ae-af50-f9959f25ee5b`
+**Properties**: Read
+**Description**: Scans for and returns available WiFi networks. Useful for initial setup or when changing WiFi configuration.
+
+**Response**:
+```json
+{
+  "success": true,
+  "networks": [
+    {
+      "ssid": "Network1",
+      "signal": 85,
+      "secured": true,
+      "unsupported": false
+    },
+    {
+      "ssid": "Network2",
+      "signal": 45,
+      "secured": false,
+      "unsupported": false
+    }
+  ]
+}
+```
+
+---
+
+### 5. Set WiFi
 **UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
 **Properties**: Write
 **Description**: Configures WiFi credentials. Requires encrypted payload from paired device.
@@ -119,7 +140,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 5. Set Relay
+### 6. Set Relay
 **UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
 **Properties**: Write
 **Description**: Configures relay server domain. Requires encrypted payload from paired device.
@@ -148,7 +169,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 6. Get Status
+### 7. Get Status
 **UUID**: `8d8218b6-97bc-4527-a8db-13094ac06b1d`
 **Properties**: Read
 **Description**: Returns current device status including firmware version and connectivity.
@@ -160,54 +181,4 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
   "wifiConnected": true,
   "relayDomain": "relay.example.com"
 }
-```
-
----
-
-## Web Bluetooth API Example
-
-```javascript
-// Connect to device
-const device = await navigator.bluetooth.requestDevice({
-  filters: [{ namePrefix: 'ROOT-Observer' }],
-  optionalServices: ['a07498ca-ad5b-474e-940d-16f1fbe7e8cd']
-});
-
-const server = await device.gatt.connect();
-const service = await server.getPrimaryService('a07498ca-ad5b-474e-940d-16f1fbe7e8cd');
-
-// Step 1: Get pairing code
-const codeChar = await service.getCharacteristic('51ff12bb-3ed8-46e5-b4f9-d64e2fec021b');
-const codeValue = await codeChar.readValue();
-const code = new TextDecoder().decode(codeValue);
-console.log('Pairing code:', code);
-
-// Step 2: Display QR code to user (using a QR code library)
-// const qrCode = generateQRCode(code); // Display this to user
-
-// Step 3: Trigger camera to scan the QR code
-const scanChar = await service.getCharacteristic('2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e');
-await scanChar.writeValue(new Uint8Array([1])); // Trigger scan
-
-// Step 4: Pair device (no code needed - camera already verified QR)
-const pairChar = await service.getCharacteristic('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
-const pairRequest = {
-  deviceId: 'my-device-id',
-  deviceName: 'My Phone',
-  devicePublicKey: 'base64-public-key'
-};
-await pairChar.writeValue(new TextEncoder().encode(JSON.stringify(pairRequest)));
-
-// Read pairing result
-const resultValue = await pairChar.readValue();
-const result = JSON.parse(new TextDecoder().decode(resultValue));
-console.log('Pairing result:', result.data);
-
-// Step 5: Set WiFi (with encryption using shared secret)
-const wifiChar = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
-const wifiRequest = {
-  deviceId: 'my-device-id',
-  encryptedPayload: encryptedBase64String // Encrypted with shared secret from ECDH
-};
-await wifiChar.writeValue(new TextEncoder().encode(JSON.stringify(wifiRequest)));
 ```

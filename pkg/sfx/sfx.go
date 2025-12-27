@@ -99,3 +99,16 @@ func (s *SFX) PlayRecording() {
 		s.playTone(800, 100*time.Millisecond)
 	}()
 }
+
+// PlayPairingSuccess plays a sound to indicate successful device pairing
+func (s *SFX) PlayPairingSuccess() {
+	if s.pin == nil {
+		return
+	}
+
+	go func() {
+		s.playTone(800, 100*time.Millisecond)
+		time.Sleep(40 * time.Millisecond)
+		s.playTone(1000, 100*time.Millisecond)
+	}()
+}

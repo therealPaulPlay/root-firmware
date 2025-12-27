@@ -14,6 +14,7 @@ import (
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/qr"
 	"root-firmware/pkg/record"
+	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/wifi"
 )
 
@@ -128,6 +129,37 @@ func (b *Pairing) ScanQRCode() error {
 	return nil
 }
 
+// ScanWiFiNetworks scans for available WiFi networks with a timeout
+func (b *Pairing) ScanWiFiNetworks() ([]wifi.Network, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	type scanResult struct {
+		networks []wifi.Network
+		err      error
+	}
+	resultChan := make(chan scanResult, 1)
+	go func() {
+		networks, err := wifi.Get().Scan()
+		select {
+		case resultChan <- scanResult{networks, err}:
+		case <-ctx.Done():
+		}
+	}()
+
+	var result scanResult
+	select {
+	case result = <-resultChan:
+		if result.err != nil {
+			return nil, fmt.Errorf("failed to scan WiFi networks: %w", result.err)
+		}
+	case <-ctx.Done():
+		return nil, fmt.Errorf("WiFi scan timed out after 15 seconds")
+	}
+
+	return result.networks, nil
+}
+
 // PairDevice pairs a device after QR code verification
 func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte) (map[string]any, error) {
 	b.mu.Lock()
@@ -159,51 +191,14 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 	// Invalidate code after successful pairing
 	b.code = nil
 
+	// Play success sound
+	sfx.Get().PlayPairingSuccess()
+
 	// Get product ID
 	productID, _ := config.Get().GetKey("id")
 
 	// Get relay domain
 	relayDomain, _ := config.Get().GetKey("relayDomain")
-
-	// Scan for WiFi networks with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	type scanResult struct {
-		networks []wifi.Network
-		err      error
-	}
-	resultChan := make(chan scanResult, 1)
-	go func() {
-		networks, err := wifi.Get().Scan()
-		select {
-		case resultChan <- scanResult{networks, err}:
-		case <-ctx.Done():
-			// Context cancelled, don't send result
-		}
-	}()
-
-	// Wait for scan result or timeout
-	var result scanResult
-	select {
-	case result = <-resultChan:
-		if result.err != nil {
-			return nil, fmt.Errorf("failed to scan WiFi networks: %w", result.err)
-		}
-	case <-ctx.Done():
-		return nil, fmt.Errorf("WiFi scan timed out after 15 seconds")
-	}
-
-	// Convert to map format
-	networks := make([]map[string]any, len(result.networks))
-	for i, net := range result.networks {
-		networks[i] = map[string]any{
-			"ssid":        net.SSID,
-			"signal":      net.Signal,
-			"secured":     net.Secured,
-			"unsupported": net.Unsupported,
-		}
-	}
 
 	// Encode camera public key to base64 for JSON transmission
 	pubKey, ok := cameraPublicKey.([]byte)
@@ -213,12 +208,11 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 	cameraPublicKeyEncoded := encryption.EncodePublicKey(pubKey)
 
 	return map[string]any{
-		"productId":         productID,
-		"cameraPublicKey":   cameraPublicKeyEncoded,
-		"wifiConnected":     wifi.Get().IsConnected(),
-		"currentWifiSSID":   wifi.Get().GetCurrentNetwork(),
-		"relayDomain":       relayDomain,
-		"availableNetworks": networks,
+		"productId":       productID,
+		"cameraPublicKey": cameraPublicKeyEncoded,
+		"wifiConnected":   wifi.Get().IsConnected(),
+		"currentWifiSSID": wifi.Get().GetCurrentNetwork(),
+		"relayDomain":     relayDomain,
 	}, nil
 }
 

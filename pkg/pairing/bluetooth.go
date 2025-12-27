@@ -20,13 +20,14 @@ import (
 
 // UUIDs generated via uuidgen - these are permanent for the ROOT firmware
 var (
-	serviceUUID     = ble.MustParse("a07498ca-ad5b-474e-940d-16f1fbe7e8cd")
-	getCodeCharUUID = ble.MustParse("51ff12bb-3ed8-46e5-b4f9-d64e2fec021b")
-	scanQRCharUUID  = ble.MustParse("2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e")
-	pairCharUUID    = ble.MustParse("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
-	wifiCharUUID    = ble.MustParse("beb5483e-36e1-4688-b7f5-ea07361b26a8")
-	relayCharUUID   = ble.MustParse("cba1d466-344c-4be3-ab3f-189f80dd7518")
-	statusCharUUID  = ble.MustParse("8d8218b6-97bc-4527-a8db-13094ac06b1d")
+	serviceUUID         = ble.MustParse("a07498ca-ad5b-474e-940d-16f1fbe7e8cd")
+	getCodeCharUUID     = ble.MustParse("51ff12bb-3ed8-46e5-b4f9-d64e2fec021b")
+	scanQRCharUUID      = ble.MustParse("2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e")
+	pairCharUUID        = ble.MustParse("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
+	wifiNetworksCharUUID = ble.MustParse("c2be2bc9-cee3-40ae-af50-f9959f25ee5b")
+	wifiCharUUID        = ble.MustParse("beb5483e-36e1-4688-b7f5-ea07361b26a8")
+	relayCharUUID       = ble.MustParse("cba1d466-344c-4be3-ab3f-189f80dd7518")
+	statusCharUUID      = ble.MustParse("8d8218b6-97bc-4527-a8db-13094ac06b1d")
 )
 
 var bleDevice ble.Device
@@ -137,6 +138,28 @@ func initBLE() error {
 		data, err := json.Marshal(map[string]any{"success": true, "data": lastPairingResult})
 		if err != nil {
 			log.Printf("BLE: Failed to marshal pairing result: %v", err)
+			writeError(rsp, "Internal error")
+			return
+		}
+		rsp.Write(data)
+	}))
+
+	// Get WiFi Networks characteristic (read to scan and get available networks)
+	wifiNetworksChar := svc.NewCharacteristic(wifiNetworksCharUUID)
+	wifiNetworksChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		networks, err := GetHelper().ScanWiFiNetworks()
+		if err != nil {
+			log.Printf("BLE: WiFi scan failed: %v", err)
+			writeError(rsp, err.Error())
+			return
+		}
+
+		data, err := json.Marshal(map[string]any{
+			"success":  true,
+			"networks": networks,
+		})
+		if err != nil {
+			log.Printf("BLE: Failed to marshal WiFi networks: %v", err)
 			writeError(rsp, "Internal error")
 			return
 		}
