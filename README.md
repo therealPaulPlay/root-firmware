@@ -14,7 +14,7 @@ The version is injected at build time via the `-ldflags` flag. If you build with
 
 ## Deploying to Pi Zero 2
 
-Prerequisites: Create user `observer`, set hostname to `ROOT-Observer`, install ONNX Runtime on the Pi.
+Prerequisites: Create user `observer`, set hostname to `ROOT-Observer`, install Go and ONNX Runtime on the Pi.
 
 Deploy:
 
@@ -22,7 +22,7 @@ Deploy:
 ./deploy.sh [user@hostname]
 ```
 
-This cross-compiles on your Mac, syncs the binary to `/home/observer/root-firmware`, and auto-starts via systemd.
+This syncs source to `/home/observer/firmware-repository`, builds on the Pi, copies binary to `/home/observer/root-firmware`, and auto-starts via systemd.
 
 Check if running:
 
@@ -30,31 +30,53 @@ Check if running:
 ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 ```
 
-## Compiling the ONNX runtime for the Pi
+## Installing ONNX Runtime on the Pi
 
-Since the camera hardware is slow compared to modern computers, compiling inside a docker container on a fast machine is recommended over compiling on the single-board computer itself. Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system.
+Since the camera hardware is slow compared to modern computers, compiling inside a docker container on a fast machine is recommended over compiling on the single-board computer itself.
+
+### 1. Compile ONNX Runtime
+
+Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system.
 
 ```bash
 docker run -it --rm --platform linux/arm64 \
-  -v $(pwd)/onnx-output:/output \
-  ubuntu:22.04 bash -c '
+  -v "$(pwd)/onnx-output:/output" \
+  ubuntu:24.04 bash -c '
 apt update && \
-apt install -y cmake build-essential pkg-config git python3 python3-pip && \
-pip3 install setuptools && \
-git clone --depth 1 -b v1.9.1 https://github.com/microsoft/onnxruntime && \
+apt install -y cmake build-essential pkg-config git python3 python3-pip python3-setuptools python3-wheel && \
+git clone --depth 1 -b v1.23.2 https://github.com/microsoft/onnxruntime && \
 cd onnxruntime && \
 git submodule update --init --recursive && \
 ./build.sh --config Release \
   --build_shared_lib \
-  --parallel 4 \
+  --parallel 2 \
   --skip_tests \
   --skip_submodule_sync \
-  --disable_rtti \
+  --allow_running_as_root \
   --cmake_extra_defines CMAKE_CXX_FLAGS="-w" && \
 cp build/Linux/Release/libonnxruntime.so* /output/ && \
 echo "Build complete! Files in ./onnx-output/"
 '
 ```
+
+This creates two files: `libonnxruntime.so.X.X.X` (the actual library) and `libonnxruntime.so` (a symlink to the versioned file).
+
+### 2. Install on Pi
+
+Copy both library files to the Pi and set up the linker:
+
+```bash
+# Copy both library files to Pi
+scp onnx-output/libonnxruntime.so* observer@ROOT-Observer.local:/tmp/
+
+# Install and configure on Pi
+ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib/ && \
+  sudo ln -sf /usr/local/lib/libonnxruntime.so /usr/local/lib/onnxruntime.so && \
+  echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/local.conf && \
+  sudo ldconfig'
+```
+
+This installs both files to `/usr/local/lib`, creates the required `onnxruntime.so` symlink (needed by the Go bindings), and updates the dynamic linker cache.
 
 ## Package overview
 
@@ -84,7 +106,7 @@ Uses ONNX for basic event detection. Heavily inspired by [Secluso](https://githu
 
 ### Pairing
 
-The firmware creates a WiFi access point and exposes a couple of endpoints needed for essential configurations. 
+The firmware uses Bluetooth Low Energy for providing endpoints needed during the pairing process.
 
 ### Record
 

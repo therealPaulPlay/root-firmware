@@ -43,18 +43,26 @@ func main() {
 		log.Fatalf("Failed to extract assets: %v", err)
 	}
 
-	// Initialize all packages
-	storage.Init()
+	// Initialize storage
+	if err := storage.Init(); err != nil {
+		log.Fatalf("Failed to initialize storage: %v", err)
+	}
+
+	// Initialize packages where init() cannot return errors
 	devices.Init()
 	wifi.Init()
 	speaker.Init()
 	ups.Init()
-	ml.Init()
 	record.Init()
 	relaycomm.Init()
 	updater.Init()
 
-	// Initialize pairing (AP + HTTP server + helper)
+	// Initialize ML
+	if err := ml.Init(); err != nil {
+		log.Fatalf("Failed to initialize ML: %v", err)
+	}
+
+	// Initialize pairing (BLE + helper)
 	if err := pairing.Init(); err != nil {
 		log.Fatalf("Failed to initialize pairing: %v", err)
 	}
