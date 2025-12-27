@@ -33,6 +33,8 @@ var (
 var bleDevice ble.Device
 var lastPairingResult map[string]any
 var lastPairingResultMu sync.Mutex
+var wifiNetworksCache []wifi.Network
+var wifiNetworksCacheMu sync.Mutex
 
 // writeError writes a JSON error response to the BLE response writer
 func writeError(rsp ble.ResponseWriter, message string) {
@@ -144,25 +146,34 @@ func initBLE() error {
 		rsp.Write(data)
 	}))
 
-	// Get WiFi Networks characteristic (read to scan and get available networks)
+	// Get WiFi Networks characteristic - returns one network per read
+	// Empty cache triggers scan, subsequent reads return next network
+	// Reading after hasMore:false triggers new scan
 	wifiNetworksChar := svc.NewCharacteristic(wifiNetworksCharUUID)
 	wifiNetworksChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
-		networks, err := GetHelper().ScanWiFiNetworks()
-		if err != nil {
-			log.Printf("BLE: WiFi scan failed: %v", err)
-			writeError(rsp, err.Error())
-			return
+		wifiNetworksCacheMu.Lock()
+		defer wifiNetworksCacheMu.Unlock()
+
+		// Scan when cache is empty
+		if len(wifiNetworksCache) == 0 {
+			networks, err := GetHelper().ScanWiFiNetworks()
+			if err != nil {
+				writeError(rsp, err.Error())
+				return
+			}
+			wifiNetworksCache = networks
+			log.Printf("BLE: Scanned %d WiFi networks", len(networks))
 		}
 
-		data, err := json.Marshal(map[string]any{
-			"success":  true,
-			"networks": networks,
+		// Return next network
+		network := wifiNetworksCache[0]
+		wifiNetworksCache = wifiNetworksCache[1:]
+		hasMore := len(wifiNetworksCache) > 0
+
+		data, _ := json.Marshal(map[string]any{
+			"network": network,
+			"hasMore": hasMore,
 		})
-		if err != nil {
-			log.Printf("BLE: Failed to marshal WiFi networks: %v", err)
-			writeError(rsp, "Internal error")
-			return
-		}
 		rsp.Write(data)
 	}))
 

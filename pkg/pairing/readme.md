@@ -82,31 +82,25 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 4. Get WiFi Networks
+### 4. Get WiFi Networks (Paginated)
 **UUID**: `c2be2bc9-cee3-40ae-af50-f9959f25ee5b`
 **Properties**: Read
-**Description**: Scans for and returns available WiFi networks. Useful for initial setup or when changing WiFi configuration.
+**Description**: Returns WiFi networks one at a time. First read scans, subsequent reads return next network. Read after `hasMore: false` triggers fresh scan.
 
 **Response**:
 ```json
 {
-  "success": true,
-  "networks": [
-    {
-      "ssid": "Network1",
-      "signal": 85,
-      "secured": true,
-      "unsupported": false
-    },
-    {
-      "ssid": "Network2",
-      "signal": 45,
-      "secured": false,
-      "unsupported": false
-    }
-  ]
+  "network": {
+    "ssid": "Network1",
+    "signal": 85,
+    "secured": true,
+    "unsupported": false
+  },
+  "hasMore": true
 }
 ```
+
+**Usage**: Keep reading until `hasMore: false`. To refresh, read again.
 
 ---
 

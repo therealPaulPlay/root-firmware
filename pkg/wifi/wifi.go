@@ -250,6 +250,7 @@ func (w *WiFi) detectCapabilities() {
 
 func (w *WiFi) parseNetworks(output string) []Network {
 	var networks []Network
+	seen := make(map[string]int) // SSID -> index in networks slice
 
 	ssidRe := regexp.MustCompile(`ESSID:"([^"]+)"`)
 	qualityRe := regexp.MustCompile(`Quality=(\d+)/(\d+)`)
@@ -287,7 +288,15 @@ func (w *WiFi) parseNetworks(output string) []Network {
 			network.Unsupported = freq > 3.0 && !w.supports5GHz
 		}
 
-		networks = append(networks, network)
+		// Deduplicate networks with identical SSID (e.g. multiple channels): keep entry with strongest signal
+		if idx, exists := seen[network.SSID]; exists {
+			if network.Signal > networks[idx].Signal {
+				networks[idx] = network
+			}
+		} else {
+			seen[network.SSID] = len(networks)
+			networks = append(networks, network)
+		}
 	}
 
 	return networks
