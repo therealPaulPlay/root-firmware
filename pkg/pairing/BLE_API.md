@@ -3,6 +3,36 @@
 ## Service UUID
 `a07498ca-ad5b-474e-940d-16f1fbe7e8cd`
 
+## Device Discovery
+
+All ROOT cameras advertise with BLE names starting with `ROOT-` (e.g., `ROOT-Observer`, `ROOT-Kitchen`).
+
+Clients should filter for devices with name prefix `ROOT-` instead of the service UUID to allow users to distinguish between multiple cameras.
+
+## Response Format
+
+**All successful responses include `"success": true`** automatically:
+
+```json
+{
+  "success": true,
+  "field": "value"
+}
+```
+
+Error responses use `"success": false`:
+
+```json
+{
+  "success": false,
+  "error": "Error message"
+}
+```
+
+## Message Size Limit
+
+Maximum BLE message size: **512 bytes**. Messages exceeding this limit will fail with `"message too large"` error.
+
 ## Pairing Flow
 
 The pairing process uses QR code verification to prove physical presence:
@@ -27,6 +57,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 **Response**:
 ```json
 {
+  "success": true,
   "code": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
@@ -95,6 +126,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 **Response**:
 ```json
 {
+  "success": true,
   "network": {
     "ssid": "Network1",
     "signal": 85,
@@ -179,6 +211,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 **Response**:
 ```json
 {
+  "success": true,
   "version": "1.0.0",
   "wifiConnected": true,
   "relayDomain": "relay.example.com"

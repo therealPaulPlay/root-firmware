@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"sync"
 
 	"github.com/go-ble/ble"
@@ -49,8 +50,11 @@ func writeSuccess(rsp ble.ResponseWriter) {
 }
 
 // writeJSON marshals and writes JSON to BLE with size validation
-func writeJSON(rsp ble.ResponseWriter, data any) error {
-	jsonData, err := json.Marshal(data)
+func writeJSON(rsp ble.ResponseWriter, data map[string]any) error {
+	response := map[string]any{"success": true}
+	maps.Copy(response, data)
+
+	jsonData, err := json.Marshal(response)
 	if err != nil {
 		return err
 	}
@@ -92,7 +96,7 @@ func initBLE() error {
 	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
 	getCodeChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		code := GetHelper().GetCode()
-		if err := writeJSON(rsp, map[string]string{"code": code}); err != nil {
+		if err := writeJSON(rsp, map[string]any{"code": code}); err != nil {
 			writeError(rsp, err.Error())
 		}
 	}))
@@ -152,10 +156,10 @@ func initBLE() error {
 		defer lastPairingResultMu.Unlock()
 
 		if lastPairingResult == nil {
-			rsp.Write([]byte(`{"error":"No pairing result available"}`))
+			writeError(rsp, "No pairing result available")
 			return
 		}
-		if err := writeJSON(rsp, map[string]any{"success": true, "data": lastPairingResult}); err != nil {
+		if err := writeJSON(rsp, map[string]any{"data": lastPairingResult}); err != nil {
 			log.Printf("BLE: Failed to send pairing result: %v", err)
 			writeError(rsp, err.Error())
 		}
