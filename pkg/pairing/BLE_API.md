@@ -199,19 +199,3 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 }
 ```
 
----
-
-### 7. Get Status
-**UUID**: `8d8218b6-97bc-4527-a8db-13094ac06b1d`
-**Properties**: Read
-**Description**: Returns current device status including firmware version and connectivity.
-
-**Response**:
-```json
-{
-  "success": true,
-  "version": "1.0.0",
-  "wifiConnected": true,
-  "relayDomain": "relay.example.com"
-}
-```

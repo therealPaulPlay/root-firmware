@@ -54,6 +54,7 @@ func (r *RelayComm) On(messageType string, handler func(Message)) {
 
 // Start connects to relay server and maintains connection
 func (r *RelayComm) Start() error {
+	// TODO: Stop and restart instead of "already running" error
 	if r.running {
 		return fmt.Errorf("already running")
 	}

@@ -14,7 +14,6 @@ import (
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
-	"root-firmware/pkg/globals"
 	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/wifi"
 )
@@ -28,7 +27,6 @@ var (
 	wifiNetworksCharUUID = ble.MustParse("c2be2bc9-cee3-40ae-af50-f9959f25ee5b")
 	wifiCharUUID         = ble.MustParse("beb5483e-36e1-4688-b7f5-ea07361b26a8")
 	relayCharUUID        = ble.MustParse("cba1d466-344c-4be3-ab3f-189f80dd7518")
-	statusCharUUID       = ble.MustParse("8d8218b6-97bc-4527-a8db-13094ac06b1d")
 )
 
 var bleDevice ble.Device
@@ -260,21 +258,6 @@ func initBLE() error {
 		}
 		log.Printf("BLE: Relay configured: %s", relayReq.RelayDomain)
 		writeSuccess(rsp)
-	}))
-
-	// Get Status characteristic (read to get device status)
-	statusChar := svc.NewCharacteristic(statusCharUUID)
-	statusChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
-		relayDomain, _ := config.Get().GetKey("relayDomain")
-		status := map[string]any{
-			"version":       globals.FirmwareVersion,
-			"wifiConnected": wifi.Get().IsConnected(),
-			"relayDomain":   relayDomain,
-		}
-		if err := writeJSON(rsp, status); err != nil {
-			log.Printf("BLE: Failed to send status: %v", err)
-			writeError(rsp, err.Error())
-		}
 	}))
 
 	// Add service to device
