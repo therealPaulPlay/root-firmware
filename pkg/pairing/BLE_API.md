@@ -5,9 +5,7 @@
 
 ## Device Discovery
 
-All ROOT cameras advertise with BLE names starting with `ROOT-` (e.g., `ROOT-Observer`, `ROOT-Kitchen`).
-
-Clients should filter for devices with name prefix `ROOT-` instead of the service UUID to allow users to distinguish between multiple cameras.
+All ROOT cameras advertise with BLE names starting with `ROOT-` (e.g., `ROOT-Observer`).
 
 ## Response Format
 
