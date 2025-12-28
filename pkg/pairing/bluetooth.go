@@ -36,6 +36,8 @@ var lastPairingResultMu sync.Mutex
 var wifiNetworksCache []wifi.Network
 var wifiNetworksCacheMu sync.Mutex
 
+const maxBLEMessageSize = 512 // Most devices support 512 bytes
+
 // writeError writes a JSON error response to the BLE response writer
 func writeError(rsp ble.ResponseWriter, message string) {
 	fmt.Fprintf(rsp, `{"success":false,"error":"%s"}`, message)
@@ -44,6 +46,20 @@ func writeError(rsp ble.ResponseWriter, message string) {
 // writeSuccess writes a JSON success response to the BLE response writer
 func writeSuccess(rsp ble.ResponseWriter) {
 	rsp.Write([]byte(`{"success":true}`))
+}
+
+// writeJSON marshals and writes JSON to BLE with size validation
+func writeJSON(rsp ble.ResponseWriter, data any) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	if len(jsonData) > maxBLEMessageSize {
+		log.Printf("BLE: Message size %d exceeds MTU limit %d", len(jsonData), maxBLEMessageSize)
+		return fmt.Errorf("message too large")
+	}
+	rsp.Write(jsonData)
+	return nil
 }
 
 // Init initializes the pairing system (BLE + helper)
@@ -76,8 +92,9 @@ func initBLE() error {
 	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
 	getCodeChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		code := GetHelper().GetCode()
-		data, _ := json.Marshal(map[string]string{"code": code})
-		rsp.Write(data)
+		if err := writeJSON(rsp, map[string]string{"code": code}); err != nil {
+			writeError(rsp, err.Error())
+		}
 	}))
 
 	// Scan QR characteristic (write to trigger QR scan and verification)
@@ -138,13 +155,10 @@ func initBLE() error {
 			rsp.Write([]byte(`{"error":"No pairing result available"}`))
 			return
 		}
-		data, err := json.Marshal(map[string]any{"success": true, "data": lastPairingResult})
-		if err != nil {
-			log.Printf("BLE: Failed to marshal pairing result: %v", err)
-			writeError(rsp, "Internal error")
-			return
+		if err := writeJSON(rsp, map[string]any{"success": true, "data": lastPairingResult}); err != nil {
+			log.Printf("BLE: Failed to send pairing result: %v", err)
+			writeError(rsp, err.Error())
 		}
-		rsp.Write(data)
 	}))
 
 	// Get WiFi Networks characteristic - returns one network per read
@@ -171,11 +185,13 @@ func initBLE() error {
 		wifiNetworksCache = wifiNetworksCache[1:]
 		hasMore := len(wifiNetworksCache) > 0
 
-		data, _ := json.Marshal(map[string]any{
+		if err := writeJSON(rsp, map[string]any{
 			"network": network,
 			"hasMore": hasMore,
-		})
-		rsp.Write(data)
+		}); err != nil {
+			log.Printf("BLE: Failed to send WiFi network: %v", err)
+			writeError(rsp, err.Error())
+		}
 	}))
 
 	// Set WiFi characteristic
@@ -251,13 +267,10 @@ func initBLE() error {
 			"wifiConnected": wifi.Get().IsConnected(),
 			"relayDomain":   relayDomain,
 		}
-		data, err := json.Marshal(status)
-		if err != nil {
-			log.Printf("BLE: Failed to marshal status: %v", err)
-			writeError(rsp, "Internal error")
-			return
+		if err := writeJSON(rsp, status); err != nil {
+			log.Printf("BLE: Failed to send status: %v", err)
+			writeError(rsp, err.Error())
 		}
-		rsp.Write(data)
 	}))
 
 	// Add service to device

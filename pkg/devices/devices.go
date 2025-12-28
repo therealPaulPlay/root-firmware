@@ -2,6 +2,7 @@ package devices
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -9,10 +10,11 @@ import (
 )
 
 type Device struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	PublicKey   []byte    `json:"publicKey"` // Device's public key
-	ConnectedAt time.Time `json:"connectedAt"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	PublicKey      []byte    `json:"publicKey"` // Device's public key
+	KeyExpiresAt   time.Time `json:"keyExpiresAt"`
+	ConnectedAt    time.Time `json:"connectedAt"`
 }
 
 type Devices struct {
@@ -75,15 +77,40 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 		}
 	}
 
-	// Add new device
+	// Add new device with 5-minute key expiry
 	filtered = append(filtered, Device{
-		ID:          id,
-		Name:        name,
-		PublicKey:   publicKey,
-		ConnectedAt: time.Now(),
+		ID:           id,
+		Name:         name,
+		PublicKey:    publicKey,
+		KeyExpiresAt: time.Now().Add(5 * time.Minute),
+		ConnectedAt:  time.Now(),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
+}
+
+// RenewKey updates the device's public key and resets expiry
+func (d *Devices) RenewKey(id string, publicKey []byte) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	devices := d.getDevices()
+	found := false
+
+	for i, dev := range devices {
+		if dev.ID == id {
+			devices[i].PublicKey = publicKey
+			devices[i].KeyExpiresAt = time.Now().Add(5 * time.Minute)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("device not found: %s", id)
+	}
+
+	return config.Get().SetKey("connectedDevices", devices)
 }
 
 // Remove immediately removes a device

@@ -34,4 +34,5 @@ go.work.sum
 # Custom
 spec.md
 reference/
+client/
 .DS_Store
