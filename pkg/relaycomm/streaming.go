@@ -37,13 +37,23 @@ func removeViewer(deviceID string) bool {
 	return len(viewers) == 0
 }
 
-// broadcastChunk sends chunk to all viewers
-func broadcastChunk(messageType string, payload map[string]any) {
+// broadcastSuccess sends successful chunk data to all viewers
+func broadcastSuccess(messageType string, fields map[string]any) {
 	viewersMu.Lock()
 	defer viewersMu.Unlock()
 
 	for _, ctx := range viewers {
-		SendEncrypted(ctx, messageType, payload)
+		SendEncryptedSuccess(ctx, messageType, fields)
+	}
+}
+
+// broadcastError sends error to all viewers
+func broadcastError(messageType, errorCode, errorMsg string) {
+	viewersMu.Lock()
+	defer viewersMu.Unlock()
+
+	for _, ctx := range viewers {
+		SendEncryptedError(ctx, messageType, errorCode, errorMsg)
 	}
 }
 
@@ -58,8 +68,7 @@ func StreamReader(reader io.Reader, messageType string) error {
 		n, err := reader.Read(buffer)
 		if n > 0 {
 			encoded := base64.StdEncoding.EncodeToString(buffer[:n])
-			broadcastChunk(messageType, map[string]any{
-				"success":    true,
+			broadcastSuccess(messageType, map[string]any{
 				"chunk":      encoded,
 				"chunkIndex": chunkIndex,
 				"done":       false,
@@ -68,9 +77,8 @@ func StreamReader(reader io.Reader, messageType string) error {
 		}
 
 		if err == io.EOF {
-			broadcastChunk(messageType, map[string]any{
-				"success": true,
-				"done":    true,
+			broadcastSuccess(messageType, map[string]any{
+				"done": true,
 			})
 			return nil
 		}

@@ -128,10 +128,6 @@ Save recordings and update the event log.
 
 Check for and download firmware updates.
 
-### UPS
-
-Obtain data from the uninterruptible power supply (battery percentage etc.). Built for the [Waveshare](https://www.waveshare.com/ups-hat-c.htm) Raspberry Pi Zero 2 UPS. 
-
 ### WiFi
 
 Scan for WiFi networks and establish a wifi connection.

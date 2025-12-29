@@ -21,7 +21,6 @@ import (
 	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/updater"
-	"root-firmware/pkg/ups"
 	"root-firmware/pkg/wifi"
 )
 
@@ -51,7 +50,6 @@ func main() {
 	// Initialize packages where init() cannot return errors
 	devices.Init()
 	wifi.Init()
-	ups.Init()
 	record.Init()
 	relaycomm.Init()
 	updater.Init()
