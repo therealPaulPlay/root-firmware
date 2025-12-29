@@ -126,20 +126,12 @@ func (s *Session) Decrypt(ciphertextB64 string) ([]byte, error) {
 	return s.gcm.Open(nil, nonce, ciphertext, nil)
 }
 
-// EncodePublicKey converts public key to base64
-func EncodePublicKey(publicKey []byte) string {
+// EncodeKey converts public key to base64
+func EncodeKey(publicKey []byte) string {
 	return base64.StdEncoding.EncodeToString(publicKey)
 }
 
-// DecodePublicKey converts base64 public key to bytes
-func DecodePublicKey(encoded string) ([]byte, error) {
-	key, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, err
-	}
-	// P-256 public keys are 65 bytes (uncompressed) or 33 bytes (compressed)
-	if len(key) != 65 && len(key) != 33 {
-		return nil, fmt.Errorf("invalid P-256 public key length: got %d bytes, expected 65 (uncompressed) or 33 (compressed)", len(key))
-	}
-	return key, nil
+// DecodeKey converts base64 key to bytes
+func DecodeKey(encoded string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(encoded)
 }

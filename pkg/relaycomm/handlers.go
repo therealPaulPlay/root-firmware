@@ -119,7 +119,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		}
 
 		// Decode from base64
-		privKey, err := encryption.DecodePublicKey(privKeyStr)
+		privKey, err := encryption.DecodeKey(privKeyStr)
 		if err != nil {
 			log.Printf("RelayComm: Failed to decode camera private key: %v", err)
 			sendError(msg.DeviceID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
@@ -313,7 +313,7 @@ func handleRenewKey(msg Message) {
 	}
 
 	// Decode from base64
-	privKey, err := encryption.DecodePublicKey(privKeyStr)
+	privKey, err := encryption.DecodeKey(privKeyStr)
 	if err != nil {
 		log.Printf("RelayComm: Failed to decode camera private key: %v", err)
 		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
@@ -350,7 +350,7 @@ func handleRenewKey(msg Message) {
 	}
 
 	// Decode new public key
-	newPublicKey, err := encryption.DecodePublicKey(req.NewPublicKey)
+	newPublicKey, err := encryption.DecodeKey(req.NewPublicKey)
 	if err != nil {
 		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Invalid public key!")
 		return

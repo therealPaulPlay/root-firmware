@@ -20,15 +20,16 @@ import (
 
 // UUIDs generated via uuidgen - these are permanent for the ROOT firmware
 var (
-	serviceUUID          = ble.MustParse("a07498ca-ad5b-474e-940d-16f1fbe7e8cd")
-	getCodeCharUUID      = ble.MustParse("51ff12bb-3ed8-46e5-b4f9-d64e2fec021b")
-	scanQRCharUUID       = ble.MustParse("2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e")
-	pairCharUUID         = ble.MustParse("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
-	wifiNetworksCharUUID = ble.MustParse("c2be2bc9-cee3-40ae-af50-f9959f25ee5b")
-	wifiStatusCharUUID   = ble.MustParse("d96453d5-1f49-47d6-8cbd-ac5547fc51a9")
-	wifiCharUUID         = ble.MustParse("beb5483e-36e1-4688-b7f5-ea07361b26a8")
-	relayStatusCharUUID  = ble.MustParse("a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab")
-	relayCharUUID        = ble.MustParse("cba1d466-344c-4be3-ab3f-189f80dd7518")
+	serviceUUID              = ble.MustParse("a07498ca-ad5b-474e-940d-16f1fbe7e8cd")
+	getCodeCharUUID          = ble.MustParse("51ff12bb-3ed8-46e5-b4f9-d64e2fec021b")
+	scanQRCharUUID           = ble.MustParse("2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e")
+	pairCharUUID             = ble.MustParse("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
+	productPublicKeyCharUUID = ble.MustParse("2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a")
+	wifiNetworksCharUUID     = ble.MustParse("c2be2bc9-cee3-40ae-af50-f9959f25ee5b")
+	wifiStatusCharUUID       = ble.MustParse("d96453d5-1f49-47d6-8cbd-ac5547fc51a9")
+	wifiConnectCharUUID      = ble.MustParse("beb5483e-36e1-4688-b7f5-ea07361b26a8")
+	relayStatusCharUUID      = ble.MustParse("a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab")
+	relaySetCharUUID         = ble.MustParse("cba1d466-344c-4be3-ab3f-189f80dd7518")
 )
 
 type operationStatus struct {
@@ -45,8 +46,6 @@ var relayStatus operationStatus
 var wifiNetworksCache []wifi.Network
 var wifiNetworksCacheMu sync.Mutex
 
-const maxBLEMessageSize = 512 // Most devices support 512 bytes
-
 // writeError writes a JSON error response to the BLE response writer
 func writeError(rsp ble.ResponseWriter, message string) {
 	fmt.Fprintf(rsp, `{"success":false,"error":"%s"}`, message)
@@ -57,7 +56,7 @@ func writeSuccess(rsp ble.ResponseWriter) {
 	rsp.Write([]byte(`{"success":true}`))
 }
 
-// writeJSON marshals and writes JSON to BLE with size validation
+// writeJSON marshals and writes JSON to BLE
 func writeJSON(rsp ble.ResponseWriter, data map[string]any) error {
 	response := map[string]any{"success": true}
 	maps.Copy(response, data)
@@ -66,11 +65,12 @@ func writeJSON(rsp ble.ResponseWriter, data map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if len(jsonData) > maxBLEMessageSize {
-		log.Printf("BLE: Message size %d exceeds MTU limit %d", len(jsonData), maxBLEMessageSize)
-		return fmt.Errorf("message too large")
+	n, err := rsp.Write(jsonData)
+	if err != nil {
+		log.Printf("BLE: Write failed (%d bytes): %v", len(jsonData), err)
+		return err
 	}
-	rsp.Write(jsonData)
+	log.Printf("BLE: Wrote %d bytes", n)
 	return nil
 }
 
@@ -137,7 +137,7 @@ func initBLE() error {
 			return
 		}
 
-		devicePublicKey, err := encryption.DecodePublicKey(pairReq.DevicePublicKey)
+		devicePublicKey, err := encryption.DecodeKey(pairReq.DevicePublicKey)
 		if err != nil {
 			log.Printf("BLE: Invalid public key: %v", err)
 			pairingStatus = operationStatus{completed: true, success: false, error: "Invalid public key"}
@@ -164,8 +164,26 @@ func initBLE() error {
 			return
 		}
 		log.Printf("BLE: Sending pairing result: %+v", pairingStatus.data)
-		if err := writeJSON(rsp, map[string]any{"data": pairingStatus.data}); err != nil {
+		// Return only productId (camera public key is in separate characteristic)
+		if err := writeJSON(rsp, map[string]any{"productId": pairingStatus.data["productId"]}); err != nil {
 			log.Printf("BLE: Failed to send pairing result: %v", err)
+			writeError(rsp, err.Error())
+		}
+	}))
+
+	// Get Camera Public Key characteristic (read after pairing)
+	cameraPublicKeyChar := svc.NewCharacteristic(productPublicKeyCharUUID)
+	cameraPublicKeyChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		if !pairingStatus.completed {
+			writeError(rsp, "No pairing result available")
+			return
+		}
+		if !pairingStatus.success {
+			writeError(rsp, pairingStatus.error)
+			return
+		}
+		if err := writeJSON(rsp, map[string]any{"publicKey": pairingStatus.data["publicKey"]}); err != nil {
+			log.Printf("BLE: Failed to send camera public key: %v", err)
 			writeError(rsp, err.Error())
 		}
 	}))
@@ -215,7 +233,7 @@ func initBLE() error {
 	}))
 
 	// Set WiFi characteristic (write to configure, read to get result)
-	wifiChar := svc.NewCharacteristic(wifiCharUUID)
+	wifiChar := svc.NewCharacteristic(wifiConnectCharUUID)
 	wifiChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		decrypted, err := decryptAndVerify(req.Data())
 		if err != nil {
@@ -268,11 +286,11 @@ func initBLE() error {
 	}))
 
 	// Set Relay characteristic (write to configure, read to get result)
-	relayChar := svc.NewCharacteristic(relayCharUUID)
+	relayChar := svc.NewCharacteristic(relaySetCharUUID)
 	relayChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		decrypted, err := decryptAndVerify(req.Data())
 		if err != nil {
-			log.Printf("BLE: Relay decrypt failed: %v", err)
+			log.Printf("BLE: Relay domain decrypt failed: %v", err)
 			relayStatus = operationStatus{completed: true, success: false, error: "Decryption failed"}
 			return
 		}
@@ -359,7 +377,7 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 	}
 
 	// Decode from base64
-	privKey, err := encryption.DecodePublicKey(privKeyStr)
+	privKey, err := encryption.DecodeKey(privKeyStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode camera private key: %w", err)
 	}

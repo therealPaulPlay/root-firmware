@@ -178,8 +178,8 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 			return nil, fmt.Errorf("failed to generate keys: %w", err)
 		}
 		// Store as base64 encoded strings for JSON compatibility
-		config.Get().SetKey("cameraPrivateKey", encryption.EncodePublicKey(keypair.PrivateKey))
-		config.Get().SetKey("cameraPublicKey", encryption.EncodePublicKey(keypair.PublicKey))
+		config.Get().SetKey("cameraPrivateKey", encryption.EncodeKey(keypair.PrivateKey))
+		config.Get().SetKey("cameraPublicKey", encryption.EncodeKey(keypair.PublicKey))
 		cameraPublicKeyBytes = keypair.PublicKey
 	} else {
 		// Decode from base64 string
@@ -187,7 +187,7 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 		if !ok {
 			return nil, fmt.Errorf("camera public key has invalid type: %T", cameraPublicKeyEncoded)
 		}
-		decoded, err := encryption.DecodePublicKey(pubKeyStr)
+		decoded, err := encryption.DecodeKey(pubKeyStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode camera public key: %w", err)
 		}
@@ -209,10 +209,10 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 	productID, _ := config.Get().GetKey("id")
 
 	// Encode camera public key to base64 for JSON transmission
-	cameraPublicKeyForResponse := encryption.EncodePublicKey(cameraPublicKeyBytes)
+	cameraPublicKeyForResponse := encryption.EncodeKey(cameraPublicKeyBytes)
 
 	return map[string]any{
-		"productId":       productID,
-		"cameraPublicKey": cameraPublicKeyForResponse,
+		"productId": productID,
+		"publicKey": cameraPublicKeyForResponse,
 	}, nil
 }

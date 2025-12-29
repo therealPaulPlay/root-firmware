@@ -102,18 +102,30 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 ```json
 {
   "success": true,
-  "data": {
-    "productId": "camera-product-id",
-    "cameraPublicKey": "base64-encoded-public-key"
-  }
+  "productId": "camera-product-id"
 }
 ```
 
-**Note**: WiFi and relay status can be queried separately using the WiFi Status and Relay Status characteristics.
+**Note**: Camera public key must be retrieved from the Get Camera Public Key characteristic. WiFi and relay status can be queried separately using the WiFi Status and Relay Status characteristics.
 
 ---
 
-### 4. Get WiFi Networks (Paginated)
+### 4. Get Camera Public Key
+**UUID**: `2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a`
+**Properties**: Read
+**Description**: Returns the camera's public key after successful pairing. Must be read after pairing completes.
+
+**Response**:
+```json
+{
+  "success": true,
+  "publicKey": "base64-encoded-public-key"
+}
+```
+
+---
+
+### 5. Get WiFi Networks (Paginated)
 **UUID**: `c2be2bc9-cee3-40ae-af50-f9959f25ee5b`
 **Properties**: Read
 **Description**: Returns WiFi networks one at a time. First read scans, subsequent reads return next network. Read after `hasMore: false` triggers fresh scan.
@@ -136,7 +148,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 5. Get WiFi Status
+### 6. Get WiFi Status
 **UUID**: `d96453d5-1f49-47d6-8cbd-ac5547fc51a9`
 **Properties**: Read
 **Description**: Returns current WiFi connection status and SSID.
@@ -152,7 +164,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 6. Set WiFi
+### 7. Set WiFi
 **UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
 **Properties**: Write, Read
 **Description**: Configures WiFi credentials. Write operation blocks until connection completes, then read to verify success. Requires encrypted payload from paired device.
@@ -193,7 +205,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 7. Get Relay Status
+### 8. Get Relay Status
 **UUID**: `a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab`
 **Properties**: Read
 **Description**: Returns currently configured relay server domain.
@@ -210,7 +222,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 8. Set Relay
+### 9. Set Relay
 **UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
 **Properties**: Write, Read
 **Description**: Configures relay server domain. Write operation blocks until configuration completes, then read to verify success. Requires encrypted payload from paired device.
