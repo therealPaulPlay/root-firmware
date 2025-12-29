@@ -50,7 +50,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 ### 1. Get Pairing Code
 **UUID**: `51ff12bb-3ed8-46e5-b4f9-d64e2fec021b`
 **Properties**: Read
-**Description**: Returns a UUID-based pairing code. Code expires after 5 minutes.
+**Description**: Generates and returns a new UUID-based pairing code. Code expires after 15 minutes.
 
 **Response**:
 ```json
@@ -104,13 +104,12 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
   "success": true,
   "data": {
     "productId": "camera-product-id",
-    "cameraPublicKey": "base64-encoded-public-key",
-    "wifiConnected": true,
-    "currentWifiSSID": "MyNetwork",
-    "relayDomain": "relay.example.com"
+    "cameraPublicKey": "base64-encoded-public-key"
   }
 }
 ```
+
+**Note**: WiFi and relay status can be queried separately using the WiFi Status and Relay Status characteristics.
 
 ---
 
@@ -137,12 +136,28 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 5. Set WiFi
-**UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
-**Properties**: Write
-**Description**: Configures WiFi credentials. Requires encrypted payload from paired device.
+### 5. Get WiFi Status
+**UUID**: `d96453d5-1f49-47d6-8cbd-ac5547fc51a9`
+**Properties**: Read
+**Description**: Returns current WiFi connection status and SSID.
 
-**Request**:
+**Response**:
+```json
+{
+  "success": true,
+  "connected": true,
+  "ssid": "MyNetwork"
+}
+```
+
+---
+
+### 6. Set WiFi
+**UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
+**Properties**: Write, Read
+**Description**: Configures WiFi credentials. Write operation blocks until connection completes, then read to verify success. Requires encrypted payload from paired device.
+
+**Write Request**:
 ```json
 {
   "deviceId": "unique-device-id",
@@ -161,21 +176,46 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 **Note**: `countryCode` is optional but recommended for regulatory compliance. It should be an ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "DE"). The client can obtain this from the browser's locale or geolocation.
 
-**Response**:
+**Read Response (Success)**:
 ```json
 {
   "success": true
 }
 ```
 
+**Read Response (Failure)**:
+```json
+{
+  "success": false,
+  "error": "WiFi connection failed"
+}
+```
+
 ---
 
-### 6. Set Relay
-**UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
-**Properties**: Write
-**Description**: Configures relay server domain. Requires encrypted payload from paired device.
+### 7. Get Relay Status
+**UUID**: `a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab`
+**Properties**: Read
+**Description**: Returns currently configured relay server domain.
 
-**Request**:
+**Response**:
+```json
+{
+  "success": true,
+  "relayDomain": "relay.example.com"
+}
+```
+
+**Note**: `relayDomain` will be `null` if not configured.
+
+---
+
+### 8. Set Relay
+**UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
+**Properties**: Write, Read
+**Description**: Configures relay server domain. Write operation blocks until configuration completes, then read to verify success. Requires encrypted payload from paired device.
+
+**Write Request**:
 ```json
 {
   "deviceId": "unique-device-id",
@@ -190,10 +230,18 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 }
 ```
 
-**Response**:
+**Read Response (Success)**:
 ```json
 {
   "success": true
+}
+```
+
+**Read Response (Failure)**:
+```json
+{
+  "success": false,
+  "error": "Relay configuration failed"
 }
 ```
 

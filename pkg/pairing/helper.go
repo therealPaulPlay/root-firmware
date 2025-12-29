@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	codeExpiry     = 5 * time.Minute
+	codeExpiry     = 15 * time.Minute
 	rateLimitDelay = 1 * time.Second
 )
 
@@ -54,24 +54,21 @@ func GetHelper() *Pairing {
 	return helperInstance
 }
 
-// GetCode returns the current pairing code, generating a new one if needed
-func (b *Pairing) GetCode() string {
+// GenerateCode creates a new pairing code
+func (b *Pairing) GenerateCode() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Generate new code if expired or not set
-	if b.code == nil || time.Now().After(b.code.ExpiresAt) {
-		// Generate UUID for pairing code
-		id, err := uuid.NewV4()
-		if err != nil {
-			log.Printf("Pairing: Failed to generate UUID: %v", err)
-			return ""
-		}
-		b.code = &PairingCode{
-			Code:         id.String(),
-			ExpiresAt:    time.Now().Add(codeExpiry),
-			CodeVerified: false, // Reset verification when new code is generated
-		}
+	// Generate UUID for pairing code
+	id, err := uuid.NewV4()
+	if err != nil {
+		log.Printf("Pairing: Failed to generate UUID: %v", err)
+		return ""
+	}
+	b.code = &PairingCode{
+		Code:         id.String(),
+		ExpiresAt:    time.Now().Add(codeExpiry),
+		CodeVerified: false,
 	}
 
 	return b.code.Code
@@ -171,16 +168,30 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 	}
 
 	// Get or generate camera keypair (single keypair for all devices)
-	cameraPublicKey, ok := config.Get().GetKey("cameraPublicKey")
+	var cameraPublicKeyBytes []byte
+
+	cameraPublicKeyEncoded, ok := config.Get().GetKey("cameraPublicKey")
 	if !ok {
-		// First time pairing - generate camera keypair
+		// First time pairing a device - generate camera keypair
 		keypair, err := encryption.GenerateKeypair()
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate keys: %w", err)
 		}
-		config.Get().SetKey("cameraPrivateKey", keypair.PrivateKey)
-		config.Get().SetKey("cameraPublicKey", keypair.PublicKey)
-		cameraPublicKey = keypair.PublicKey
+		// Store as base64 encoded strings for JSON compatibility
+		config.Get().SetKey("cameraPrivateKey", encryption.EncodePublicKey(keypair.PrivateKey))
+		config.Get().SetKey("cameraPublicKey", encryption.EncodePublicKey(keypair.PublicKey))
+		cameraPublicKeyBytes = keypair.PublicKey
+	} else {
+		// Decode from base64 string
+		pubKeyStr, ok := cameraPublicKeyEncoded.(string)
+		if !ok {
+			return nil, fmt.Errorf("camera public key has invalid type: %T", cameraPublicKeyEncoded)
+		}
+		decoded, err := encryption.DecodePublicKey(pubKeyStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode camera public key: %w", err)
+		}
+		cameraPublicKeyBytes = decoded
 	}
 
 	// Add device with its public key
@@ -197,22 +208,11 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 	// Get product ID
 	productID, _ := config.Get().GetKey("id")
 
-	// Get relay domain
-	relayDomain, _ := config.Get().GetKey("relayDomain")
-
 	// Encode camera public key to base64 for JSON transmission
-	pubKey, ok := cameraPublicKey.([]byte)
-	if !ok {
-		return nil, fmt.Errorf("camera public key has invalid type")
-	}
-	cameraPublicKeyEncoded := encryption.EncodePublicKey(pubKey)
+	cameraPublicKeyForResponse := encryption.EncodePublicKey(cameraPublicKeyBytes)
 
 	return map[string]any{
 		"productId":       productID,
-		"cameraPublicKey": cameraPublicKeyEncoded,
-		"wifiConnected":   wifi.Get().IsConnected(),
-		"currentWifiSSID": wifi.Get().GetCurrentNetwork(),
-		"relayDomain":     relayDomain,
+		"cameraPublicKey": cameraPublicKeyForResponse,
 	}, nil
 }
-

@@ -104,16 +104,24 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 			return
 		}
 
-		// Get camera's private key (single key for all devices)
-		cameraPrivateKey, ok := config.Get().GetKey("cameraPrivateKey")
+		// Get camera's private key (stored as base64 string)
+		cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
 		if !ok {
 			sendError(msg.DeviceID, messageType, ErrCameraNotInit, "Camera not initialized!")
 			return
 		}
 
-		privKey, ok := cameraPrivateKey.([]byte)
+		privKeyStr, ok := cameraPrivateKeyEncoded.(string)
 		if !ok {
 			log.Printf("RelayComm: Camera private key has invalid type")
+			sendError(msg.DeviceID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
+			return
+		}
+
+		// Decode from base64
+		privKey, err := encryption.DecodePublicKey(privKeyStr)
+		if err != nil {
+			log.Printf("RelayComm: Failed to decode camera private key: %v", err)
 			sendError(msg.DeviceID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
 			return
 		}
@@ -290,16 +298,24 @@ func handleRenewKey(msg Message) {
 		return
 	}
 
-	// Get camera's private key
-	cameraPrivateKey, ok := config.Get().GetKey("cameraPrivateKey")
+	// Get camera's private key (stored as base64 string)
+	cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
 	if !ok {
 		sendError(msg.DeviceID, MsgRenewKey, ErrCameraNotInit, "Camera not initialized!")
 		return
 	}
 
-	privKey, ok := cameraPrivateKey.([]byte)
+	privKeyStr, ok := cameraPrivateKeyEncoded.(string)
 	if !ok {
 		log.Printf("RelayComm: Camera private key has invalid type")
+		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
+		return
+	}
+
+	// Decode from base64
+	privKey, err := encryption.DecodePublicKey(privKeyStr)
+	if err != nil {
+		log.Printf("RelayComm: Failed to decode camera private key: %v", err)
 		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
 		return
 	}
