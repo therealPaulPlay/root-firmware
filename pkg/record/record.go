@@ -3,6 +3,7 @@ package record
 import (
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ type Recorder struct {
 	videoStreamCmd *exec.Cmd
 	audioStreamCmd *exec.Cmd
 	mu             sync.Mutex
+	captureMu      sync.Mutex // Serialize camera captures to prevent "in use" errors
 }
 
 type StreamOutput struct {
@@ -28,10 +30,18 @@ type StreamOutput struct {
 var instance *Recorder
 var once sync.Once
 
-func Init() {
+func Init() error {
+	var initErr error
 	once.Do(func() {
+		for _, cmd := range []string{"rpicam-vid", "rpicam-still", "ffmpeg"} {
+			if _, err := exec.LookPath(cmd); err != nil {
+				initErr = fmt.Errorf("ffmpeg and/or rpicam-apps are missing - please install them")
+				return
+			}
+		}
 		instance = &Recorder{}
 	})
+	return initErr
 }
 
 func Get() *Recorder {
@@ -57,7 +67,7 @@ func (r *Recorder) IsStreamingOrRecording() bool {
 	return r.recording || r.streaming
 }
 
-// StartRecording starts recording video (and audio if mic enabled) to file
+// StartRecording starts recording video to file
 func (r *Recorder) StartRecording(outputPath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -65,36 +75,21 @@ func (r *Recorder) StartRecording(outputPath string) error {
 	if r.recording {
 		return fmt.Errorf("already recording")
 	}
-
 	if r.streaming {
 		return fmt.Errorf("camera in use (streaming)")
 	}
 
-	var args []string
-	if micEnabled() {
-		args = []string{
-			"-f", "v4l2", "-i", "/dev/video0",
-			"-f", "alsa", "-i", "default",
-			"-c:v", "h264_v4l2m2m",
-			"-c:a", "aac",
-			"-y", outputPath,
-		}
-	} else {
-		args = []string{
-			"-f", "v4l2", "-i", "/dev/video0",
-			"-c:v", "h264_v4l2m2m",
-			"-y", outputPath,
-		}
-	}
+	cmd := exec.Command("rpicam-vid",
+		"-t", "0", "-o", outputPath,
+		"--codec", "h264", "-n",
+	)
 
-	cmd := exec.Command("ffmpeg", args...)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
 	// Play sound effect if key is true
-	val, ok := config.Get().GetKey("playActiveCameraSound")
-	if !ok || (ok && val.(bool)) {
+	if val, ok := config.Get().GetKey("playActiveCameraSound"); !ok || val.(bool) {
 		sfx.Get().PlayRecording()
 	}
 
@@ -131,26 +126,23 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 	}
 
 	// Stop any active recording to give stream priority
-	if r.recording && r.recordCmd != nil && r.recordCmd.Process != nil {
+	if r.recording && r.recordCmd != nil {
 		r.recordCmd.Process.Kill()
 		r.recordCmd.Wait()
 		r.recording = false
 		r.recordCmd = nil
 	}
 
-	videoCmd := exec.Command("ffmpeg",
-		"-f", "v4l2", "-i", "/dev/video0",
-		"-c:v", "h264_v4l2m2m",
-		"-f", "h264",
-		"pipe:1",
+	videoCmd := exec.Command("rpicam-vid",
+		"-t", "0", "-o", "-",
+		"--codec", "h264", "-n", "--inline", "--listen",
 	)
-	videoCmd.WaitDelay = 2 * time.Second // Force pipe closure after 2s
+	videoCmd.WaitDelay = 2 * time.Second
 
 	videoOut, err := videoCmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create video pipe: %w", err)
 	}
-
 	if err := videoCmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start video stream: %w", err)
 	}
@@ -161,18 +153,15 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 	if micEnabled() {
 		audioCmd := exec.Command("ffmpeg",
 			"-f", "alsa", "-i", "default",
-			"-c:a", "aac",
-			"-f", "adts",
-			"pipe:1",
+			"-c:a", "aac", "-f", "adts", "pipe:1",
 		)
-		audioCmd.WaitDelay = 2 * time.Second // Force pipe closure after 2s
+		audioCmd.WaitDelay = 2 * time.Second
 
 		audioOut, err := audioCmd.StdoutPipe()
 		if err != nil {
 			videoCmd.Process.Kill()
 			return nil, fmt.Errorf("failed to create audio pipe: %w", err)
 		}
-
 		if err := audioCmd.Start(); err != nil {
 			videoCmd.Process.Kill()
 			return nil, fmt.Errorf("failed to start audio stream: %w", err)
@@ -216,15 +205,31 @@ func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
 	return config.Get().SetKey("microphoneEnabled", enabled)
 }
 
-// CapturePreview captures a single frame as JPEG
+// CapturePreview captures a single frame as JPEG with configurable resolution
 func (r *Recorder) CapturePreview() ([]byte, error) {
-	cmd := exec.Command("ffmpeg",
-		"-f", "v4l2", "-i", "/dev/video0",
-		"-frames:v", "1",
-		"-f", "image2pipe",
-		"-c:v", "mjpeg",
-		"pipe:1",
+	return r.CapturePreviewWithResolution(640, 480)
+}
+
+// CapturePreviewWithResolution captures a single frame as JPEG at specified resolution
+func (r *Recorder) CapturePreviewWithResolution(width, height int) ([]byte, error) {
+	r.captureMu.Lock()
+	defer r.captureMu.Unlock()
+
+	cmd := exec.Command("rpicam-still",
+		"-o", "-", "-t", "2000",
+		"--width", fmt.Sprintf("%d", width),
+		"--height", fmt.Sprintf("%d", height),
+		"-n", "--encoding", "jpg",
 	)
 
-	return cmd.Output()
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			log.Printf("Recorder: rpicam-still failed: %v, stderr: %s", err, string(exitErr.Stderr))
+		} else {
+			log.Printf("Recorder: rpicam-still failed: %v", err)
+		}
+		return nil, fmt.Errorf("camera capture failed")
+	}
+	return output, nil
 }

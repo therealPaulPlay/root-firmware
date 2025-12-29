@@ -64,10 +64,8 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ### 2. Scan QR Code
 **UUID**: `2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e`
-**Properties**: Write
+**Properties**: Read
 **Description**: Triggers camera to capture a frame and scan for QR code. Verifies the scanned code matches the expected pairing code and marks it as verified.
-
-**Request**: Empty
 
 **Response**:
 ```json

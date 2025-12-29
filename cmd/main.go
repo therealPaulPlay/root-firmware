@@ -50,9 +50,13 @@ func main() {
 	// Initialize packages where init() cannot return errors
 	devices.Init()
 	wifi.Init()
-	record.Init()
 	relaycomm.Init()
 	updater.Init()
+
+	// Initialize recorder (requires ffmpeg)
+	if err := record.Init(); err != nil {
+		log.Fatalf("Failed to initialize recorder: %v", err)
+	}
 
 	// Initialize SFX
 	if err := sfx.Init(); err != nil {

@@ -99,9 +99,9 @@ func initBLE() error {
 		}
 	}))
 
-	// Scan QR characteristic (write to trigger QR scan and verification)
+	// Scan QR characteristic (read to trigger QR scan and verification)
 	scanQRChar := svc.NewCharacteristic(scanQRCharUUID)
-	scanQRChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+	scanQRChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		err := GetHelper().ScanQRCode()
 		if err != nil {
 			log.Printf("BLE: QR scan/verification failed: %v", err)

@@ -14,7 +14,7 @@ The version is injected at build time via the `-ldflags` flag. If you build with
 
 ## Deploying to Raspberry Pi
 
-Prerequisites: Create user `observer`, set hostname to `ROOT-Observer.local`, install Go and ONNX Runtime on the Pi.
+Prerequisites: Create user `observer`, set hostname to `ROOT-Observer.local`, install Go and ONNX Runtime on the Pi. Raspian OS Bookworm or higher is required.
 
 Deploy:
 

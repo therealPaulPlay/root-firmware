@@ -3,6 +3,7 @@ package encryption
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -10,7 +11,6 @@ import (
 	"io"
 	"sync"
 
-	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -26,42 +26,40 @@ type Keypair struct {
 	PrivateKey []byte
 }
 
-// GenerateKeypair creates new Curve25519 keypair for key exchange
+// GenerateKeypair creates new P-256 keypair for key exchange
 func GenerateKeypair() (*Keypair, error) {
-	privateKey := make([]byte, 32)
-	if _, err := rand.Read(privateKey); err != nil {
-		return nil, err
-	}
-
-	publicKey, err := curve25519.X25519(privateKey, curve25519.Basepoint)
+	curve := ecdh.P256()
+	privateKey, err := curve.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Keypair{PublicKey: publicKey, PrivateKey: privateKey}, nil
+	return &Keypair{
+		PublicKey:  privateKey.PublicKey().Bytes(),
+		PrivateKey: privateKey.Bytes(),
+	}, nil
 }
 
-// DeriveSharedSecret computes shared secret from keypair exchange using HKDF
+// DeriveSharedSecret computes shared secret from P-256 ECDH using HKDF
 func DeriveSharedSecret(yourPrivateKey, theirPublicKey []byte) ([]byte, error) {
-	if len(yourPrivateKey) != 32 || len(theirPublicKey) != 32 {
-		return nil, fmt.Errorf("keys must be 32 bytes")
-	}
+	curve := ecdh.P256()
 
-	secret, err := curve25519.X25519(yourPrivateKey, theirPublicKey)
+	// Parse private key
+	privKey, err := curve.NewPrivateKey(yourPrivateKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid private key: %w", err)
 	}
 
-	// Check for all-zero shared secret (weak key)
-	allZero := true
-	for _, b := range secret {
-		if b != 0 {
-			allZero = false
-			break
-		}
+	// Parse public key
+	pubKey, err := curve.NewPublicKey(theirPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid public key: %w", err)
 	}
-	if allZero {
-		return nil, fmt.Errorf("weak shared secret detected")
+
+	// Perform ECDH
+	secret, err := privKey.ECDH(pubKey)
+	if err != nil {
+		return nil, fmt.Errorf("ECDH failed: %w", err)
 	}
 
 	// Use HKDF to derive key material
@@ -139,8 +137,9 @@ func DecodePublicKey(encoded string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(key) != 32 {
-		return nil, fmt.Errorf("invalid key length")
+	// P-256 public keys are 65 bytes (uncompressed) or 33 bytes (compressed)
+	if len(key) != 65 && len(key) != 33 {
+		return nil, fmt.Errorf("invalid P-256 public key length: got %d bytes, expected 65 (uncompressed) or 33 (compressed)", len(key))
 	}
 	return key, nil
 }

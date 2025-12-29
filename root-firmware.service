@@ -4,6 +4,7 @@ After=network.target bluetooth.target
 
 [Service]
 User=root
+SupplementaryGroups=video
 WorkingDirectory=/home/observer
 Environment="LD_LIBRARY_PATH=/usr/local/lib"
 ExecStartPre=/usr/sbin/rfkill unblock bluetooth
