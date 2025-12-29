@@ -12,9 +12,9 @@ go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root
 
 The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`.
 
-## Deploying to Pi Zero 2
+## Deploying to Raspberry Pi
 
-Prerequisites: Create user `observer`, set hostname to `ROOT-Observer`, install Go and ONNX Runtime on the Pi.
+Prerequisites: Create user `observer`, set hostname to `ROOT-Observer.local`, install Go and ONNX Runtime on the Pi.
 
 Deploy:
 
@@ -29,6 +29,10 @@ Check if running:
 ```bash
 ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 ```
+
+### Setting up an SSH Key
+
+Using an SSH key for development instead of an SSH password is significantly more convenient. Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it onto the Pi using `ssh-copy-id observer@ROOT-Observer.local`. 
 
 ## Installing ONNX Runtime on the Pi
 
