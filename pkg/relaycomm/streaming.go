@@ -47,6 +47,8 @@ func broadcastChunk(messageType string, payload map[string]any) {
 	}
 }
 
+// TODO: This does not seem to be actually streaming video and audio from the recorder package
+
 // StreamReader streams data from a reader to all active viewers
 func StreamReader(reader io.Reader, messageType string) error {
 	buffer := make([]byte, chunkSize)

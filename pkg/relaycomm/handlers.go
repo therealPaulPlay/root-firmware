@@ -29,6 +29,28 @@ import (
 	"root-firmware/pkg/wifi"
 )
 
+// Message type constants
+const (
+	MsgRenewKey          = "renewKey"
+	MsgGetDevices        = "getDevices"
+	MsgRemoveDevice      = "removeDevice"
+	MsgKickDevice        = "kickDevice"
+	MsgGetEvents         = "getEvents"
+	MsgGetRecording      = "getRecording"
+	MsgGetThumbnail      = "getThumbnail"
+	MsgStartStream       = "startStream"
+	MsgStopStream        = "stopStream"
+	MsgStreamVideoChunk  = "streamVideoChunk"
+	MsgStreamAudioChunk  = "streamAudioChunk"
+	MsgSetMicrophone     = "setMicrophone"
+	MsgSetRecordingSound = "setRecordingSound"
+	MsgGetHealth         = "getHealth"
+	MsgGetPreview        = "getPreview"
+	MsgStartUpdate       = "startUpdate"
+	MsgRestart           = "restart"
+	MsgReset             = "reset"
+)
+
 // HandlerContext provides encryption context to handlers
 type HandlerContext struct {
 	DeviceID          string
@@ -62,48 +84,48 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		// Get device to verify it's paired
 		device, ok := devices.Get().GetByID(msg.DeviceID)
 		if !ok {
-			sendError(msg.DeviceID, messageType+"Result", "Device not paired!")
+			sendError(msg.DeviceID, messageType, "Device not paired!")
 			return
 		}
 
 		// Check if key is expired (forward secrecy enforcement)
 		if time.Now().After(device.KeyExpiresAt) {
-			sendError(msg.DeviceID, messageType+"Result", "Session key expired!")
+			sendError(msg.DeviceID, messageType, "Session key expired!")
 			return
 		}
 
 		// Get camera's private key (single key for all devices)
 		cameraPrivateKey, ok := config.Get().GetKey("cameraPrivateKey")
 		if !ok {
-			sendError(msg.DeviceID, messageType+"Result", "Camera not initialized!")
+			sendError(msg.DeviceID, messageType, "Camera not initialized!")
 			return
 		}
 
 		privKey, ok := cameraPrivateKey.([]byte)
 		if !ok {
 			log.Printf("RelayComm: Camera private key has invalid type")
-			sendError(msg.DeviceID, messageType+"Result", "Camera encryption key invalid!")
+			sendError(msg.DeviceID, messageType, "Camera encryption key invalid!")
 			return
 		}
 
 		// Derive shared secret using camera's private key and device's public key
 		sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 		if err != nil {
-			sendError(msg.DeviceID, messageType+"Result", "Failed to derive encryption key!")
+			sendError(msg.DeviceID, messageType, "Failed to derive encryption key!")
 			return
 		}
 
 		// Create session for decryption
 		session, err := encryption.FromSharedSecret(sharedSecret)
 		if err != nil {
-			sendError(msg.DeviceID, messageType+"Result", "Failed to create encryption session!")
+			sendError(msg.DeviceID, messageType, "Failed to create encryption session!")
 			return
 		}
 
 		// Decrypt payload
 		decrypted, err := session.Decrypt(msg.EncryptedPayload)
 		if err != nil {
-			sendError(msg.DeviceID, messageType+"Result", "Failed to decrypt payload!")
+			sendError(msg.DeviceID, messageType, "Failed to decrypt payload!")
 			return
 		}
 
@@ -142,7 +164,7 @@ func sendError(deviceID, messageType, errorMsg string) {
 	}
 
 	Get().Send(Message{
-		Type:             messageType,
+		Type:             messageType + "Result",
 		Target:           "device",
 		ProductID:        prodIDStr,
 		DeviceID:         deviceID,
@@ -195,7 +217,7 @@ func SendEncrypted(ctx *HandlerContext, messageType string, payload any) error {
 
 	// Send encrypted response
 	return Get().Send(Message{
-		Type:             messageType,
+		Type:             messageType + "Result",
 		Target:           "device",
 		ProductID:        prodIDStr,
 		DeviceID:         ctx.DeviceID,
@@ -215,32 +237,32 @@ func RegisterHandlers() {
 	relay := Get()
 
 	// Key renewal (no encryption middleware - uses old key to decrypt renewal request)
-	relay.On("renewKey", handleRenewKey)
+	relay.On(MsgRenewKey, handleRenewKey)
 
 	// Device management
-	relay.On("getDevices", useEncryption("getDevices", handleGetDevices))
-	relay.On("removeDevice", useEncryption("removeDevice", handleRemoveDevice))
-	relay.On("kickDevice", useEncryption("kickDevice", handleKickDevice))
+	relay.On(MsgGetDevices, useEncryption(MsgGetDevices, handleGetDevices))
+	relay.On(MsgRemoveDevice, useEncryption(MsgRemoveDevice, handleRemoveDevice))
+	relay.On(MsgKickDevice, useEncryption(MsgKickDevice, handleKickDevice))
 
 	// Storage
-	relay.On("getEvents", useEncryption("getEvents", handleGetEvents))
-	relay.On("getRecording", useEncryption("getRecording", handleGetRecording))
-	relay.On("getThumbnail", useEncryption("getThumbnail", handleGetThumbnail))
+	relay.On(MsgGetEvents, useEncryption(MsgGetEvents, handleGetEvents))
+	relay.On(MsgGetRecording, useEncryption(MsgGetRecording, handleGetRecording))
+	relay.On(MsgGetThumbnail, useEncryption(MsgGetThumbnail, handleGetThumbnail))
 
 	// Streaming
-	relay.On("startStream", useEncryption("startStream", handleStartStream))
-	relay.On("stopStream", useEncryption("stopStream", handleStopStream))
+	relay.On(MsgStartStream, useEncryption(MsgStartStream, handleStartStream))
+	relay.On(MsgStopStream, useEncryption(MsgStopStream, handleStopStream))
 
 	// Settings
-	relay.On("setMicrophone", useEncryption("setMicrophone", handleSetMicrophone))
-	relay.On("setRecordingSound", useEncryption("setRecordingSound", handleSetRecordingSound))
+	relay.On(MsgSetMicrophone, useEncryption(MsgSetMicrophone, handleSetMicrophone))
+	relay.On(MsgSetRecordingSound, useEncryption(MsgSetRecordingSound, handleSetRecordingSound))
 
 	// System
-	relay.On("getHealth", useEncryption("getHealth", handleGetHealth))
-	relay.On("getPreview", useEncryption("getPreview", handleGetPreview))
-	relay.On("startUpdate", useEncryption("startUpdate", handleStartUpdate))
-	relay.On("restart", useEncryption("restart", handleRestart))
-	relay.On("reset", useEncryption("reset", handleReset))
+	relay.On(MsgGetHealth, useEncryption(MsgGetHealth, handleGetHealth))
+	relay.On(MsgGetPreview, useEncryption(MsgGetPreview, handleGetPreview))
+	relay.On(MsgStartUpdate, useEncryption(MsgStartUpdate, handleStartUpdate))
+	relay.On(MsgRestart, useEncryption(MsgRestart, handleRestart))
+	relay.On(MsgReset, useEncryption(MsgReset, handleReset))
 
 	// Start the connection
 	if err := relay.Start(); err != nil {
@@ -252,42 +274,42 @@ func handleRenewKey(msg Message) {
 	// Get device to verify it's paired (allow expired keys for renewal)
 	device, ok := devices.Get().GetByID(msg.DeviceID)
 	if !ok {
-		sendError(msg.DeviceID, "renewKeyResult", "Device not paired!")
+		sendError(msg.DeviceID, MsgRenewKey, "Device not paired!")
 		return
 	}
 
 	// Get camera's private key
 	cameraPrivateKey, ok := config.Get().GetKey("cameraPrivateKey")
 	if !ok {
-		sendError(msg.DeviceID, "renewKeyResult", "Camera not initialized!")
+		sendError(msg.DeviceID, MsgRenewKey, "Camera not initialized!")
 		return
 	}
 
 	privKey, ok := cameraPrivateKey.([]byte)
 	if !ok {
 		log.Printf("RelayComm: Camera private key has invalid type")
-		sendError(msg.DeviceID, "renewKeyResult", "Camera encryption key invalid!")
+		sendError(msg.DeviceID, MsgRenewKey, "Camera encryption key invalid!")
 		return
 	}
 
 	// Derive shared secret using OLD key (still stored in device)
 	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Failed to derive encryption key!")
+		sendError(msg.DeviceID, MsgRenewKey, "Failed to derive encryption key!")
 		return
 	}
 
 	// Create session for decryption
 	session, err := encryption.FromSharedSecret(sharedSecret)
 	if err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Failed to create encryption session!")
+		sendError(msg.DeviceID, MsgRenewKey, "Failed to create encryption session!")
 		return
 	}
 
 	// Decrypt payload containing new public key
 	decrypted, err := session.Decrypt(msg.EncryptedPayload)
 	if err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Failed to decrypt payload!")
+		sendError(msg.DeviceID, MsgRenewKey, "Failed to decrypt payload!")
 		return
 	}
 
@@ -295,33 +317,33 @@ func handleRenewKey(msg Message) {
 		NewPublicKey string `json:"newPublicKey"`
 	}
 	if err := json.Unmarshal(decrypted, &req); err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Invalid payload!")
+		sendError(msg.DeviceID, MsgRenewKey, "Invalid payload!")
 		return
 	}
 
 	// Decode new public key
 	newPublicKey, err := encryption.DecodePublicKey(req.NewPublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Invalid public key!")
+		sendError(msg.DeviceID, MsgRenewKey, "Invalid public key!")
 		return
 	}
 
 	// Update device with new key
 	if err := devices.Get().RenewKey(msg.DeviceID, newPublicKey); err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Failed to update key!")
+		sendError(msg.DeviceID, MsgRenewKey, "Failed to update key!")
 		return
 	}
 
 	// Derive NEW shared secret for response
 	newSharedSecret, err := encryption.DeriveSharedSecret(privKey, newPublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Failed to derive new encryption key!")
+		sendError(msg.DeviceID, MsgRenewKey, "Failed to derive new encryption key!")
 		return
 	}
 
 	newSession, err := encryption.FromSharedSecret(newSharedSecret)
 	if err != nil {
-		sendError(msg.DeviceID, "renewKeyResult", "Failed to create new encryption session!")
+		sendError(msg.DeviceID, MsgRenewKey, "Failed to create new encryption session!")
 		return
 	}
 
@@ -333,14 +355,14 @@ func handleRenewKey(msg Message) {
 	}
 
 	log.Printf("Relaycomm: Key renewed for device %s", msg.DeviceID)
-	SendEncrypted(ctx, "renewKeyResult", map[string]any{
+	SendEncrypted(ctx, MsgRenewKey, map[string]any{
 		"success": true,
 	})
 }
 
 func handleGetDevices(ctx *HandlerContext, payload json.RawMessage) {
 	allDevices := devices.Get().GetAll()
-	SendEncrypted(ctx, "devicesResult", map[string]any{
+	SendEncrypted(ctx, MsgGetDevices, map[string]any{
 		"success": true,
 		"devices": allDevices,
 	})
@@ -349,7 +371,7 @@ func handleGetDevices(ctx *HandlerContext, payload json.RawMessage) {
 func handleRemoveDevice(ctx *HandlerContext, payload json.RawMessage) {
 	// Device can only remove itself
 	err := devices.Get().Remove(ctx.DeviceID)
-	SendEncrypted(ctx, "removeDeviceResult", buildResult(err, nil))
+	SendEncrypted(ctx, MsgRemoveDevice, buildResult(err, nil))
 }
 
 func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
@@ -358,23 +380,23 @@ func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
-		SendEncrypted(ctx, "kickDeviceResult", buildResult(fmt.Errorf("invalid payload"), nil))
+		SendEncrypted(ctx, MsgKickDevice, buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
 	// Device cannot kick itself
 	if req.TargetDeviceID == ctx.DeviceID {
-		SendEncrypted(ctx, "kickDeviceResult", buildResult(fmt.Errorf("cannot kick self"), nil))
+		SendEncrypted(ctx, MsgKickDevice, buildResult(fmt.Errorf("cannot kick self"), nil))
 		return
 	}
 
 	err := devices.Get().ScheduleKick(req.TargetDeviceID)
-	SendEncrypted(ctx, "kickDeviceResult", buildResult(err, nil))
+	SendEncrypted(ctx, MsgKickDevice, buildResult(err, nil))
 }
 
 func handleGetEvents(ctx *HandlerContext, payload json.RawMessage) {
 	events, err := storage.Get().GetEventLog()
-	SendEncrypted(ctx, "eventsResult", buildResult(err, map[string]any{
+	SendEncrypted(ctx, MsgGetEvents, buildResult(err, map[string]any{
 		"events": events,
 	}))
 }
@@ -385,23 +407,23 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
-		SendEncrypted(ctx, "recordingResult", buildResult(fmt.Errorf("invalid payload"), nil))
+		SendEncrypted(ctx, MsgGetRecording, buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
 	filePath, err := storage.Get().GetRecordingPath(req.ID)
 	if err != nil {
-		SendEncrypted(ctx, "recordingResult", buildResult(err, nil))
+		SendEncrypted(ctx, MsgGetRecording, buildResult(err, nil))
 		return
 	}
 
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
-		SendEncrypted(ctx, "recordingResult", buildResult(fmt.Errorf("failed to read file: %w", err), nil))
+		SendEncrypted(ctx, MsgGetRecording, buildResult(fmt.Errorf("failed to read file: %w", err), nil))
 		return
 	}
 
-	SendEncrypted(ctx, "recordingResult", buildResult(nil, map[string]any{
+	SendEncrypted(ctx, MsgGetRecording, buildResult(nil, map[string]any{
 		"data": base64.StdEncoding.EncodeToString(fileData),
 	}))
 }
@@ -412,23 +434,23 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
-		SendEncrypted(ctx, "thumbnailResult", buildResult(fmt.Errorf("invalid payload"), nil))
+		SendEncrypted(ctx, MsgGetThumbnail, buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
 	filePath, err := storage.Get().GetThumbnailPath(req.ID)
 	if err != nil {
-		SendEncrypted(ctx, "thumbnailResult", buildResult(err, nil))
+		SendEncrypted(ctx, MsgGetThumbnail, buildResult(err, nil))
 		return
 	}
 
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
-		SendEncrypted(ctx, "thumbnailResult", buildResult(fmt.Errorf("failed to read thumbnail: %w", err), nil))
+		SendEncrypted(ctx, MsgGetThumbnail, buildResult(fmt.Errorf("failed to read thumbnail: %w", err), nil))
 		return
 	}
 
-	SendEncrypted(ctx, "thumbnailResult", buildResult(nil, map[string]any{
+	SendEncrypted(ctx, MsgGetThumbnail, buildResult(nil, map[string]any{
 		"data": base64.StdEncoding.EncodeToString(fileData),
 	}))
 }
@@ -436,7 +458,7 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 	// Add viewer (enforces limit)
 	if err := addViewer(ctx); err != nil {
-		SendEncrypted(ctx, "startStreamResult", buildResult(err, nil))
+		SendEncrypted(ctx, MsgStartStream, buildResult(err, nil))
 		return
 	}
 
@@ -444,15 +466,15 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 	stream, err := record.Get().StartStream()
 	if err != nil && err.Error() != "already streaming" {
 		removeViewer(ctx.DeviceID)
-		SendEncrypted(ctx, "startStreamResult", buildResult(err, nil))
+		SendEncrypted(ctx, MsgStartStream, buildResult(err, nil))
 		return
 	}
 
 	// If this is the first viewer, start streaming goroutines
 	if err == nil {
 		go func() {
-			if err := StreamReader(stream.Video, "streamVideoChunkResult"); err != nil {
-				broadcastChunk("streamVideoChunkResult", map[string]any{
+			if err := StreamReader(stream.Video, MsgStreamVideoChunk); err != nil {
+				broadcastChunk(MsgStreamVideoChunk, map[string]any{
 					"success": false,
 					"error":   err.Error(),
 					"done":    true,
@@ -462,8 +484,8 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 
 		if stream.Audio != nil {
 			go func() {
-				if err := StreamReader(stream.Audio, "streamAudioChunkResult"); err != nil {
-					broadcastChunk("streamAudioChunkResult", map[string]any{
+				if err := StreamReader(stream.Audio, MsgStreamAudioChunk); err != nil {
+					broadcastChunk(MsgStreamAudioChunk, map[string]any{
 						"success": false,
 						"error":   err.Error(),
 						"done":    true,
@@ -473,7 +495,7 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 		}
 	}
 
-	SendEncrypted(ctx, "startStreamResult", buildResult(nil, nil))
+	SendEncrypted(ctx, MsgStartStream, buildResult(nil, nil))
 }
 
 func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
@@ -481,7 +503,7 @@ func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
 	if removeViewer(ctx.DeviceID) {
 		err = record.Get().StopStream()
 	}
-	SendEncrypted(ctx, "stopStreamResult", buildResult(err, nil))
+	SendEncrypted(ctx, MsgStopStream, buildResult(err, nil))
 }
 
 func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
@@ -490,12 +512,12 @@ func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
-		SendEncrypted(ctx, "microphoneResult", buildResult(fmt.Errorf("invalid payload"), nil))
+		SendEncrypted(ctx, MsgSetMicrophone, buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
 	err := record.Get().SetMicrophoneEnabled(req.Enabled)
-	SendEncrypted(ctx, "microphoneResult", buildResult(err, map[string]any{
+	SendEncrypted(ctx, MsgSetMicrophone, buildResult(err, map[string]any{
 		"enabled": req.Enabled,
 	}))
 }
@@ -506,12 +528,12 @@ func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
-		SendEncrypted(ctx, "recordingSoundResult", buildResult(fmt.Errorf("invalid payload"), nil))
+		SendEncrypted(ctx, MsgSetRecordingSound, buildResult(fmt.Errorf("invalid payload"), nil))
 		return
 	}
 
 	err := config.Get().SetKey("playActiveCameraSound", req.Enabled)
-	SendEncrypted(ctx, "recordingSoundResult", buildResult(err, map[string]any{
+	SendEncrypted(ctx, MsgSetRecordingSound, buildResult(err, map[string]any{
 		"enabled": req.Enabled,
 	}))
 }
@@ -600,29 +622,29 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 		}
 	}
 
-	SendEncrypted(ctx, "healthResult", health)
+	SendEncrypted(ctx, MsgGetHealth, health)
 }
 
 func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
 	frameData, err := record.Get().CapturePreview()
 	if err != nil {
-		SendEncrypted(ctx, "previewResult", buildResult(err, nil))
+		SendEncrypted(ctx, MsgGetPreview, buildResult(err, nil))
 		return
 	}
 
-	SendEncrypted(ctx, "previewResult", buildResult(nil, map[string]any{
+	SendEncrypted(ctx, MsgGetPreview, buildResult(nil, map[string]any{
 		"image": base64.StdEncoding.EncodeToString(frameData),
 	}))
 }
 
 func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
 	err := updater.Get().StartUpdate()
-	SendEncrypted(ctx, "startUpdateResult", buildResult(err, nil))
+	SendEncrypted(ctx, MsgStartUpdate, buildResult(err, nil))
 }
 
 func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
 	// Send success response before rebooting
-	SendEncrypted(ctx, "restartResult", map[string]any{
+	SendEncrypted(ctx, MsgRestart, map[string]any{
 		"success": true,
 	})
 
@@ -633,7 +655,7 @@ func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleReset(ctx *HandlerContext, payload json.RawMessage) {
-	SendEncrypted(ctx, "resetResult", map[string]any{"success": true})
+	SendEncrypted(ctx, MsgReset, map[string]any{"success": true})
 
 	go func() {
 		time.Sleep(500 * time.Millisecond)
