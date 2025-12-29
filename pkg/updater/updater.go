@@ -68,42 +68,40 @@ func (u *Updater) GetStatus() (UpdateStatus, string, string) {
 	return u.status, u.availableVersion, u.errorMsg
 }
 
-func (u *Updater) CheckForUpdates() error {
+func (u *Updater) CheckForUpdates() {
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
 		log.Println("Updater: Skipping update check: relay domain not configured")
-		return nil
+		return
 	}
 
 	client := &http.Client{Timeout: updateCheckTimeout}
 	resp, err := client.Get("https://" + relayDomain.(string) + firmwareEndpoint)
 	if err != nil {
-		u.setError(fmt.Sprintf("failed to check for updates: %v", err))
-		return err
+		log.Printf("Updater: Failed to check for updates: %v", err)
+		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("server returned status %d", resp.StatusCode)
-		u.setError(err.Error())
-		return err
+		log.Printf("Updater: Server returned status %d", resp.StatusCode)
+		return
 	}
 
 	var info FirmwareInfo
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		u.setError(fmt.Sprintf("failed to parse response: %v", err))
-		return err
+		log.Printf("Updater: Failed to parse response: %v", err)
+		return
 	}
 
-	// Validate SHA256 format (64 hex chars)
+	// Validate SHA256 format (64 hex chars) - critical security check
 	if len(info.SHA256) != 64 {
-		err := fmt.Errorf("invalid SHA256 length: %d", len(info.SHA256))
-		u.setError(err.Error())
-		return err
+		u.setError(fmt.Sprintf("invalid SHA256 length: %d", len(info.SHA256)))
+		return
 	}
 	if _, err := hex.DecodeString(info.SHA256); err != nil {
 		u.setError(fmt.Sprintf("invalid SHA256 format: %v", err))
-		return err
+		return
 	}
 
 	u.mu.Lock()
@@ -119,8 +117,6 @@ func (u *Updater) CheckForUpdates() error {
 		u.status = StatusUpToDate
 		u.errorMsg = ""
 	}
-
-	return nil
 }
 
 func (u *Updater) StartUpdate() error {
