@@ -53,10 +53,11 @@ func (r *RelayComm) On(messageType string, handler func(Message)) {
 }
 
 // Start connects to relay server and maintains connection
+// If already running, stops and restarts with the current relay domain
 func (r *RelayComm) Start() error {
-	// TODO: Stop and restart instead of "already running" error
+	// Stop existing connection if running
 	if r.running {
-		return fmt.Errorf("already running")
+		r.Stop()
 	}
 
 	relayDomain, ok := config.Get().GetKey("relayDomain")
@@ -69,6 +70,22 @@ func (r *RelayComm) Start() error {
 
 	go r.connectLoop(relayDomain.(string))
 	return nil
+}
+
+// Stop stops the relay connection
+func (r *RelayComm) Stop() {
+	if !r.running {
+		return
+	}
+
+	r.running = false
+	close(r.stopChan)
+
+	// Close connection if exists
+	if r.conn != nil {
+		r.conn.Close()
+		r.conn = nil
+	}
 }
 
 // Send sends a message to the relay server
