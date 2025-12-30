@@ -3,8 +3,11 @@ package globals
 // FirmwareVersion is set at build time via -ldflags
 var FirmwareVersion = "dev"
 
+// ProductModel is the model name of the product (lowercase)
+const ProductModel = "observer"
+
 // Writable data directory
-var DataDir = "/data"
+const DataDir = "/data"
 
 // Extract embedded assets
 var AssetsPath = DataDir + "/assets"
@@ -25,9 +28,9 @@ var RecordingsPath = DataDir + "/recordings"
 var EventLogPath = RecordingsPath + "/events.json"
 
 // Firmware update paths
-var UpdateImagePath = "/tmp/firmware-update.img"   // Temporary download, cleaned on reboot
-var BootCmdlinePath = "/boot/firmware/cmdline.txt" // Boot partition configuration
-var BootCountPath = "/boot/firmware/bootcount.txt" // Boot attempt counter for rollback
+const UpdateImagePath = "/tmp/firmware-update.img"   // Temporary download, cleaned on reboot
+const BootCmdlinePath = "/boot/firmware/cmdline.txt" // Boot partition configuration
+const BootCountPath = "/boot/firmware/bootcount.txt" // Boot attempt counter for rollback
 
 // Boot counter configuration
 const MaxBootAttempts = 3 // Number of boot attempts before rollback

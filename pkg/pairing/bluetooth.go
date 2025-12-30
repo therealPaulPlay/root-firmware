@@ -14,6 +14,7 @@ import (
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
+	"root-firmware/pkg/globals"
 	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/wifi"
 )
@@ -21,6 +22,7 @@ import (
 // UUIDs generated via uuidgen - these are permanent for the ROOT firmware
 var (
 	serviceUUID              = ble.MustParse("a07498ca-ad5b-474e-940d-16f1fbe7e8cd")
+	productModelCharUUID     = ble.MustParse("fa3fd066-de2d-4a15-8e0c-4a8d45a847a5")
 	getCodeCharUUID          = ble.MustParse("51ff12bb-3ed8-46e5-b4f9-d64e2fec021b")
 	scanQRCharUUID           = ble.MustParse("2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e")
 	pairCharUUID             = ble.MustParse("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
@@ -99,6 +101,14 @@ func initBLE() error {
 
 	// Create service
 	svc := ble.NewService(serviceUUID)
+
+	// Device Model characteristic (read-only)
+	productModelChar := svc.NewCharacteristic(productModelCharUUID)
+	productModelChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		if err := writeJSON(rsp, map[string]any{"model": globals.ProductModel}); err != nil {
+			writeError(rsp, err.Error())
+		}
+	}))
 
 	// Get Code characteristic (read to get pairing code)
 	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
