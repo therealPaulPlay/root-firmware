@@ -73,7 +73,7 @@ func (w *WiFi) applyStoredWiFiConfig() {
 		return
 	}
 
-	// Apply country code if set
+	// Apply country code if set (skip otherwise)
 	if countryCodeVal, ok := config.Get().GetKey("wifiCountryCode"); ok {
 		if code, ok := countryCodeVal.(string); ok && len(code) == 2 {
 			if err := w.setCountryCode(code); err != nil {
@@ -84,7 +84,7 @@ func (w *WiFi) applyStoredWiFiConfig() {
 
 	// Configure stored WiFi (wpa_supplicant will auto-reconnect)
 	go func() {
-		if err := w.configureNetwork(ssid, password); err != nil {
+		if _, err := w.configureNetwork(ssid, password); err != nil {
 			log.Printf("WiFi: Failed to configure network: %v", err)
 		}
 	}()
@@ -123,65 +123,91 @@ func (w *WiFi) Connect(ssid, password, countryCode string) error {
 		if err := w.setCountryCode(countryCode); err != nil {
 			log.Printf("WiFi: Warning - failed to set country code: %v", err)
 		}
-		// Save to config
-		if err := config.Get().SetKey("wifiCountryCode", countryCode); err != nil {
-			log.Printf("WiFi: Warning - failed to save country code: %v", err)
-		}
 	}
 
-	// Save WiFi credentials to config
+	// Configure network and get the network ID
+	networkID, err := w.configureNetwork(ssid, password)
+	if err != nil {
+		return err
+	}
+
+	// Wait for connection and verify internet access
+	if err := w.waitForInternet(ssid, 15*time.Second); err != nil {
+		w.removeNetwork(networkID)
+
+		// Revert to saved network if different from the one that just failed
+		if savedSSID, ok := config.Get().GetKey("wifiSSID"); ok && savedSSID.(string) != ssid {
+			if savedPassword, ok := config.Get().GetKey("wifiPassword"); ok {
+				log.Printf("WiFi: Reverting to saved network: %s", savedSSID)
+				if _, revertErr := w.configureNetwork(savedSSID.(string), savedPassword.(string)); revertErr != nil {
+					log.Printf("WiFi: Failed to revert to saved network: %v", revertErr)
+				}
+			}
+		}
+
+		return err
+	}
+
+	// Only save credentials after successful internet verification
 	if err := config.Get().SetKey("wifiSSID", ssid); err != nil {
 		return fmt.Errorf("failed to save WiFi SSID: %w", err)
 	}
 	if err := config.Get().SetKey("wifiPassword", password); err != nil {
 		return fmt.Errorf("failed to save WiFi password: %w", err)
 	}
-
-	// Configure network
-	if err := w.configureNetwork(ssid, password); err != nil {
-		return err
+	if countryCode != "" {
+		if err := config.Get().SetKey("wifiCountryCode", countryCode); err != nil {
+			log.Printf("WiFi: Warning - failed to save country code: %v", err)
+		}
 	}
 
-	// Wait for connection and verify internet access
-	return w.waitForInternet(ssid, 15*time.Second)
+	return nil
 }
 
-// configureNetwork configures a WiFi network using wpa_cli
-func (w *WiFi) configureNetwork(ssid, password string) error {
+// configureNetwork configures a WiFi network using wpa_cli and returns the network ID
+func (w *WiFi) configureNetwork(ssid, password string) (string, error) {
 	// Add network via wpa_cli
 	output, err := exec.Command("wpa_cli", "-i", "wlan0", "add_network").Output()
 	if err != nil {
-		return fmt.Errorf("failed to add network: %w", err)
+		return "", fmt.Errorf("failed to add network: %w", err)
 	}
 	networkID := strings.TrimSpace(string(output))
 
 	// Set SSID
 	if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "ssid", fmt.Sprintf(`"%s"`, ssid)).Run(); err != nil {
-		return fmt.Errorf("failed to set SSID: %w", err)
+		return "", fmt.Errorf("failed to set SSID: %w", err)
 	}
 
 	// Set password or key_mgmt=NONE for open networks
 	if password == "" {
 		if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "key_mgmt", "NONE").Run(); err != nil {
-			return fmt.Errorf("failed to set key_mgmt: %w", err)
+			return "", fmt.Errorf("failed to set key_mgmt: %w", err)
 		}
 	} else {
 		if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "psk", fmt.Sprintf(`"%s"`, password)).Run(); err != nil {
-			return fmt.Errorf("failed to set password: %w", err)
+			return "", fmt.Errorf("failed to set password: %w", err)
 		}
 	}
 
 	// Enable the network
 	if err := exec.Command("wpa_cli", "-i", "wlan0", "enable_network", networkID).Run(); err != nil {
-		return fmt.Errorf("failed to enable network: %w", err)
+		return "", fmt.Errorf("failed to enable network: %w", err)
 	}
 
 	// Select this network
 	if err := exec.Command("wpa_cli", "-i", "wlan0", "select_network", networkID).Run(); err != nil {
-		return fmt.Errorf("failed to select network: %w", err)
+		return "", fmt.Errorf("failed to select network: %w", err)
 	}
 
-	return nil
+	return networkID, nil
+}
+
+// removeNetwork removes a specific network by ID
+// Don't call reconnect here, the caller will explicitly reconfigure the saved network if available
+func (w *WiFi) removeNetwork(networkID string) {
+	if err := exec.Command("wpa_cli", "-i", "wlan0", "remove_network", networkID).Run(); err != nil {
+		log.Printf("WiFi: Failed to remove network %s: %v", networkID, err)
+	}
 }
 
 // waitForInternet waits for internet connectivity up to the specified timeout

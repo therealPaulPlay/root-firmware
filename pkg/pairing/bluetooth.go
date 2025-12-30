@@ -87,8 +87,8 @@ func initBLE() error {
 		deviceName = ssid.(string)
 	}
 
-	// Create Linux BLE device
-	d, err := linux.NewDevice()
+	// Create Linux BLE device with specified name
+	d, err := linux.NewDeviceWithName(deviceName)
 	if err != nil {
 		return fmt.Errorf("failed to create BLE device: %w", err)
 	}
@@ -233,8 +233,8 @@ func initBLE() error {
 	}))
 
 	// Set WiFi characteristic (write to configure, read to get result)
-	wifiChar := svc.NewCharacteristic(wifiConnectCharUUID)
-	wifiChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+	wifiConnectChar := svc.NewCharacteristic(wifiConnectCharUUID)
+	wifiConnectChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		decrypted, err := decryptAndVerify(req.Data())
 		if err != nil {
 			log.Printf("BLE: WiFi decrypt failed: %v", err)
@@ -254,7 +254,7 @@ func initBLE() error {
 		}
 
 		if err := wifi.Get().Connect(wifiReq.SSID, wifiReq.Password, wifiReq.CountryCode); err != nil {
-			log.Printf("BLE: WiFi connect failed: %v", err)
+			log.Printf("BLE: WiFi connection to %s failed: %v", wifiReq.SSID, err)
 			wifiStatus = operationStatus{completed: true, success: false, error: err.Error()}
 			return
 		}
@@ -262,7 +262,7 @@ func initBLE() error {
 		log.Printf("BLE: WiFi configured: %s", wifiReq.SSID)
 		wifiStatus = operationStatus{completed: true, success: true}
 	}))
-	wifiChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+	wifiConnectChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if !wifiStatus.completed {
 			writeError(rsp, "No WiFi configuration result available")
 			return
@@ -286,8 +286,8 @@ func initBLE() error {
 	}))
 
 	// Set Relay characteristic (write to configure, read to get result)
-	relayChar := svc.NewCharacteristic(relaySetCharUUID)
-	relayChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+	relaySetChar := svc.NewCharacteristic(relaySetCharUUID)
+	relaySetChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		decrypted, err := decryptAndVerify(req.Data())
 		if err != nil {
 			log.Printf("BLE: Relay domain decrypt failed: %v", err)
@@ -317,7 +317,7 @@ func initBLE() error {
 		log.Printf("BLE: Relay configured: %s", relayReq.RelayDomain)
 		relayStatus = operationStatus{completed: true, success: true}
 	}))
-	relayChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+	relaySetChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if !relayStatus.completed {
 			writeError(rsp, "No relay configuration result available")
 			return
@@ -339,7 +339,6 @@ func initBLE() error {
 	log.Printf("BLE: Starting advertising as '%s' with service UUID %s", deviceName, serviceUUID)
 
 	go func() {
-		log.Printf("BLE: Advertising goroutine started")
 		if err := ble.AdvertiseNameAndServices(ctx, deviceName, serviceUUID); err != nil {
 			log.Printf("BLE: Advertising error: %v", err)
 		} else {
