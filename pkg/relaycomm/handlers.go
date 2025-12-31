@@ -52,7 +52,6 @@ const (
 
 // Error code constants
 const (
-	ErrKeyExpired       = "KEY_EXPIRED"
 	ErrDeviceNotPaired  = "DEVICE_NOT_PAIRED"
 	ErrCameraNotInit    = "CAMERA_NOT_INITIALIZED"
 	ErrInvalidKey       = "INVALID_KEY"
@@ -95,12 +94,6 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		device, ok := devices.Get().GetByID(msg.DeviceID)
 		if !ok {
 			sendError(msg.DeviceID, messageType, ErrDeviceNotPaired, "Device not paired!")
-			return
-		}
-
-		// Check if key is expired (forward secrecy enforcement)
-		if time.Now().After(device.KeyExpiresAt) {
-			sendError(msg.DeviceID, messageType, ErrKeyExpired, "Session key expired!")
 			return
 		}
 
