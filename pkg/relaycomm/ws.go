@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	reconnectDelay      = 5 * time.Second
+	reconnectDelay       = 5 * time.Second
 	maxMessagesPerSecond = 15
 )
 
@@ -71,6 +71,12 @@ func (r *RelayComm) Start() error {
 	if !ok {
 		return fmt.Errorf("relay domain not configured")
 	}
+
+	// Reset rate limit counter
+	r.rateLimitMu.Lock()
+	r.rateLimitMessageCount = 0
+	r.rateLimitLastReset = time.Now()
+	r.rateLimitMu.Unlock()
 
 	r.running = true
 	r.stopChan = make(chan struct{})
@@ -153,7 +159,7 @@ func (r *RelayComm) handleMessages() {
 
 		// Check rate limit
 		if !r.checkRateLimit() {
-			log.Println("RelayComm: Incoming messages rate limit exceeded")
+			log.Printf("RelayComm: Rate limit exceeded (%d messages/second), message type: %s", r.rateLimitMessageCount, msg.Type)
 			continue
 		}
 
