@@ -250,7 +250,7 @@ func RegisterHandlers() {
 	// Check if relay domain is configured
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok || relayDomain == "" {
-		log.Println("Relaycomm: Relay handlers not registered - relay domain not configured")
+		log.Println("RelayComm: Relay handlers not registered - relay domain not configured")
 		return
 	}
 
@@ -382,7 +382,7 @@ func handleRenewKey(msg Message) {
 		EncryptionSession: newSession,
 	}
 
-	log.Printf("Relaycomm: Key renewed for device %s", msg.DeviceID)
+	log.Printf("RelayComm: Key renewed for device %s", msg.DeviceID)
 	SendEncryptedSuccess(ctx, MsgRenewKey, nil)
 }
 

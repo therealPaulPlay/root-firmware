@@ -2,6 +2,7 @@ package relaycomm
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -11,7 +12,8 @@ import (
 )
 
 const (
-	reconnectDelay = 5 * time.Second
+	reconnectDelay      = 5 * time.Second
+	maxMessagesPerSecond = 15
 )
 
 type Message struct {
@@ -23,10 +25,14 @@ type Message struct {
 }
 
 type RelayComm struct {
-	conn     *websocket.Conn
-	running  bool
-	stopChan chan struct{}
-	handlers map[string]func(Message)
+	conn                  *websocket.Conn
+	connMu                sync.Mutex // Protects WebSocket writes
+	running               bool
+	stopChan              chan struct{}
+	handlers              map[string]func(Message)
+	rateLimitMessageCount int
+	rateLimitLastReset    time.Time
+	rateLimitMu           sync.Mutex
 }
 
 var instance *RelayComm
@@ -35,7 +41,8 @@ var once sync.Once
 func Init() {
 	once.Do(func() {
 		instance = &RelayComm{
-			handlers: make(map[string]func(Message)),
+			handlers:           make(map[string]func(Message)),
+			rateLimitLastReset: time.Now(),
 		}
 	})
 }
@@ -90,6 +97,9 @@ func (r *RelayComm) Stop() {
 
 // Send sends a message to the relay server
 func (r *RelayComm) Send(msg Message) error {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
+
 	if r.conn == nil {
 		return fmt.Errorf("not connected")
 	}
@@ -141,9 +151,34 @@ func (r *RelayComm) handleMessages() {
 			return
 		}
 
+		// Check rate limit
+		if !r.checkRateLimit() {
+			log.Println("RelayComm: Incoming messages rate limit exceeded")
+			continue
+		}
+
 		// Look up and call handler
 		if handler, ok := r.handlers[msg.Type]; ok {
 			go handler(msg)
 		}
 	}
+}
+
+// checkRateLimit returns false if rate limit exceeded
+func (r *RelayComm) checkRateLimit() bool {
+	r.rateLimitMu.Lock()
+	defer r.rateLimitMu.Unlock()
+
+	// Reset counter every second
+	if time.Since(r.rateLimitLastReset) >= time.Second {
+		r.rateLimitMessageCount = 0
+		r.rateLimitLastReset = time.Now()
+	}
+
+	if r.rateLimitMessageCount >= maxMessagesPerSecond {
+		return false
+	}
+
+	r.rateLimitMessageCount++
+	return true
 }
