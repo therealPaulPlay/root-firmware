@@ -173,7 +173,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 ```json
 {
   "deviceId": "unique-device-id",
-  "encryptedPayload": "base64-encrypted-json"
+  "payload": "base64-encrypted-json"
 }
 ```
 
@@ -231,7 +231,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 ```json
 {
   "deviceId": "unique-device-id",
-  "encryptedPayload": "base64-encrypted-json"
+  "payload": "base64-encrypted-json"
 }
 ```
 

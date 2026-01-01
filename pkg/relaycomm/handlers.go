@@ -63,6 +63,7 @@ const (
 // HandlerContext provides encryption context to handlers
 type HandlerContext struct {
 	DeviceID          string
+	RequestID         string
 	SharedSecret      []byte
 	EncryptionSession *encryption.Session
 }
@@ -74,7 +75,7 @@ Device → Relay Server → Camera:
 		"target": "product",
 		"productId": "camera-uuid-123",    // ← Which camera should handle this
 		"deviceId": "device-uuid-456",     // ← Which device sent this
-		"encryptedPayload": "base64..." // { ssid: "...", password: "..." } (No deviceId needed - if wrong device sent it, decryption would fail)
+		"payload": "encrypted base64..." // { ssid: "...", password: "..." } (No deviceId needed - if wrong device sent it, decryption would fail)
 	}
 
 Camera → Relay Server → Device:
@@ -83,7 +84,7 @@ Camera → Relay Server → Device:
 		"target": "device",
 		"productId": "camera-uuid-123",    // ← Which camera sent this
 		"deviceId": "device-uuid-456",     // ← Which device should receive this
-		"encryptedPayload": "base64..." // { success: true, networks: [...] } (No productId needed - if wrong camera sent it, decryption would fail)
+		"payload": "encrypted base64..." // { success: true, networks: [...] } (No productId needed - if wrong camera sent it, decryption would fail)
 	}
 */
 
@@ -93,21 +94,21 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		// Get device to verify it's paired
 		device, ok := devices.Get().GetByID(msg.DeviceID)
 		if !ok {
-			sendError(msg.DeviceID, messageType, ErrDeviceNotPaired, "Device not paired!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrDeviceNotPaired, "Device not paired!")
 			return
 		}
 
 		// Get camera's private key (stored as base64 string)
 		cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
 		if !ok {
-			sendError(msg.DeviceID, messageType, ErrCameraNotInit, "Camera not initialized!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrCameraNotInit, "Camera not initialized!")
 			return
 		}
 
 		privKeyStr, ok := cameraPrivateKeyEncoded.(string)
 		if !ok {
 			log.Printf("RelayComm: Camera private key has invalid type")
-			sendError(msg.DeviceID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
 			return
 		}
 
@@ -115,34 +116,35 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		privKey, err := encryption.DecodeKey(privKeyStr)
 		if err != nil {
 			log.Printf("RelayComm: Failed to decode camera private key: %v", err)
-			sendError(msg.DeviceID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
 			return
 		}
 
 		// Derive shared secret using camera's private key and device's public key
 		sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 		if err != nil {
-			sendError(msg.DeviceID, messageType, ErrInvalidKey, "Failed to derive encryption key!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Failed to derive encryption key!")
 			return
 		}
 
 		// Create session for decryption
 		session, err := encryption.FromSharedSecret(sharedSecret)
 		if err != nil {
-			sendError(msg.DeviceID, messageType, ErrInternalError, "Failed to create encryption session!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInternalError, "Failed to create encryption session!")
 			return
 		}
 
 		// Decrypt payload
-		decrypted, err := session.Decrypt(msg.EncryptedPayload)
+		decrypted, err := session.Decrypt(msg.Payload)
 		if err != nil {
-			sendError(msg.DeviceID, messageType, ErrDecryptionFailed, "Failed to decrypt payload!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload!")
 			return
 		}
 
 		// Create handler context with encryption info
 		ctx := &HandlerContext{
 			DeviceID:          msg.DeviceID,
+			RequestID:         msg.RequestID,
 			SharedSecret:      sharedSecret,
 			EncryptionSession: session,
 		}
@@ -153,7 +155,7 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 }
 
 // sendError sends an error response to a device
-func sendError(deviceID, messageType, errorCode, errorMsg string) {
+func sendError(deviceID, requestID, messageType, errorCode, errorMsg string) {
 	productID, _ := config.Get().GetKey("id")
 
 	prodIDStr, ok := productID.(string)
@@ -164,7 +166,6 @@ func sendError(deviceID, messageType, errorCode, errorMsg string) {
 
 	// Create error payload with error code
 	errorPayload := map[string]any{
-		"productId": prodIDStr,
 		"success":   false,
 		"errorCode": errorCode,
 		"error":     errorMsg,
@@ -176,11 +177,12 @@ func sendError(deviceID, messageType, errorCode, errorMsg string) {
 	}
 
 	Get().Send(Message{
-		Type:             messageType + "Result",
-		Target:           "device",
-		ProductID:        prodIDStr,
-		DeviceID:         deviceID,
-		EncryptedPayload: string(payloadJSON), // Send as unencrypted JSON for errors
+		Type:      messageType + "Result",
+		Target:    "device",
+		ProductID: prodIDStr,
+		DeviceID:  deviceID,
+		RequestID: requestID,
+		Payload:   string(payloadJSON), // Send as unencrypted JSON for errors
 	})
 }
 
@@ -211,11 +213,12 @@ func sendEncrypted(ctx *HandlerContext, messageType string, payload map[string]a
 
 	// Send encrypted response
 	return Get().Send(Message{
-		Type:             messageType + "Result",
-		Target:           "device",
-		ProductID:        prodIDStr,
-		DeviceID:         ctx.DeviceID,
-		EncryptedPayload: encryptedPayload,
+		Type:      messageType + "Result",
+		Target:    "device",
+		ProductID: prodIDStr,
+		DeviceID:  ctx.DeviceID,
+		RequestID: ctx.RequestID,
+		Payload:   encryptedPayload,
 	})
 }
 
@@ -287,21 +290,21 @@ func handleRenewKey(msg Message) {
 	// Get device to verify it's paired (allow expired keys for renewal)
 	device, ok := devices.Get().GetByID(msg.DeviceID)
 	if !ok {
-		sendError(msg.DeviceID, MsgRenewKey, ErrDeviceNotPaired, "Device not paired!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrDeviceNotPaired, "Device not paired!")
 		return
 	}
 
 	// Get camera's private key (stored as base64 string)
 	cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
 	if !ok {
-		sendError(msg.DeviceID, MsgRenewKey, ErrCameraNotInit, "Camera not initialized!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrCameraNotInit, "Camera not initialized!")
 		return
 	}
 
 	privKeyStr, ok := cameraPrivateKeyEncoded.(string)
 	if !ok {
 		log.Printf("RelayComm: Camera private key has invalid type")
-		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
 		return
 	}
 
@@ -309,28 +312,28 @@ func handleRenewKey(msg Message) {
 	privKey, err := encryption.DecodeKey(privKeyStr)
 	if err != nil {
 		log.Printf("RelayComm: Failed to decode camera private key: %v", err)
-		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
 		return
 	}
 
 	// Derive shared secret using OLD key (still stored in device)
 	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Failed to derive encryption key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive encryption key!")
 		return
 	}
 
 	// Create session for decryption
 	session, err := encryption.FromSharedSecret(sharedSecret)
 	if err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrInternalError, "Failed to create encryption session!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to create encryption session!")
 		return
 	}
 
 	// Decrypt payload containing new public key
-	decrypted, err := session.Decrypt(msg.EncryptedPayload)
+	decrypted, err := session.Decrypt(msg.Payload)
 	if err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrDecryptionFailed, "Failed to decrypt payload!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrDecryptionFailed, "Failed to decrypt payload!")
 		return
 	}
 
@@ -338,39 +341,40 @@ func handleRenewKey(msg Message) {
 		NewPublicKey string `json:"newPublicKey"`
 	}
 	if err := json.Unmarshal(decrypted, &req); err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidPayload, "Invalid payload!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidPayload, "Invalid payload!")
 		return
 	}
 
 	// Decode new public key
 	newPublicKey, err := encryption.DecodeKey(req.NewPublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Invalid public key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Invalid public key!")
 		return
 	}
 
 	// Update device with new key
 	if err := devices.Get().RenewKey(msg.DeviceID, newPublicKey); err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrInternalError, "Failed to update key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to update key!")
 		return
 	}
 
 	// Derive NEW shared secret for response
 	newSharedSecret, err := encryption.DeriveSharedSecret(privKey, newPublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrInvalidKey, "Failed to derive new encryption key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive new encryption key!")
 		return
 	}
 
 	newSession, err := encryption.FromSharedSecret(newSharedSecret)
 	if err != nil {
-		sendError(msg.DeviceID, MsgRenewKey, ErrInternalError, "Failed to create new encryption session!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to create new encryption session!")
 		return
 	}
 
 	// Create context with NEW session for response
 	ctx := &HandlerContext{
 		DeviceID:          msg.DeviceID,
+		RequestID:         msg.RequestID,
 		SharedSecret:      newSharedSecret,
 		EncryptionSession: newSession,
 	}

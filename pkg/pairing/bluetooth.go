@@ -360,18 +360,18 @@ func initBLE() error {
 }
 
 func decryptAndVerify(data []byte) ([]byte, error) {
-	var payload struct {
-		DeviceID         string `json:"deviceId"`
-		EncryptedPayload string `json:"encryptedPayload"`
+	var msg struct {
+		DeviceID string `json:"deviceId"`
+		Payload  string `json:"payload"`
 	}
 
-	if err := json.Unmarshal(data, &payload); err != nil {
+	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, fmt.Errorf("invalid payload format: %w", err)
 	}
 
-	device, ok := devices.Get().GetByID(payload.DeviceID)
+	device, ok := devices.Get().GetByID(msg.DeviceID)
 	if !ok {
-		return nil, fmt.Errorf("device not paired: %s", payload.DeviceID)
+		return nil, fmt.Errorf("device not paired: %s", msg.DeviceID)
 	}
 
 	// Get camera private key (stored as base64 string)
@@ -401,7 +401,7 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	decrypted, err := session.Decrypt(payload.EncryptedPayload)
+	decrypted, err := session.Decrypt(msg.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("decryption failed: %w", err)
 	}

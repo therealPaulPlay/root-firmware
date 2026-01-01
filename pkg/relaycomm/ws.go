@@ -17,11 +17,12 @@ const (
 )
 
 type Message struct {
-	Type             string `json:"type"`
-	Target           string `json:"target,omitempty"`           // "product" or "device"
-	ProductID        string `json:"productId,omitempty"`        // Target/source product ID
-	DeviceID         string `json:"deviceId,omitempty"`         // Target/source device ID
-	EncryptedPayload string `json:"encryptedPayload,omitempty"` // Base64 encrypted JSON
+	Type      string `json:"type"`
+	Target    string `json:"target,omitempty"`    // "product" or "device"
+	ProductID string `json:"productId,omitempty"` // Target/source product ID
+	DeviceID  string `json:"deviceId,omitempty"`  // Target/source device ID
+	RequestID string `json:"requestId,omitempty"` // Request tracking ID
+	Payload   string `json:"payload,omitempty"`   // Encrypted (base64) or unencrypted JSON
 }
 
 type RelayComm struct {
