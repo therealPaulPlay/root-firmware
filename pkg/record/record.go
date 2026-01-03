@@ -60,13 +60,6 @@ func micEnabled() bool {
 	return ok && b
 }
 
-// IsStreamingOrRecording returns true if camera is in use
-func (r *Recorder) IsStreamingOrRecording() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.recording || r.streaming
-}
-
 // StartRecording starts recording video to file
 func (r *Recorder) StartRecording(outputPath string) error {
 	r.mu.Lock()
@@ -78,6 +71,10 @@ func (r *Recorder) StartRecording(outputPath string) error {
 	if r.streaming {
 		return fmt.Errorf("camera in use (streaming)")
 	}
+
+	// Kill any rpicam-still processes (ML might be using camera)
+	exec.Command("pkill", "-9", "rpicam-still").Run()
+	time.Sleep(200 * time.Millisecond)
 
 	cmd := exec.Command("rpicam-vid",
 		"-t", "0", "-o", outputPath,
@@ -125,19 +122,25 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 		return nil, fmt.Errorf("already streaming")
 	}
 
-	// Stop any active recording to give stream priority
-	if r.recording && r.recordCmd != nil {
-		r.recordCmd.Process.Kill()
-		r.recordCmd.Wait()
+	// Stop any active recording
+	if r.recording {
+		if r.recordCmd != nil && r.recordCmd.Process != nil {
+			r.recordCmd.Process.Kill()
+		}
 		r.recording = false
 		r.recordCmd = nil
 	}
 
+	// Kill any rpicam-still processes (ML might be using camera)
+	exec.Command("pkill", "-9", "rpicam-still").Run()
+	time.Sleep(200 * time.Millisecond)
+
 	videoCmd := exec.Command("rpicam-vid",
 		"-t", "0", "-o", "-",
 		"--codec", "h264", "-n", "--inline", "--listen",
+		"--framerate", "15", // 15 FPS for streaming
+		"--width", "1920", "--height", "1080", // 1080p
 	)
-	videoCmd.WaitDelay = 2 * time.Second
 
 	videoOut, err := videoCmd.StdoutPipe()
 	if err != nil {
@@ -155,16 +158,15 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 			"-f", "alsa", "-i", "default",
 			"-c:a", "aac", "-f", "adts", "pipe:1",
 		)
-		audioCmd.WaitDelay = 2 * time.Second
 
 		audioOut, err := audioCmd.StdoutPipe()
 		if err != nil {
 			videoCmd.Process.Kill()
-			return nil, fmt.Errorf("failed to create audio pipe: %w", err)
+			return nil, err
 		}
 		if err := audioCmd.Start(); err != nil {
 			videoCmd.Process.Kill()
-			return nil, fmt.Errorf("failed to start audio stream: %w", err)
+			return nil, err
 		}
 
 		output.Audio = audioOut
@@ -214,6 +216,14 @@ func (r *Recorder) CapturePreview() ([]byte, error) {
 func (r *Recorder) CapturePreviewWithResolution(width, height int) ([]byte, error) {
 	r.captureMu.Lock()
 	defer r.captureMu.Unlock()
+
+	// Skip if camera is busy
+	r.mu.Lock()
+	busy := r.streaming || r.recording
+	r.mu.Unlock()
+	if busy {
+		return nil, fmt.Errorf("currently streaming or recording")
+	}
 
 	cmd := exec.Command("rpicam-still",
 		"-o", "-", "-t", "2000",

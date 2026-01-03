@@ -4,56 +4,100 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"sync"
+	"time"
 )
 
 const (
-	chunkSize  = 64 * 1024 // 64KB chunks
-	maxViewers = 3
+	chunkSize     = 64 * 1024 // 64KB chunks
+	maxViewers    = 3
+	channelBuffer = 30 // Buffer up to 30 chunks per viewer
 )
 
+type viewer struct {
+	ctx     *HandlerContext
+	chunks  chan map[string]any
+	stopCh  chan struct{}
+	msgType string
+}
+
 var (
-	viewers   = make(map[string]*HandlerContext)
+	viewers   = make(map[string]*viewer)
 	viewersMu sync.Mutex
 )
 
-// addViewer adds a viewer and returns error if limit reached
-func addViewer(ctx *HandlerContext) error {
+// AddViewer adds a viewer. Returns (shouldStartCamera, error).
+func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
 	viewersMu.Lock()
 	defer viewersMu.Unlock()
 
 	if len(viewers) >= maxViewers {
-		return fmt.Errorf("viewer limit reached (%d/%d)", len(viewers), maxViewers)
+		return false, fmt.Errorf("viewer limit reached (%d/%d)", len(viewers), maxViewers)
 	}
-	viewers[ctx.DeviceID] = ctx
-	return nil
+
+	v := &viewer{
+		ctx:     ctx,
+		chunks:  make(chan map[string]any, channelBuffer),
+		stopCh:  make(chan struct{}),
+		msgType: messageType,
+	}
+
+	// Start sender goroutine for this viewer
+	go func() {
+		for {
+			select {
+			case chunk := <-v.chunks:
+				// Send with timeout to prevent blocking indefinitely
+				done := make(chan struct{})
+				go func() {
+					SendEncryptedSuccess(v.ctx, v.msgType, chunk)
+					close(done)
+				}()
+
+				select {
+				case <-done:
+					// Success
+				case <-time.After(5 * time.Second):
+					log.Printf("RelayComm: Send timeout for viewer %s", v.ctx.DeviceID)
+				}
+			case <-v.stopCh:
+				return
+			}
+		}
+	}()
+
+	wasEmpty := len(viewers) == 0
+	viewers[ctx.DeviceID] = v
+
+	return wasEmpty, nil // Start camera if this was first viewer
 }
 
-// removeViewer removes a viewer and returns true if no viewers remain
-func removeViewer(deviceID string) bool {
+// RemoveViewer removes a viewer. Returns true if camera should stop (last viewer left).
+func RemoveViewer(deviceID string) bool {
 	viewersMu.Lock()
 	defer viewersMu.Unlock()
-	delete(viewers, deviceID)
+
+	if v, ok := viewers[deviceID]; ok {
+		close(v.stopCh)
+		close(v.chunks)
+		delete(viewers, deviceID)
+	}
 	return len(viewers) == 0
 }
 
-// broadcastSuccess sends successful chunk data to all viewers
-func broadcastSuccess(messageType string, fields map[string]any) {
+// broadcastChunk sends chunk data to all viewers (non-blocking, drops if buffer full)
+func broadcastChunk(fields map[string]any) {
 	viewersMu.Lock()
 	defer viewersMu.Unlock()
 
-	for _, ctx := range viewers {
-		SendEncryptedSuccess(ctx, messageType, fields)
-	}
-}
-
-// broadcastError sends error to all viewers
-func broadcastError(messageType, errorCode, errorMsg string) {
-	viewersMu.Lock()
-	defer viewersMu.Unlock()
-
-	for _, ctx := range viewers {
-		SendEncryptedError(ctx, messageType, errorCode, errorMsg)
+	for deviceID, v := range viewers {
+		select {
+		case v.chunks <- fields:
+			// Successfully queued
+		default:
+			log.Printf("RelayComm: Dropping chunk for viewer %s (buffer full)", deviceID)
+		}
 	}
 }
 
@@ -62,11 +106,19 @@ func StreamReader(reader io.Reader, messageType string) error {
 	buffer := make([]byte, chunkSize)
 	chunkIndex := 0
 
+	log.Printf("RelayComm: StreamReader started for %s", messageType)
+
+	// Rate limit: 5 chunks/sec (each chunk can contain multiple frames)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
+		<-ticker.C // Wait before reading next chunk
+
 		n, err := reader.Read(buffer)
 		if n > 0 {
 			encoded := base64.StdEncoding.EncodeToString(buffer[:n])
-			broadcastSuccess(messageType, map[string]any{
+			broadcastChunk(map[string]any{
 				"chunk":      encoded,
 				"chunkIndex": chunkIndex,
 				"done":       false,
@@ -75,13 +127,15 @@ func StreamReader(reader io.Reader, messageType string) error {
 		}
 
 		if err == io.EOF {
-			broadcastSuccess(messageType, map[string]any{
+			log.Printf("RelayComm: %s reached EOF after %d chunks", messageType, chunkIndex)
+			broadcastChunk(map[string]any{
 				"done": true,
 			})
 			return nil
 		}
 
 		if err != nil {
+			log.Printf("RelayComm: %s error after %d chunks: %v", messageType, chunkIndex, err)
 			return fmt.Errorf("failed to read: %w", err)
 		}
 	}

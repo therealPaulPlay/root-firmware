@@ -488,34 +488,23 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	// Add viewer (enforces limit)
-	if err := addViewer(ctx); err != nil {
+	shouldStart, err := AddViewer(ctx, MsgStreamVideoChunk)
+	if err != nil {
 		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
 		return
 	}
 
-	// Start stream if not already running
-	stream, err := record.Get().StartStream()
-	if err != nil && err.Error() != "already streaming" {
-		removeViewer(ctx.DeviceID)
-		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
-		return
-	}
+	if shouldStart {
+		stream, err := record.Get().StartStream()
+		if err != nil {
+			RemoveViewer(ctx.DeviceID)
+			SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
+			return
+		}
 
-	// If this is the first viewer, start streaming goroutines
-	if err == nil {
-		go func() {
-			if err := StreamReader(stream.Video, MsgStreamVideoChunk); err != nil {
-				broadcastError(MsgStreamVideoChunk, ErrInternalError, err.Error())
-			}
-		}()
-
+		go StreamReader(stream.Video, MsgStreamVideoChunk)
 		if stream.Audio != nil {
-			go func() {
-				if err := StreamReader(stream.Audio, MsgStreamAudioChunk); err != nil {
-					broadcastError(MsgStreamAudioChunk, ErrInternalError, err.Error())
-				}
-			}()
+			go StreamReader(stream.Audio, MsgStreamAudioChunk)
 		}
 	}
 
@@ -523,14 +512,13 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
-	var err error
-	if removeViewer(ctx.DeviceID) {
-		err = record.Get().StopStream()
-	}
+	shouldStop := RemoveViewer(ctx.DeviceID)
 
-	if err != nil {
-		SendEncryptedError(ctx, MsgStopStream, ErrInternalError, err.Error())
-		return
+	if shouldStop {
+		if err := record.Get().StopStream(); err != nil {
+			SendEncryptedError(ctx, MsgStopStream, ErrInternalError, err.Error())
+			return
+		}
 	}
 
 	SendEncryptedSuccess(ctx, MsgStopStream, nil)

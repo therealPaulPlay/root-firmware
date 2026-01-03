@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	checkInterval    = 1 * time.Second  // Check frequently for motion
+	checkInterval    = 5 * time.Second  // Check for motion
 	recordDuration   = 10 * time.Second // Fixed recording chunks
 	cooldownDuration = 5 * time.Second  // Wait after recording stops
 	motionTimeout    = 3 * time.Second  // Stop recording if no motion
@@ -75,16 +75,16 @@ func (m *ML) loop() {
 }
 
 func (m *ML) check() {
-	// Check recording state and cooldown (need lock for timestamps)
+	// Check cooldown
 	m.mu.Lock()
-	isRecording := record.Get().IsStreamingOrRecording()
-	if !isRecording && time.Since(m.lastRecordedAt) < cooldownDuration {
+	if time.Since(m.lastRecordedAt) < cooldownDuration {
 		m.mu.Unlock()
 		return
 	}
+	isRecording := m.recordingPath != ""
 	m.mu.Unlock()
 
-	// Capture frame without holding lock (this is a slow blocking call to ffmpeg)
+	// Capture frame (returns error if camera busy!)
 	frame, err := record.Get().CapturePreview()
 	if err != nil {
 		return
