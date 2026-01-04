@@ -31,19 +31,25 @@ var (
 	cleanupTicker *time.Ticker
 )
 
-// AddViewer adds a viewer for the given device
-func AddViewer(ctx *HandlerContext, messageType string) error {
+// AddViewer adds a viewer for the given device.
+// Returns true if this is the first viewer (stream should start), false otherwise.
+func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
 	viewersMu.Lock()
-	defer viewersMu.Unlock()
 
-	// Return if viewer for this device already exists
+	// Update existing viewer (reconnect scenario)
 	if _, exists := viewers[ctx.DeviceID]; exists {
-		return nil
+		viewersMu.Unlock()
+		UpdateViewerContext(ctx.DeviceID, ctx)
+		UpdateViewerActivity(ctx.DeviceID)
+		return false, nil
 	}
 
 	if len(viewers) >= maxViewers {
-		return fmt.Errorf("viewer limit reached (%d/%d)", len(viewers), maxViewers)
+		viewersMu.Unlock()
+		return false, fmt.Errorf("viewer limit reached (%d/%d)", len(viewers), maxViewers)
 	}
+
+	defer viewersMu.Unlock()
 
 	v := &viewer{
 		ctx:        ctx,
@@ -58,10 +64,12 @@ func AddViewer(ctx *HandlerContext, messageType string) error {
 		for {
 			select {
 			case chunk := <-v.chunks:
-				// Send with timeout to prevent blocking indefinitely
 				done := make(chan struct{})
 				go func() {
-					SendEncryptedSuccess(v.ctx, v.msgType, chunk)
+					viewersMu.Lock()
+					ctx := v.ctx
+					viewersMu.Unlock()
+					SendEncryptedSuccess(ctx, v.msgType, chunk)
 					close(done)
 				}()
 
@@ -69,7 +77,7 @@ func AddViewer(ctx *HandlerContext, messageType string) error {
 				case <-done:
 					// Success
 				case <-time.After(5 * time.Second):
-					log.Printf("RelayComm: Send timeout for viewer %s", v.ctx.DeviceID)
+					log.Printf("RelayComm: Send timeout for viewer %s", ctx.DeviceID)
 				}
 			case <-v.stopCh:
 				return
@@ -85,7 +93,7 @@ func AddViewer(ctx *HandlerContext, messageType string) error {
 		startViewerCleanup()
 	}
 
-	return nil
+	return isFirstViewer, nil
 }
 
 // UpdateViewerActivity updates the last active timestamp for a viewer
@@ -120,7 +128,7 @@ func startViewerCleanup() {
 			for deviceID, v := range viewers {
 				// Remove viewer if no heartbeat for 5s
 				if now.Sub(v.lastActive) > 5*time.Second {
-					log.Printf("RelayComm: Removing inactive viewer %s", deviceID)
+					log.Printf("RelayComm: Removing inactive viewer with device ID %s", deviceID)
 					close(v.stopCh)
 					close(v.chunks)
 					delete(viewers, deviceID)

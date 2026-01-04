@@ -491,22 +491,24 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	if err := AddViewer(ctx, MsgStreamVideoChunk); err != nil {
-		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
-		return
-	}
-
-	// Restart stream to ensure new viewer starts from a keyframe
-	record.Get().StopStream()
-	stream, err := record.Get().StartStream()
+	isFirstViewer, err := AddViewer(ctx, MsgStreamVideoChunk)
 	if err != nil {
 		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
 		return
 	}
 
-	go StreamReader(stream.Video, MsgStreamVideoChunk)
-	if stream.Audio != nil {
-		go StreamReader(stream.Audio, MsgStreamAudioChunk)
+	// Only start stream if this is the first viewer
+	if isFirstViewer {
+		stream, err := record.Get().StartStream()
+		if err != nil {
+			SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
+			return
+		}
+
+		go StreamReader(stream.Video, MsgStreamVideoChunk)
+		if stream.Audio != nil {
+			go StreamReader(stream.Audio, MsgStreamAudioChunk)
+		}
 	}
 
 	SendEncryptedSuccess(ctx, MsgStartStream, nil)
