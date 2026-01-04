@@ -18,6 +18,7 @@ type Recorder struct {
 	recordCmd      *exec.Cmd
 	videoStreamCmd *exec.Cmd
 	audioStreamCmd *exec.Cmd
+	ffmpegCmd      *exec.Cmd
 	mu             sync.Mutex
 	captureMu      sync.Mutex // Serialize camera captures to prevent "in use" errors
 }
@@ -135,23 +136,48 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 	exec.Command("pkill", "-9", "rpicam-still").Run()
 	time.Sleep(200 * time.Millisecond)
 
-	videoCmd := exec.Command("rpicam-vid",
+	// Start rpicam-vid to capture H.264
+	cameraCmd := exec.Command("rpicam-vid",
 		"-t", "0", "-o", "-",
 		"--codec", "h264", "-n", "--inline", "--listen",
 		"--framerate", "15", // 15 FPS for streaming
 		"--width", "1920", "--height", "1080", // 1080p
 	)
 
-	videoOut, err := videoCmd.StdoutPipe()
+	// Pipe camera output to ffmpeg for fragmented MP4 conversion
+	ffmpegCmd := exec.Command("ffmpeg",
+		"-i", "pipe:0", // Read from stdin
+		"-c:v", "copy", // Copy video codec (no re-encoding)
+		"-f", "mp4", // MP4 format
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof", // Fragmented MP4
+		"-frag_duration", "200000", // Fragment duration in microseconds (~200ms for sending chunks every 5s)
+		"pipe:1", // Output to stdout
+	)
+
+	cameraPipe, err := cameraCmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create video pipe: %w", err)
-	}
-	if err := videoCmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start video stream: %w", err)
+		return nil, fmt.Errorf("failed to create camera pipe: %w", err)
 	}
 
+	ffmpegCmd.Stdin = cameraPipe
+
+	videoOut, err := ffmpegCmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ffmpeg pipe: %w", err)
+	}
+
+	if err := cameraCmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start camera: %w", err)
+	}
+	r.videoStreamCmd = cameraCmd
+
+	if err := ffmpegCmd.Start(); err != nil {
+		r.cleanupStream()
+		return nil, fmt.Errorf("failed to start ffmpeg: %w", err)
+	}
+	r.ffmpegCmd = ffmpegCmd
+
 	output := &StreamOutput{Video: videoOut}
-	r.videoStreamCmd = videoCmd
 
 	if micEnabled() {
 		audioCmd := exec.Command("ffmpeg",
@@ -161,16 +187,17 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 
 		audioOut, err := audioCmd.StdoutPipe()
 		if err != nil {
-			videoCmd.Process.Kill()
-			return nil, err
-		}
-		if err := audioCmd.Start(); err != nil {
-			videoCmd.Process.Kill()
+			r.cleanupStream()
 			return nil, err
 		}
 
-		output.Audio = audioOut
+		if err := audioCmd.Start(); err != nil {
+			r.cleanupStream()
+			return nil, err
+		}
+
 		r.audioStreamCmd = audioCmd
+		output.Audio = audioOut
 	}
 
 	r.streaming = true
@@ -183,6 +210,16 @@ func (r *Recorder) StopStream() error {
 
 	if !r.streaming {
 		return nil
+	}
+
+	r.cleanupStream()
+	return nil
+}
+
+func (r *Recorder) cleanupStream() {
+	if r.ffmpegCmd != nil && r.ffmpegCmd.Process != nil {
+		r.ffmpegCmd.Process.Kill()
+		r.ffmpegCmd.Wait()
 	}
 
 	if r.videoStreamCmd != nil && r.videoStreamCmd.Process != nil {
@@ -198,7 +235,7 @@ func (r *Recorder) StopStream() error {
 	r.streaming = false
 	r.videoStreamCmd = nil
 	r.audioStreamCmd = nil
-	return nil
+	r.ffmpegCmd = nil
 }
 
 // SetMicrophoneEnabled enables or disables microphone

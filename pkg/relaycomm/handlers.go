@@ -38,7 +38,7 @@ const (
 	MsgGetRecording      = "getRecording"
 	MsgGetThumbnail      = "getThumbnail"
 	MsgStartStream       = "startStream"
-	MsgStopStream        = "stopStream"
+	MsgContinueStream    = "continueStream"
 	MsgStreamVideoChunk  = "streamVideoChunk"
 	MsgStreamAudioChunk  = "streamAudioChunk"
 	MsgSetMicrophone     = "setMicrophone"
@@ -267,7 +267,7 @@ func RegisterHandlers() {
 
 	// Streaming
 	relay.On(MsgStartStream, useEncryption(MsgStartStream, handleStartStream))
-	relay.On(MsgStopStream, useEncryption(MsgStopStream, handleStopStream))
+	relay.On(MsgContinueStream, useEncryption(MsgContinueStream, handleContinueStream))
 
 	// Settings
 	relay.On(MsgSetMicrophone, useEncryption(MsgSetMicrophone, handleSetMicrophone))
@@ -379,6 +379,9 @@ func handleRenewKey(msg Message) {
 		EncryptionSession: newSession,
 	}
 
+	// Update viewer context if this device is streaming
+	UpdateViewerContext(msg.DeviceID, ctx)
+
 	log.Printf("RelayComm: Key renewed for device %s", msg.DeviceID)
 	SendEncryptedSuccess(ctx, MsgRenewKey, nil)
 }
@@ -488,40 +491,31 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	shouldStart, err := AddViewer(ctx, MsgStreamVideoChunk)
+	if err := AddViewer(ctx, MsgStreamVideoChunk); err != nil {
+		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
+		return
+	}
+
+	// Restart stream to ensure new viewer starts from a keyframe
+	record.Get().StopStream()
+	stream, err := record.Get().StartStream()
 	if err != nil {
 		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
 		return
 	}
 
-	if shouldStart {
-		stream, err := record.Get().StartStream()
-		if err != nil {
-			RemoveViewer(ctx.DeviceID)
-			SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
-			return
-		}
-
-		go StreamReader(stream.Video, MsgStreamVideoChunk)
-		if stream.Audio != nil {
-			go StreamReader(stream.Audio, MsgStreamAudioChunk)
-		}
+	go StreamReader(stream.Video, MsgStreamVideoChunk)
+	if stream.Audio != nil {
+		go StreamReader(stream.Audio, MsgStreamAudioChunk)
 	}
 
 	SendEncryptedSuccess(ctx, MsgStartStream, nil)
 }
 
-func handleStopStream(ctx *HandlerContext, payload json.RawMessage) {
-	shouldStop := RemoveViewer(ctx.DeviceID)
-
-	if shouldStop {
-		if err := record.Get().StopStream(); err != nil {
-			SendEncryptedError(ctx, MsgStopStream, ErrInternalError, err.Error())
-			return
-		}
-	}
-
-	SendEncryptedSuccess(ctx, MsgStopStream, nil)
+// If clients do not send this, stream will be stopped after 5s (recommended interval is 2s)
+func handleContinueStream(ctx *HandlerContext, payload json.RawMessage) {
+	UpdateViewerActivity(ctx.DeviceID)
+	SendEncryptedSuccess(ctx, MsgContinueStream, nil)
 }
 
 func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {

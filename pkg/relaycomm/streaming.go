@@ -7,6 +7,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"root-firmware/pkg/record"
 )
 
 const (
@@ -16,31 +18,39 @@ const (
 )
 
 type viewer struct {
-	ctx     *HandlerContext
-	chunks  chan map[string]any
-	stopCh  chan struct{}
-	msgType string
+	ctx        *HandlerContext
+	chunks     chan map[string]any
+	stopCh     chan struct{}
+	msgType    string
+	lastActive time.Time
 }
 
 var (
-	viewers   = make(map[string]*viewer)
-	viewersMu sync.Mutex
+	viewers       = make(map[string]*viewer)
+	viewersMu     sync.Mutex
+	cleanupTicker *time.Ticker
 )
 
-// AddViewer adds a viewer. Returns (shouldStartCamera, error).
-func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
+// AddViewer adds a viewer for the given device
+func AddViewer(ctx *HandlerContext, messageType string) error {
 	viewersMu.Lock()
 	defer viewersMu.Unlock()
 
+	// Return if viewer for this device already exists
+	if _, exists := viewers[ctx.DeviceID]; exists {
+		return nil
+	}
+
 	if len(viewers) >= maxViewers {
-		return false, fmt.Errorf("viewer limit reached (%d/%d)", len(viewers), maxViewers)
+		return fmt.Errorf("viewer limit reached (%d/%d)", len(viewers), maxViewers)
 	}
 
 	v := &viewer{
-		ctx:     ctx,
-		chunks:  make(chan map[string]any, channelBuffer),
-		stopCh:  make(chan struct{}),
-		msgType: messageType,
+		ctx:        ctx,
+		chunks:     make(chan map[string]any, channelBuffer),
+		stopCh:     make(chan struct{}),
+		msgType:    messageType,
+		lastActive: time.Now(),
 	}
 
 	// Start sender goroutine for this viewer
@@ -67,23 +77,71 @@ func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
 		}
 	}()
 
-	wasEmpty := len(viewers) == 0
+	isFirstViewer := len(viewers) == 0
 	viewers[ctx.DeviceID] = v
 
-	return wasEmpty, nil // Start camera if this was first viewer
+	// Start cleanup goroutine if first viewer
+	if isFirstViewer {
+		startViewerCleanup()
+	}
+
+	return nil
 }
 
-// RemoveViewer removes a viewer. Returns true if camera should stop (last viewer left).
-func RemoveViewer(deviceID string) bool {
+// UpdateViewerActivity updates the last active timestamp for a viewer
+func UpdateViewerActivity(deviceID string) {
 	viewersMu.Lock()
 	defer viewersMu.Unlock()
 
 	if v, ok := viewers[deviceID]; ok {
-		close(v.stopCh)
-		close(v.chunks)
-		delete(viewers, deviceID)
+		v.lastActive = time.Now()
 	}
-	return len(viewers) == 0
+}
+
+// UpdateViewerContext updates the encryption context for a viewer (used during key renewal)
+func UpdateViewerContext(deviceID string, newCtx *HandlerContext) {
+	viewersMu.Lock()
+	defer viewersMu.Unlock()
+
+	if v, ok := viewers[deviceID]; ok {
+		v.ctx = newCtx
+	}
+}
+
+// startViewerCleanup starts a background goroutine to remove inactive viewers
+func startViewerCleanup() {
+	cleanupTicker = time.NewTicker(1 * time.Second)
+
+	go func() {
+		for range cleanupTicker.C {
+			viewersMu.Lock()
+			now := time.Now()
+
+			for deviceID, v := range viewers {
+				// Remove viewer if no heartbeat for 5s
+				if now.Sub(v.lastActive) > 5*time.Second {
+					log.Printf("RelayComm: Removing inactive viewer %s", deviceID)
+					close(v.stopCh)
+					close(v.chunks)
+					delete(viewers, deviceID)
+				}
+			}
+
+			// Stop cleanup interval if no viewers left
+			if len(viewers) == 0 {
+				viewersMu.Unlock()
+				cleanupTicker.Stop()
+
+				// Stop camera stream
+				if err := record.Get().StopStream(); err != nil {
+					log.Printf("RelayComm: Failed to stop stream: %v", err)
+				}
+				return
+			}
+
+			viewersMu.Unlock()
+		}
+	}()
 }
 
 // broadcastChunk sends chunk data to all viewers (non-blocking, drops if buffer full)
@@ -108,7 +166,7 @@ func StreamReader(reader io.Reader, messageType string) error {
 
 	log.Printf("RelayComm: StreamReader started for %s", messageType)
 
-	// Rate limit: 5 chunks/sec (each chunk can contain multiple frames)
+	// 5 chunks/sec (each chunk can contain multiple frames)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -121,22 +179,13 @@ func StreamReader(reader io.Reader, messageType string) error {
 			broadcastChunk(map[string]any{
 				"chunk":      encoded,
 				"chunkIndex": chunkIndex,
-				"done":       false,
 			})
 			chunkIndex++
 		}
 
-		if err == io.EOF {
-			log.Printf("RelayComm: %s reached EOF after %d chunks", messageType, chunkIndex)
-			broadcastChunk(map[string]any{
-				"done": true,
-			})
-			return nil
-		}
-
 		if err != nil {
-			log.Printf("RelayComm: %s error after %d chunks: %v", messageType, chunkIndex, err)
-			return fmt.Errorf("failed to read: %w", err)
+			log.Printf("RelayComm: %s ended after %d chunks", messageType, chunkIndex)
+			return nil
 		}
 	}
 }
