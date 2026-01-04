@@ -59,7 +59,7 @@ func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
 		lastActive: time.Now(),
 	}
 
-	// Start sender goroutine for this viewer
+	// Start sender goroutine for viewer
 	go func() {
 		for {
 			select {
@@ -174,14 +174,9 @@ func StreamReader(reader io.Reader, messageType string) error {
 
 	log.Printf("RelayComm: StreamReader started for %s", messageType)
 
-	// 5 chunks/sec (each chunk can contain multiple frames)
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-
 	for {
-		<-ticker.C // Wait before reading next chunk
-
 		n, err := reader.Read(buffer)
+
 		if n > 0 {
 			encoded := base64.StdEncoding.EncodeToString(buffer[:n])
 			broadcastChunk(map[string]any{
@@ -189,11 +184,16 @@ func StreamReader(reader io.Reader, messageType string) error {
 				"chunkIndex": chunkIndex,
 			})
 			chunkIndex++
+			time.Sleep(200 * time.Millisecond) // Small delay to prevent flooding the channel (5 messages / s)
 		}
 
 		if err != nil {
-			log.Printf("RelayComm: %s ended after %d chunks", messageType, chunkIndex)
-			return nil
+			if err == io.EOF {
+				log.Printf("RelayComm: %s ended after %d chunks", messageType, chunkIndex)
+			} else {
+				log.Printf("RelayComm: %s error: %v", messageType, err)
+			}
+			return err
 		}
 	}
 }

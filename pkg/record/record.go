@@ -150,7 +150,7 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 		"-c:v", "copy", // Copy video codec (no re-encoding)
 		"-f", "mp4", // MP4 format
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof", // Fragmented MP4
-		"-frag_duration", "200000", // Fragment duration in microseconds (~200ms for sending chunks every 5s)
+		"-frag_duration", "200000", // Fragment duration in microseconds (~200ms)
 		"pipe:1", // Output to stdout
 	)
 
