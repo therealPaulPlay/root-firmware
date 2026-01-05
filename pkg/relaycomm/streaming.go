@@ -162,70 +162,55 @@ func streamToClient(stream *currentStream) {
 	chunkIndex := 0
 	log.Printf("RelayComm: Stream sender started for %s", stream.msgType)
 
-	// Use a goroutine to read boxes and send on a channel
-	boxCh := make(chan []byte, 2)
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer close(boxCh)
-		defer close(errCh)
-		for {
-			boxData, err := readMP4Box(stream.reader)
-			if err != nil {
-				errCh <- err
-				return
-			}
-			select {
-			case boxCh <- boxData:
-			case <-stream.stopCh:
-				return
-			}
-		}
-	}()
-
 	var pendingBox []byte
 
 	for {
+		// Check for stop signal before reading
 		select {
 		case <-stream.stopCh:
 			log.Printf("RelayComm: Stream sender stopped after %d chunks", chunkIndex)
 			return
-
-		case err := <-errCh:
-			log.Printf("RelayComm: %s error: %v", stream.msgType, err)
-			return
-
-		case boxData := <-boxCh:
-			boxType := ""
-			if len(boxData) >= 8 {
-				boxType = string(boxData[4:8])
-			}
-
-			// Combine init segment (ftyp + moov) and fragments (moof + mdat)
-			if boxType == "ftyp" || boxType == "moof" {
-				pendingBox = boxData
-				continue
-			} else if (boxType == "moov" || boxType == "mdat") && pendingBox != nil {
-				// Combine: ftyp+moov or moof+mdat
-				combined := make([]byte, len(pendingBox)+len(boxData))
-				copy(combined, pendingBox)
-				copy(combined[len(pendingBox):], boxData)
-				boxData = combined
-				pendingBox = nil
-			}
-
-			// Send chunk asynchronously to avoid blocking on slow network
-			encoded := base64.StdEncoding.EncodeToString(boxData)
-			currentIndex := chunkIndex
-			chunkIndex++
-
-			go func() {
-				if err := SendEncryptedSuccess(stream.ctx, stream.msgType, map[string]any{
-					"chunk": encoded, "chunkIndex": currentIndex,
-				}); err != nil {
-					log.Printf("RelayComm: Failed to send chunk %d: %v", currentIndex, err)
-				}
-			}()
+		default:
 		}
+
+		// Read next MP4 box
+		boxData, err := readMP4Box(stream.reader)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("RelayComm: %s error: %v", stream.msgType, err)
+			}
+			return
+		}
+
+		boxType := ""
+		if len(boxData) >= 8 {
+			boxType = string(boxData[4:8])
+		}
+
+		// Combine init segment (ftyp + moov) and fragments (moof + mdat)
+		if boxType == "ftyp" || boxType == "moof" {
+			pendingBox = boxData
+			continue
+		} else if (boxType == "moov" || boxType == "mdat") && pendingBox != nil {
+			// Combine: ftyp+moov or moof+mdat
+			combined := make([]byte, len(pendingBox)+len(boxData))
+			copy(combined, pendingBox)
+			copy(combined[len(pendingBox):], boxData)
+			boxData = combined
+			pendingBox = nil
+		}
+
+		// Send the chunk
+		encoded := base64.StdEncoding.EncodeToString(boxData)
+
+		if sendErr := SendEncryptedSuccess(stream.ctx, stream.msgType, map[string]any{
+			"chunk":      encoded,
+			"chunkIndex": chunkIndex,
+		}); sendErr != nil {
+			log.Printf("RelayComm: Error sending chunk %d: %v", chunkIndex, sendErr)
+			return
+		}
+
+		chunkIndex++
 	}
 }
