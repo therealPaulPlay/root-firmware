@@ -183,6 +183,8 @@ func streamToClient(stream *currentStream) {
 		}
 	}()
 
+	var pendingBox []byte
+
 	for {
 		select {
 		case <-stream.stopCh:
@@ -194,7 +196,25 @@ func streamToClient(stream *currentStream) {
 			return
 
 		case boxData := <-boxCh:
-			// Send the complete fragment as one chunk
+			boxType := ""
+			if len(boxData) >= 8 {
+				boxType = string(boxData[4:8])
+			}
+
+			// Combine init segment (ftyp + moov) and fragments (moof + mdat)
+			if boxType == "ftyp" || boxType == "moof" {
+				pendingBox = boxData
+				continue
+			} else if (boxType == "moov" || boxType == "mdat") && pendingBox != nil {
+				// Combine: ftyp+moov or moof+mdat
+				combined := make([]byte, len(pendingBox)+len(boxData))
+				copy(combined, pendingBox)
+				copy(combined[len(pendingBox):], boxData)
+				boxData = combined
+				pendingBox = nil
+			}
+
+			// Send the chunk
 			encoded := base64.StdEncoding.EncodeToString(boxData)
 
 			if sendErr := SendEncryptedSuccess(stream.ctx, stream.msgType, map[string]any{
