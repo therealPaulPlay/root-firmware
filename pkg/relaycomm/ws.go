@@ -110,7 +110,19 @@ func (r *RelayComm) Send(msg Message) error {
 	if r.conn == nil {
 		return fmt.Errorf("not connected")
 	}
-	return r.conn.WriteJSON(msg)
+
+	// Set write deadline
+	if err := r.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return fmt.Errorf("failed to set write deadline: %w", err)
+	}
+
+	// Write
+	err := r.conn.WriteJSON(msg)
+
+	// Clear deadline
+	_ = r.conn.SetWriteDeadline(time.Time{})
+
+	return err
 }
 
 func (r *RelayComm) connectLoop(relayDomain string) {

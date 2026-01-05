@@ -149,8 +149,8 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 		"-i", "pipe:0", // Read from stdin
 		"-c:v", "copy", // Copy video codec (no re-encoding)
 		"-f", "mp4", // MP4 format
-		"-movflags", "frag_keyframe+empty_moov+default_base_moof", // Fragmented MP4
-		"-frag_duration", "200000", // Fragment duration in microseconds (~200ms)
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof", // Fragmented
+		"-frag_duration", "200000", // 200ms fragments
 		"pipe:1", // Output to stdout
 	)
 
@@ -179,6 +179,9 @@ func (r *Recorder) StartStream() (*StreamOutput, error) {
 
 	output := &StreamOutput{Video: videoOut}
 
+	// TODO:
+	// Mux audio, if enabled, into the same fMP4 (in ffmpegCmd)
+	// Get rid of thix
 	if micEnabled() {
 		audioCmd := exec.Command("ffmpeg",
 			"-f", "alsa", "-i", "default",

@@ -506,9 +506,6 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 		}
 
 		go StreamReader(stream.Video, MsgStreamVideoChunk)
-		if stream.Audio != nil {
-			go StreamReader(stream.Audio, MsgStreamAudioChunk)
-		}
 	}
 
 	SendEncryptedSuccess(ctx, MsgStartStream, nil)
