@@ -11,11 +11,7 @@ import (
 	"root-firmware/pkg/record"
 )
 
-const (
-	chunkSize     = 64 * 1024 // 64KB chunks
-	maxViewers    = 3
-	channelBuffer = 30 // Buffer up to 30 chunks per viewer
-)
+const maxViewers = 3
 
 type viewer struct {
 	ctx        *HandlerContext
@@ -36,10 +32,9 @@ var (
 func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
 	viewersMu.Lock()
 
-	// Update existing viewer (reconnect scenario)
+	// Update existing viewer if device ID already viewing
 	if _, exists := viewers[ctx.DeviceID]; exists {
 		viewersMu.Unlock()
-		UpdateViewerContext(ctx.DeviceID, ctx)
 		UpdateViewerActivity(ctx.DeviceID)
 		return false, nil
 	}
@@ -53,7 +48,7 @@ func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
 
 	v := &viewer{
 		ctx:        ctx,
-		chunks:     make(chan map[string]any, channelBuffer),
+		chunks:     make(chan map[string]any, 30), // Max. 15 chunks in buffer before dropping
 		stopCh:     make(chan struct{}),
 		msgType:    messageType,
 		lastActive: time.Now(),
@@ -64,21 +59,16 @@ func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
 		for {
 			select {
 			case chunk := <-v.chunks:
-				done := make(chan struct{})
+				// Send in separate goroutine to avoid blocking channel drain
 				go func() {
 					viewersMu.Lock()
 					ctx := v.ctx
 					viewersMu.Unlock()
-					SendEncryptedSuccess(ctx, v.msgType, chunk)
-					close(done)
-				}()
 
-				select {
-				case <-done:
-					// Success
-				case <-time.After(5 * time.Second):
-					log.Printf("RelayComm: Send timeout for viewer %s", ctx.DeviceID)
-				}
+					if err := SendEncryptedSuccess(ctx, v.msgType, chunk); err != nil {
+						log.Printf("RelayComm: Error sending chunk to viewer %s: %v", ctx.DeviceID, err)
+					}
+				}()
 			case <-v.stopCh:
 				return
 			}
@@ -169,7 +159,7 @@ func broadcastChunk(fields map[string]any) {
 
 // StreamReader streams data from a reader to all active viewers
 func StreamReader(reader io.Reader, messageType string) error {
-	buffer := make([]byte, chunkSize)
+	buffer := make([]byte, 128*1024) // 128KB chunks (dynamic chunking?)
 	chunkIndex := 0
 
 	log.Printf("RelayComm: StreamReader started for %s", messageType)
