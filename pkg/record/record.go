@@ -13,6 +13,15 @@ import (
 	"root-firmware/pkg/sfx"
 )
 
+// keyframeBufferSize controls H.264 keyframe capture starting from SPS (NAL type 7).
+//
+// Preview extraction: Must contain complete I-frame (SPS+PPS+IDR) for artifact-free decoding.
+// Smaller values risk corrupted/stretched frames in CapturePreview().
+//
+// Stream chunking: Larger buffers → fewer, larger MP4 fragments sent to relay server.
+// 500KB yields ~5-6 chunks/sec, 256KB yields ~10 chunks/sec (more relay overhead).
+const keyframeBufferSize = 500 * 1024 // 500KB
+
 type Recorder struct {
 	cameraCmd *exec.Cmd
 	broadcast *Broadcast
@@ -125,8 +134,7 @@ func (r *Recorder) broadcastLoop(cameraOut io.ReadCloser) {
 			// Accumulate keyframe data
 			if capturingKeyframe {
 				keyframeBuffer.Write(data)
-				// Save once we have enough data
-				if keyframeBuffer.Len() > 100*1024 {
+				if keyframeBuffer.Len() > keyframeBufferSize {
 					r.broadcast.frameMu.Lock()
 					r.broadcast.latestFrame = append([]byte(nil), keyframeBuffer.Bytes()...)
 					r.broadcast.frameMu.Unlock()
@@ -366,11 +374,10 @@ func (r *Recorder) CapturePreview() ([]byte, error) {
 	}
 
 	cmd := exec.Command("ffmpeg",
+		"-err_detect", "ignore_err",
 		"-f", "h264",
-		"-analyzeduration", "500000",
-		"-probesize", "500000",
 		"-i", "pipe:0",
-		"-vframes", "1",
+		"-frames:v", "1",
 		"-vf", "scale=640:480",
 		"-f", "image2",
 		"-c:v", "mjpeg",
