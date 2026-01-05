@@ -214,18 +214,18 @@ func streamToClient(stream *currentStream) {
 				pendingBox = nil
 			}
 
-			// Send the chunk
+			// Send chunk asynchronously to avoid blocking on slow network
 			encoded := base64.StdEncoding.EncodeToString(boxData)
-
-			if sendErr := SendEncryptedSuccess(stream.ctx, stream.msgType, map[string]any{
-				"chunk":      encoded,
-				"chunkIndex": chunkIndex,
-			}); sendErr != nil {
-				log.Printf("RelayComm: Error sending chunk: %v", sendErr)
-				return
-			}
-
+			currentIndex := chunkIndex
 			chunkIndex++
+
+			go func() {
+				if err := SendEncryptedSuccess(stream.ctx, stream.msgType, map[string]any{
+					"chunk": encoded, "chunkIndex": currentIndex,
+				}); err != nil {
+					log.Printf("RelayComm: Failed to send chunk %d: %v", currentIndex, err)
+				}
+			}()
 		}
 	}
 }

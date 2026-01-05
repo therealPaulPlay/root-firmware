@@ -112,7 +112,7 @@ func (r *RelayComm) Send(msg Message) error {
 	}
 
 	// Set write deadline
-	if err := r.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+	if err := r.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return fmt.Errorf("failed to set write deadline: %w", err)
 	}
 
