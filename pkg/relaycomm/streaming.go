@@ -2,6 +2,7 @@ package relaycomm
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -11,179 +12,200 @@ import (
 	"root-firmware/pkg/record"
 )
 
-const maxViewers = 3
-
-type viewer struct {
+type currentStream struct {
 	ctx        *HandlerContext
-	chunks     chan map[string]any
 	stopCh     chan struct{}
 	msgType    string
+	reader     io.Reader
+	wg         sync.WaitGroup
 	lastActive time.Time
 }
 
 var (
-	viewers       = make(map[string]*viewer)
-	viewersMu     sync.Mutex
-	cleanupTicker *time.Ticker
+	activeStream   *currentStream
+	activeStreamMu sync.Mutex
+	heartbeatTimer *time.Ticker
 )
 
-// AddViewer adds a viewer for the given device.
-// Returns true if this is the first viewer (stream should start), false otherwise.
-func AddViewer(ctx *HandlerContext, messageType string) (bool, error) {
-	viewersMu.Lock()
+// StartStreamForClient starts a new stream for the given client
+func StartStreamForClient(ctx *HandlerContext, reader io.Reader, messageType string) {
+	activeStreamMu.Lock()
+	defer activeStreamMu.Unlock()
 
-	// Update existing viewer if device ID already viewing
-	if _, exists := viewers[ctx.DeviceID]; exists {
-		viewersMu.Unlock()
-		UpdateViewerActivity(ctx.DeviceID)
-		return false, nil
-	}
-
-	if len(viewers) >= maxViewers {
-		viewersMu.Unlock()
-		return false, fmt.Errorf("viewer limit reached (%d/%d)", len(viewers), maxViewers)
-	}
-
-	defer viewersMu.Unlock()
-
-	v := &viewer{
+	// Start new stream for this client
+	stream := &currentStream{
 		ctx:        ctx,
-		chunks:     make(chan map[string]any, 30), // Max. 15 chunks in buffer before dropping
 		stopCh:     make(chan struct{}),
 		msgType:    messageType,
+		reader:     reader,
 		lastActive: time.Now(),
 	}
 
-	// Start sender goroutine for viewer
-	go func() {
-		for {
-			select {
-			case chunk := <-v.chunks:
-				// Send in separate goroutine to avoid blocking channel drain
-				go func() {
-					viewersMu.Lock()
-					ctx := v.ctx
-					viewersMu.Unlock()
+	stream.wg.Add(1)
+	go streamToClient(stream)
 
-					if err := SendEncryptedSuccess(ctx, v.msgType, chunk); err != nil {
-						log.Printf("RelayComm: Error sending chunk to viewer %s: %v", ctx.DeviceID, err)
-					}
-				}()
-			case <-v.stopCh:
-				return
-			}
+	activeStream = stream
+	startHeartbeatMonitor()
+	log.Printf("RelayComm: Started stream for device %s", ctx.DeviceID)
+}
+
+// StopCurrentStream stops the active stream if any
+func StopCurrentStream() {
+	activeStreamMu.Lock()
+	defer activeStreamMu.Unlock()
+	stopCurrentStreamLocked()
+}
+
+// stopCurrentStreamLocked must be called while holding activeStreamMu
+func stopCurrentStreamLocked() {
+	if activeStream != nil {
+		close(activeStream.stopCh)
+		activeStream.wg.Wait()
+
+		// Stop the actual camera stream
+		if err := record.Get().StopStream(); err != nil {
+			log.Printf("RelayComm: Failed to stop stream: %v", err)
 		}
-	}()
 
-	isFirstViewer := len(viewers) == 0
-	viewers[ctx.DeviceID] = v
-
-	// Start cleanup goroutine if first viewer
-	if isFirstViewer {
-		startViewerCleanup()
+		activeStream = nil
 	}
 
-	return isFirstViewer, nil
-}
-
-// UpdateViewerActivity updates the last active timestamp for a viewer
-func UpdateViewerActivity(deviceID string) {
-	viewersMu.Lock()
-	defer viewersMu.Unlock()
-
-	if v, ok := viewers[deviceID]; ok {
-		v.lastActive = time.Now()
+	// Stop heartbeat monitor
+	if heartbeatTimer != nil {
+		heartbeatTimer.Stop()
+		heartbeatTimer = nil
 	}
 }
 
-// UpdateViewerContext updates the encryption context for a viewer (used during key renewal)
-func UpdateViewerContext(deviceID string, newCtx *HandlerContext) {
-	viewersMu.Lock()
-	defer viewersMu.Unlock()
+// UpdateStreamContext updates the encryption context for the active stream (used during key renewal)
+func UpdateStreamContext(deviceID string, newCtx *HandlerContext) {
+	activeStreamMu.Lock()
+	defer activeStreamMu.Unlock()
 
-	if v, ok := viewers[deviceID]; ok {
-		v.ctx = newCtx
+	if activeStream != nil && activeStream.ctx.DeviceID == deviceID {
+		activeStream.ctx = newCtx
 	}
 }
 
-// startViewerCleanup starts a background goroutine to remove inactive viewers
-func startViewerCleanup() {
-	cleanupTicker = time.NewTicker(1 * time.Second)
+// UpdateStreamActivity updates the last active timestamp (called by continueStream handler)
+func UpdateStreamActivity() {
+	activeStreamMu.Lock()
+	defer activeStreamMu.Unlock()
+
+	if activeStream != nil {
+		activeStream.lastActive = time.Now()
+	}
+}
+
+// startHeartbeatMonitor monitors client heartbeat and stops stream if inactive
+func startHeartbeatMonitor() {
+	// Stop existing monitor if any
+	if heartbeatTimer != nil {
+		heartbeatTimer.Stop()
+	}
+
+	heartbeatTimer = time.NewTicker(1 * time.Second)
 
 	go func() {
-		for range cleanupTicker.C {
-			viewersMu.Lock()
-			now := time.Now()
+		for range heartbeatTimer.C {
+			activeStreamMu.Lock()
 
-			for deviceID, v := range viewers {
-				// Remove viewer if no heartbeat for 5s
-				if now.Sub(v.lastActive) > 5*time.Second {
-					log.Printf("RelayComm: Removing inactive viewer with device ID %s", deviceID)
-					close(v.stopCh)
-					close(v.chunks)
-					delete(viewers, deviceID)
-				}
+			// Stop stream if no heartbeat for 5 seconds
+			if activeStream != nil && time.Since(activeStream.lastActive) > 5*time.Second {
+				log.Printf("RelayComm: Stopping stream due to client inactivity")
+				stopCurrentStreamLocked()
 			}
 
-			// Stop cleanup interval if no viewers left
-			if len(viewers) == 0 {
-				viewersMu.Unlock()
-				cleanupTicker.Stop()
-
-				// Stop camera stream
-				if err := record.Get().StopStream(); err != nil {
-					log.Printf("RelayComm: Failed to stop stream: %v", err)
-				}
-				return
-			}
-
-			viewersMu.Unlock()
+			activeStreamMu.Unlock()
 		}
 	}()
 }
 
-// broadcastChunk sends chunk data to all viewers (non-blocking, drops if buffer full)
-func broadcastChunk(fields map[string]any) {
-	viewersMu.Lock()
-	defer viewersMu.Unlock()
+// readMP4Box reads a single MP4 box from the reader
+func readMP4Box(r io.Reader) ([]byte, error) {
+	// Read 8-byte header (4 bytes size + 4 bytes type)
+	header := make([]byte, 8)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return nil, err
+	}
 
-	for deviceID, v := range viewers {
-		select {
-		case v.chunks <- fields:
-			// Successfully queued
-		default:
-			log.Printf("RelayComm: Dropping chunk for viewer %s (buffer full)", deviceID)
+	// Parse box size (big-endian)
+	size := binary.BigEndian.Uint32(header[:4])
+	if size < 8 {
+		return nil, io.ErrUnexpectedEOF
+	}
+
+	// Sanity check: if size is unreasonably large, stream is corrupted
+	maxSize := uint32(10 * 1024 * 1024) // 10MB max
+	if size > maxSize {
+		return nil, fmt.Errorf("invalid MP4 box size: %d bytes (corrupted stream)", size)
+	}
+
+	// Read entire box (already read 8 bytes of header)
+	remainingSize := size - 8
+	boxData := make([]byte, size)
+	copy(boxData[:8], header)
+
+	if remainingSize > 0 {
+		if _, err := io.ReadFull(r, boxData[8:size]); err != nil {
+			return nil, err
 		}
 	}
+
+	return boxData, nil
 }
 
-// StreamReader streams data from a reader to all active viewers
-func StreamReader(reader io.Reader, messageType string) error {
-	buffer := make([]byte, 128*1024) // 128KB chunks (dynamic chunking?)
+// streamToClient reads MP4 fragments and sends them to the client
+func streamToClient(stream *currentStream) {
+	defer stream.wg.Done()
+
 	chunkIndex := 0
+	log.Printf("RelayComm: Stream sender started for %s", stream.msgType)
 
-	log.Printf("RelayComm: StreamReader started for %s", messageType)
+	// Use a goroutine to read boxes and send on a channel
+	boxCh := make(chan []byte, 2)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(boxCh)
+		defer close(errCh)
+		for {
+			boxData, err := readMP4Box(stream.reader)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			select {
+			case boxCh <- boxData:
+			case <-stream.stopCh:
+				return
+			}
+		}
+	}()
 
 	for {
-		n, err := reader.Read(buffer)
+		select {
+		case <-stream.stopCh:
+			log.Printf("RelayComm: Stream sender stopped after %d chunks", chunkIndex)
+			return
 
-		if n > 0 {
-			encoded := base64.StdEncoding.EncodeToString(buffer[:n])
-			broadcastChunk(map[string]any{
+		case err := <-errCh:
+			log.Printf("RelayComm: %s error: %v", stream.msgType, err)
+			return
+
+		case boxData := <-boxCh:
+			// Send the complete fragment as one chunk
+			encoded := base64.StdEncoding.EncodeToString(boxData)
+
+			if sendErr := SendEncryptedSuccess(stream.ctx, stream.msgType, map[string]any{
 				"chunk":      encoded,
 				"chunkIndex": chunkIndex,
-			})
-			chunkIndex++
-			time.Sleep(200 * time.Millisecond) // Small delay to prevent flooding the channel (5 messages / s)
-		}
-
-		if err != nil {
-			if err == io.EOF {
-				log.Printf("RelayComm: %s ended after %d chunks", messageType, chunkIndex)
-			} else {
-				log.Printf("RelayComm: %s error: %v", messageType, err)
+			}); sendErr != nil {
+				log.Printf("RelayComm: Error sending chunk: %v", sendErr)
+				return
 			}
-			return err
+
+			chunkIndex++
 		}
 	}
 }

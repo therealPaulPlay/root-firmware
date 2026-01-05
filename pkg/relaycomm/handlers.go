@@ -58,6 +58,7 @@ const (
 	ErrDecryptionFailed = "DECRYPTION_FAILED"
 	ErrInvalidPayload   = "INVALID_PAYLOAD"
 	ErrInternalError    = "INTERNAL_ERROR"
+	ErrStreamSwitched   = "STREAM_SWITCHED"
 )
 
 // HandlerContext provides encryption context to handlers
@@ -379,8 +380,8 @@ func handleRenewKey(msg Message) {
 		EncryptionSession: newSession,
 	}
 
-	// Update viewer context if this device is streaming
-	UpdateViewerContext(msg.DeviceID, ctx)
+	// Update stream context if this device is streaming
+	UpdateStreamContext(msg.DeviceID, ctx)
 
 	log.Printf("RelayComm: Key renewed for device %s", msg.DeviceID)
 	SendEncryptedSuccess(ctx, MsgRenewKey, nil)
@@ -491,29 +492,24 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	isFirstViewer, err := AddViewer(ctx, MsgStreamVideoChunk)
+	// Stop existing stream first (if any)
+	StopCurrentStream()
+
+	// Start fresh stream with new ffmpeg process
+	stream, err := record.Get().StartStream()
 	if err != nil {
 		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
 		return
 	}
 
-	// Only start stream if this is the first viewer
-	if isFirstViewer {
-		stream, err := record.Get().StartStream()
-		if err != nil {
-			SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
-			return
-		}
-
-		go StreamReader(stream.Video, MsgStreamVideoChunk)
-	}
-
+	// Start streaming to this client
+	StartStreamForClient(ctx, stream, MsgStreamVideoChunk)
 	SendEncryptedSuccess(ctx, MsgStartStream, nil)
 }
 
 // If clients do not send this, stream will be stopped after 5s (recommended interval is 2s)
 func handleContinueStream(ctx *HandlerContext, payload json.RawMessage) {
-	UpdateViewerActivity(ctx.DeviceID)
+	UpdateStreamActivity()
 	SendEncryptedSuccess(ctx, MsgContinueStream, nil)
 }
 

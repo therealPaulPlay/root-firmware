@@ -95,8 +95,8 @@ func (b *Pairing) ScanQRCode() error {
 	expectedCode := b.code.Code
 	b.mu.Unlock()
 
-	// Capture frame at higher resolution for better QR code detection
-	frame, err := record.Get().CapturePreviewWithResolution(1920, 1080)
+	// Capture frame for QR code detection
+	frame, err := record.Get().CapturePreview()
 	if err != nil {
 		return fmt.Errorf("failed to capture frame: %w", err)
 	}
