@@ -31,6 +31,7 @@ import (
 // Message type constants
 const (
 	MsgRenewKey          = "renewKey"
+	MsgRenewKeyAck       = "renewKeyAck"
 	MsgGetDevices        = "getDevices"
 	MsgRemoveDevice      = "removeDevice"
 	MsgKickDevice        = "kickDevice"
@@ -135,11 +136,20 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 			return
 		}
 
-		// Decrypt payload
+		// Decrypt payload (try current key first, then previous key if available)
 		decrypted, err := session.Decrypt(msg.Payload)
 		if err != nil {
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload!")
-			return
+			// Retry with previous encryption session if available (during key renewal grace period)
+			if prevSession, ok := GetPreviousEncryption(msg.DeviceID); ok {
+				decrypted, err = prevSession.Decrypt(msg.Payload)
+				if err != nil {
+					sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload!")
+					return
+				}
+			} else {
+				sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload!")
+				return
+			}
 		}
 
 		// Create handler context with encryption info
@@ -253,8 +263,9 @@ func RegisterHandlers() {
 
 	relay := Get()
 
-	// Key renewal (no encryption middleware - uses old key to decrypt renewal request)
+	// Key renewal
 	relay.On(MsgRenewKey, handleRenewKey)
+	relay.On(MsgRenewKeyAck, handleRenewKeyAck)
 
 	// Device management
 	relay.On(MsgGetDevices, useEncryption(MsgGetDevices, handleGetDevices))
@@ -317,7 +328,7 @@ func handleRenewKey(msg Message) {
 		return
 	}
 
-	// Derive shared secret using OLD key (still stored in device)
+	// Derive shared secret using current key (still stored in device)
 	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 	if err != nil {
 		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive encryption key!")
@@ -353,13 +364,7 @@ func handleRenewKey(msg Message) {
 		return
 	}
 
-	// Update device with new key
-	if err := devices.Get().RenewKey(msg.DeviceID, newPublicKey); err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to update key!")
-		return
-	}
-
-	// Derive NEW shared secret for response
+	// Derive NEW shared secret (but don't commit yet - wait for ACK)
 	newSharedSecret, err := encryption.DeriveSharedSecret(privKey, newPublicKey)
 	if err != nil {
 		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive new encryption key!")
@@ -372,19 +377,64 @@ func handleRenewKey(msg Message) {
 		return
 	}
 
-	// Create context with NEW session for response
-	ctx := &HandlerContext{
+	// Create context with current session for response (client hasn't switched yet)
+	currentCtx := &HandlerContext{
+		DeviceID:          msg.DeviceID,
+		RequestID:         msg.RequestID,
+		SharedSecret:      sharedSecret,
+		EncryptionSession: session,
+	}
+
+	StorePreviousEncryption(msg.DeviceID, session)                                   // Store current encryption session for grace period
+	BufferPendingKeyRenewal(msg.DeviceID, newPublicKey, newSharedSecret, newSession) // Buffer new key (don't commit yet)
+
+	log.Printf("RelayComm: Key renewal prepared for device %s, waiting for ACK", msg.DeviceID)
+	SendEncryptedSuccess(currentCtx, MsgRenewKey, nil) // Send with current (to-be-replaced) encryption
+}
+
+func handleRenewKeyAck(msg Message) {
+	newPublicKey, newSharedSecret, newSession, ok := GetAndClearPendingKeyRenewal(msg.DeviceID)
+	if !ok {
+		log.Printf("RelayComm: No pending key renewal for device %s", msg.DeviceID)
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "No pending key renewal!")
+		return
+	}
+
+	decrypted, err := newSession.Decrypt(msg.Payload) // Decrypt ACK with NEW key
+	if err != nil {
+		log.Printf("RelayComm: Failed to decrypt renewal ACK from device %s: %v", msg.DeviceID, err)
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrDecryptionFailed, "Failed to decrypt payload!")
+		return
+	}
+
+	var req struct {
+		Ack bool `json:"ack"`
+	}
+	if err := json.Unmarshal(decrypted, &req); err != nil || !req.Ack {
+		log.Printf("RelayComm: Invalid renewal ACK from device %s", msg.DeviceID)
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInvalidPayload, "Invalid payload!")
+		return
+	}
+
+	log.Printf("RelayComm: Committing new key for device %s", msg.DeviceID)
+	if err := devices.Get().RenewKey(msg.DeviceID, newPublicKey); err != nil { // NOW commit the new key
+		log.Printf("RelayComm: Failed to commit renewed key for device %s: %v", msg.DeviceID, err)
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "Failed to commit key!")
+		return
+	}
+
+	// Update stream context if this device is streaming
+	newCtx := &HandlerContext{
 		DeviceID:          msg.DeviceID,
 		RequestID:         msg.RequestID,
 		SharedSecret:      newSharedSecret,
 		EncryptionSession: newSession,
 	}
+	UpdateStreamContext(msg.DeviceID, newCtx)
 
-	// Update stream context if this device is streaming
-	UpdateStreamContext(msg.DeviceID, ctx)
-
-	log.Printf("RelayComm: Key renewed for device %s", msg.DeviceID)
-	SendEncryptedSuccess(ctx, MsgRenewKey, nil)
+	// Send success response to confirm commit
+	SendEncryptedSuccess(newCtx, MsgRenewKeyAck, nil)
+	log.Printf("RelayComm: Key renewal committed for device %s", msg.DeviceID)
 }
 
 func handleGetDevices(ctx *HandlerContext, payload json.RawMessage) {
@@ -653,7 +703,6 @@ func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
-	// Send success response before rebooting
 	SendEncryptedSuccess(ctx, MsgRestart, nil)
 
 	// Reboot the system

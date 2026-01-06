@@ -110,8 +110,8 @@ func startHeartbeatMonitor() {
 		for range heartbeatTimer.C {
 			activeStreamMu.Lock()
 
-			// Stop stream if no heartbeat for 5 seconds
-			if activeStream != nil && time.Since(activeStream.lastActive) > 5*time.Second {
+			// Stop stream if no heartbeat for 10 seconds
+			if activeStream != nil && time.Since(activeStream.lastActive) > 10*time.Second {
 				log.Printf("RelayComm: Stopping stream due to client inactivity")
 				stopCurrentStreamLocked()
 			}
