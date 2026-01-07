@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"regexp"
 	"sync"
 	"time"
 
@@ -79,6 +80,28 @@ func micEnabled() bool {
 	}
 	b, ok := val.(bool)
 	return ok && b
+}
+
+// getMicDevice returns the plughw device string for the first available microphone, or empty string if none
+func getMicDevice() string {
+	cmd := exec.Command("arecord", "-l")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Recorder: No microphone available (arecord failed): %v", err)
+		return ""
+	}
+
+	// Match "card N: ... device M:" pattern
+	re := regexp.MustCompile(`card (\d+):.*device (\d+):`)
+	matches := re.FindSubmatch(output)
+	if len(matches) >= 3 {
+		deviceStr := fmt.Sprintf("plughw:%s,%s", matches[1], matches[2])
+		log.Printf("Recorder: Using microphone at %s", deviceStr)
+		return deviceStr
+	}
+
+	log.Println("Recorder: No microphone available")
+	return ""
 }
 
 func (r *Recorder) startCamera() error {
@@ -205,12 +228,17 @@ func startFFmpeg(input io.Reader, outputFile string) (*exec.Cmd, io.ReadCloser, 
 	var cmd *exec.Cmd
 	var outputReader io.ReadCloser
 
+	var micDevice string
+	if micEnabled() {
+		micDevice = getMicDevice()
+	}
+
 	if outputFile != "" {
 		// Recording to file
-		if micEnabled() {
+		if micDevice != "" {
 			cmd = exec.Command("ffmpeg",
 				"-f", "h264", "-i", "pipe:0",
-				"-f", "alsa", "-i", "default",
+				"-f", "alsa", "-i", micDevice,
 				"-c:v", "copy", "-c:a", "aac",
 				"-f", "mp4", outputFile,
 			)
@@ -224,10 +252,10 @@ func startFFmpeg(input io.Reader, outputFile string) (*exec.Cmd, io.ReadCloser, 
 		cmd.Stdin = input
 	} else {
 		// Streaming to pipe
-		if micEnabled() {
+		if micDevice != "" {
 			cmd = exec.Command("ffmpeg",
 				"-f", "h264", "-i", "pipe:0",
-				"-f", "alsa", "-i", "default",
+				"-f", "alsa", "-i", micDevice,
 				"-c:v", "copy", "-c:a", "aac",
 				"-f", "mp4",
 				"-movflags", "frag_keyframe+empty_moov+default_base_moof",
