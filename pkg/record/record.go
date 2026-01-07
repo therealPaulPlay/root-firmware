@@ -287,6 +287,10 @@ func (r *Recorder) StartStream() (io.ReadCloser, error) {
 	r.streamCmd = cmd
 	r.streaming = true
 
+	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok && val.(bool) {
+		sfx.Get().PlayRecording()
+	}
+
 	log.Println("Recorder: Started streaming")
 	return outputReader, nil
 }
@@ -337,7 +341,7 @@ func (r *Recorder) StartRecording(outputPath string) error {
 	r.recordCmd = cmd
 	r.recording = true
 
-	if val, ok := config.Get().GetKey("playActiveCameraSound"); !ok || val.(bool) {
+	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok && val.(bool) {
 		sfx.Get().PlayRecording()
 	}
 

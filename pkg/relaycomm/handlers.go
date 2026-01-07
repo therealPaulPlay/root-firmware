@@ -34,14 +34,12 @@ const (
 	MsgRenewKeyAck       = "renewKeyAck"
 	MsgGetDevices        = "getDevices"
 	MsgRemoveDevice      = "removeDevice"
-	MsgKickDevice        = "kickDevice"
 	MsgGetEvents         = "getEvents"
 	MsgGetRecording      = "getRecording"
 	MsgGetThumbnail      = "getThumbnail"
 	MsgStartStream       = "startStream"
 	MsgContinueStream    = "continueStream"
 	MsgStreamVideoChunk  = "streamVideoChunk"
-	MsgStreamAudioChunk  = "streamAudioChunk"
 	MsgSetMicrophone     = "setMicrophone"
 	MsgSetRecordingSound = "setRecordingSound"
 	MsgGetHealth         = "getHealth"
@@ -270,7 +268,6 @@ func RegisterHandlers() {
 	// Device management
 	relay.On(MsgGetDevices, useEncryption(MsgGetDevices, handleGetDevices))
 	relay.On(MsgRemoveDevice, useEncryption(MsgRemoveDevice, handleRemoveDevice))
-	relay.On(MsgKickDevice, useEncryption(MsgKickDevice, handleKickDevice))
 
 	// Storage
 	relay.On(MsgGetEvents, useEncryption(MsgGetEvents, handleGetEvents))
@@ -445,35 +442,21 @@ func handleGetDevices(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleRemoveDevice(ctx *HandlerContext, payload json.RawMessage) {
-	// Device can only remove itself
-	if err := devices.Get().Remove(ctx.DeviceID); err != nil {
-		SendEncryptedError(ctx, MsgRemoveDevice, ErrInternalError, err.Error())
-		return
-	}
-	SendEncryptedSuccess(ctx, MsgRemoveDevice, nil)
-}
-
-func handleKickDevice(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		TargetDeviceID string `json:"targetDeviceId"`
 	}
 
 	if err := json.Unmarshal(payload, &req); err != nil {
-		SendEncryptedError(ctx, MsgKickDevice, ErrInvalidPayload, "Invalid payload")
+		SendEncryptedError(ctx, MsgRemoveDevice, ErrInvalidPayload, "Invalid payload")
 		return
 	}
 
-	// Device cannot kick itself
-	if req.TargetDeviceID == ctx.DeviceID {
-		SendEncryptedError(ctx, MsgKickDevice, ErrInvalidPayload, "Cannot kick self")
+	if err := devices.Get().Remove(req.TargetDeviceID); err != nil {
+		SendEncryptedError(ctx, MsgRemoveDevice, ErrInternalError, err.Error())
 		return
 	}
 
-	if err := devices.Get().ScheduleKick(req.TargetDeviceID); err != nil {
-		SendEncryptedError(ctx, MsgKickDevice, ErrInternalError, err.Error())
-		return
-	}
-	SendEncryptedSuccess(ctx, MsgKickDevice, nil)
+	SendEncryptedSuccess(ctx, MsgRemoveDevice, nil)
 }
 
 func handleGetEvents(ctx *HandlerContext, payload json.RawMessage) {

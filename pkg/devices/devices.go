@@ -17,20 +17,15 @@ type Device struct {
 }
 
 type Devices struct {
-	mu         sync.Mutex
-	kickTimers map[string]*time.Timer
+	mu sync.Mutex
 }
 
 var instance *Devices
 var once sync.Once
 
-const kickDelay = 5 * time.Minute
-
 func Init() {
 	once.Do(func() {
-		instance = &Devices{
-			kickTimers: make(map[string]*time.Timer),
-		}
+		instance = &Devices{}
 	})
 }
 
@@ -110,12 +105,6 @@ func (d *Devices) Remove(deviceID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// Cancel kick timer if exists
-	if timer, exists := d.kickTimers[deviceID]; exists {
-		timer.Stop()
-		delete(d.kickTimers, deviceID)
-	}
-
 	devices := d.getDevices()
 	filtered := []Device{}
 	for _, dev := range devices {
@@ -125,36 +114,6 @@ func (d *Devices) Remove(deviceID string) error {
 	}
 
 	return config.Get().SetKey("connectedDevices", filtered)
-}
-
-// ScheduleKick schedules device removal in 5 minutes
-func (d *Devices) ScheduleKick(deviceID string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	// Cancel existing timer if any
-	if timer, exists := d.kickTimers[deviceID]; exists {
-		timer.Stop()
-	}
-
-	// Schedule removal
-	d.kickTimers[deviceID] = time.AfterFunc(kickDelay, func() {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-
-		devices := d.getDevices()
-		filtered := []Device{}
-		for _, dev := range devices {
-			if dev.ID != deviceID {
-				filtered = append(filtered, dev)
-			}
-		}
-
-		config.Get().SetKey("connectedDevices", filtered)
-		delete(d.kickTimers, deviceID)
-	})
-
-	return nil
 }
 
 func (d *Devices) getDevices() []Device {
