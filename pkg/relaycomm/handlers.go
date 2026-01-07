@@ -40,7 +40,9 @@ const (
 	MsgStartStream       = "startStream"
 	MsgContinueStream    = "continueStream"
 	MsgStreamVideoChunk  = "streamVideoChunk"
+	MsgGetMicrophone     = "getMicrophone"
 	MsgSetMicrophone     = "setMicrophone"
+	MsgGetRecordingSound = "getRecordingSound"
 	MsgSetRecordingSound = "setRecordingSound"
 	MsgGetHealth         = "getHealth"
 	MsgGetPreview        = "getPreview"
@@ -279,7 +281,9 @@ func RegisterHandlers() {
 	relay.On(MsgContinueStream, useEncryption(MsgContinueStream, handleContinueStream))
 
 	// Settings
+	relay.On(MsgGetMicrophone, useEncryption(MsgGetMicrophone, handleGetMicrophone))
 	relay.On(MsgSetMicrophone, useEncryption(MsgSetMicrophone, handleSetMicrophone))
+	relay.On(MsgGetRecordingSound, useEncryption(MsgGetRecordingSound, handleGetRecordingSound))
 	relay.On(MsgSetRecordingSound, useEncryption(MsgSetRecordingSound, handleSetRecordingSound))
 
 	// System
@@ -456,7 +460,9 @@ func handleRemoveDevice(ctx *HandlerContext, payload json.RawMessage) {
 		return
 	}
 
-	SendEncryptedSuccess(ctx, MsgRemoveDevice, nil)
+	SendEncryptedSuccess(ctx, MsgRemoveDevice, map[string]any{
+		"removedDeviceId": req.TargetDeviceID,
+	})
 }
 
 func handleGetEvents(ctx *HandlerContext, payload json.RawMessage) {
@@ -546,6 +552,18 @@ func handleContinueStream(ctx *HandlerContext, payload json.RawMessage) {
 	SendEncryptedSuccess(ctx, MsgContinueStream, nil)
 }
 
+func handleGetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
+	enabled := true
+	if val, ok := config.Get().GetKey("microphoneEnabled"); ok {
+		if b, ok := val.(bool); ok {
+			enabled = b
+		}
+	}
+	SendEncryptedSuccess(ctx, MsgGetMicrophone, map[string]any{
+		"enabled": enabled,
+	})
+}
+
 func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 	var req struct {
 		Enabled bool `json:"enabled"`
@@ -563,6 +581,18 @@ func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 
 	SendEncryptedSuccess(ctx, MsgSetMicrophone, map[string]any{
 		"enabled": req.Enabled,
+	})
+}
+
+func handleGetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
+	enabled := false
+	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok {
+		if b, ok := val.(bool); ok {
+			enabled = b
+		}
+	}
+	SendEncryptedSuccess(ctx, MsgGetRecordingSound, map[string]any{
+		"enabled": enabled,
 	})
 }
 
