@@ -37,9 +37,10 @@ const (
 	MsgGetEvents         = "getEvents"
 	MsgGetRecording      = "getRecording"
 	MsgGetThumbnail      = "getThumbnail"
-	MsgStartStream       = "startStream"
-	MsgContinueStream    = "continueStream"
-	MsgStreamVideoChunk  = "streamVideoChunk"
+	MsgStartStream      = "startStream"
+	MsgContinueStream   = "continueStream"
+	MsgStreamVideoChunk = "streamVideoChunk"
+	MsgStreamAudioChunk = "streamAudioChunk"
 	MsgGetMicrophone     = "getMicrophone"
 	MsgSetMicrophone     = "setMicrophone"
 	MsgGetRecordingSound = "getRecordingSound"
@@ -531,18 +532,29 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	// Stop existing stream first (if any)
-	StopCurrentStream()
+	StopVideoStream() // Stop existing video stream first (if any)
+	StopAudioStream() // Stop existing audio stream first (if any)
 
-	// Start fresh stream with new ffmpeg process
-	stream, err := record.Get().StartStream()
+	// Start fresh video stream
+	stream, err := record.Get().StartVideoStream()
 	if err != nil {
 		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
 		return
 	}
 
-	// Start streaming to this client
-	StartStreamForClient(ctx, stream, MsgStreamVideoChunk)
+	// Start streaming video to this client
+	StartVideoStreamForClient(ctx, stream, MsgStreamVideoChunk)
+
+	// Start audio stream if microphone is enabled
+	if record.MicEnabled() {
+		audioStream, err := record.Get().StartAudioStream()
+		if err != nil {
+			log.Printf("RelayComm: Failed to start audio stream: %v", err)
+		} else {
+			StartAudioStreamForClient(ctx, audioStream)
+		}
+	}
+
 	SendEncryptedSuccess(ctx, MsgStartStream, nil)
 }
 
@@ -553,12 +565,7 @@ func handleContinueStream(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleGetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
-	enabled := true
-	if val, ok := config.Get().GetKey("microphoneEnabled"); ok {
-		if b, ok := val.(bool); ok {
-			enabled = b
-		}
-	}
+	enabled := record.MicEnabled()
 	SendEncryptedSuccess(ctx, MsgGetMicrophone, map[string]any{
 		"enabled": enabled,
 	})

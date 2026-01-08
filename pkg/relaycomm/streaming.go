@@ -22,15 +22,17 @@ type currentStream struct {
 }
 
 var (
-	activeStream   *currentStream
-	activeStreamMu sync.Mutex
 	heartbeatTimer *time.Ticker
+	videoStream    *currentStream
+	videoStreamMu  sync.Mutex
+	audioStream    *currentStream
+	audioStreamMu  sync.Mutex
 )
 
-// StartStreamForClient starts a new stream for the given client
-func StartStreamForClient(ctx *HandlerContext, reader io.Reader, messageType string) {
-	activeStreamMu.Lock()
-	defer activeStreamMu.Unlock()
+// StartVideoStreamForClient starts a new stream for the given client
+func StartVideoStreamForClient(ctx *HandlerContext, reader io.Reader, messageType string) {
+	videoStreamMu.Lock()
+	defer videoStreamMu.Unlock()
 
 	// Start new stream for this client
 	stream := &currentStream{
@@ -44,30 +46,30 @@ func StartStreamForClient(ctx *HandlerContext, reader io.Reader, messageType str
 	stream.wg.Add(1)
 	go streamToClient(stream)
 
-	activeStream = stream
+	videoStream = stream
 	startHeartbeatMonitor()
-	log.Printf("RelayComm: Started stream for device %s", ctx.DeviceID)
+	log.Printf("RelayComm: Started video stream for device %s", ctx.DeviceID)
 }
 
-// StopCurrentStream stops the active stream if any
-func StopCurrentStream() {
-	activeStreamMu.Lock()
-	defer activeStreamMu.Unlock()
-	stopCurrentStreamLocked()
+// StopVideoStream stops the active stream if any
+func StopVideoStream() {
+	videoStreamMu.Lock()
+	defer videoStreamMu.Unlock()
+	stopVideoStreamLocked()
 }
 
-// stopCurrentStreamLocked must be called while holding activeStreamMu
-func stopCurrentStreamLocked() {
-	if activeStream != nil {
-		close(activeStream.stopCh)
-		activeStream.wg.Wait()
+// stopVideoStreamLocked must be called while holding activeStreamMu
+func stopVideoStreamLocked() {
+	if videoStream != nil {
+		close(videoStream.stopCh)
+		videoStream.wg.Wait()
 
 		// Stop the actual camera stream
-		if err := record.Get().StopStream(); err != nil {
-			log.Printf("RelayComm: Failed to stop stream: %v", err)
+		if err := record.Get().StopVideoStream(); err != nil {
+			log.Printf("RelayComm: Failed to stop video stream: %v", err)
 		}
 
-		activeStream = nil
+		videoStream = nil
 	}
 
 	// Stop heartbeat monitor
@@ -79,21 +81,35 @@ func stopCurrentStreamLocked() {
 
 // UpdateStreamContext updates the encryption context for the active stream (used during key renewal)
 func UpdateStreamContext(deviceID string, newCtx *HandlerContext) {
-	activeStreamMu.Lock()
-	defer activeStreamMu.Unlock()
+	videoStreamMu.Lock()
+	defer videoStreamMu.Unlock()
 
-	if activeStream != nil && activeStream.ctx.DeviceID == deviceID {
-		activeStream.ctx = newCtx
+	if videoStream != nil && videoStream.ctx.DeviceID == deviceID {
+		videoStream.ctx = newCtx
+	}
+
+	audioStreamMu.Lock()
+	defer audioStreamMu.Unlock()
+
+	if audioStream != nil && audioStream.ctx.DeviceID == deviceID {
+		audioStream.ctx = newCtx
 	}
 }
 
 // UpdateStreamActivity updates the last active timestamp (called by continueStream handler)
 func UpdateStreamActivity() {
-	activeStreamMu.Lock()
-	defer activeStreamMu.Unlock()
+	videoStreamMu.Lock()
+	defer videoStreamMu.Unlock()
 
-	if activeStream != nil {
-		activeStream.lastActive = time.Now()
+	if videoStream != nil {
+		videoStream.lastActive = time.Now()
+	}
+
+	audioStreamMu.Lock()
+	defer audioStreamMu.Unlock()
+
+	if audioStream != nil {
+		audioStream.lastActive = time.Now()
 	}
 }
 
@@ -108,15 +124,21 @@ func startHeartbeatMonitor() {
 
 	go func() {
 		for range heartbeatTimer.C {
-			activeStreamMu.Lock()
-
-			// Stop stream if no heartbeat for 10 seconds
-			if activeStream != nil && time.Since(activeStream.lastActive) > 10*time.Second {
-				log.Printf("RelayComm: Stopping stream due to client inactivity")
-				stopCurrentStreamLocked()
+			// Stop video stream if no heartbeat for 10 seconds
+			videoStreamMu.Lock()
+			if videoStream != nil && time.Since(videoStream.lastActive) > 10*time.Second {
+				log.Printf("RelayComm: Stopping video stream due to client inactivity")
+				stopVideoStreamLocked()
 			}
+			videoStreamMu.Unlock()
 
-			activeStreamMu.Unlock()
+			// Stop audio stream if no heartbeat for 10 seconds
+			audioStreamMu.Lock()
+			if audioStream != nil && time.Since(audioStream.lastActive) > 10*time.Second {
+				log.Printf("RelayComm: Stopping audio stream due to client inactivity")
+				stopAudioStreamLocked()
+			}
+			audioStreamMu.Unlock()
 		}
 	}()
 }
@@ -155,7 +177,7 @@ func readMP4Box(r io.Reader) ([]byte, error) {
 	return boxData, nil
 }
 
-// streamToClient reads MP4 fragments and sends them to the client
+// streamToClient reads MP4 fragments pre-chunked from broadcast and sends them to the client
 func streamToClient(stream *currentStream) {
 	defer stream.wg.Done()
 
@@ -212,5 +234,88 @@ func streamToClient(stream *currentStream) {
 		}
 
 		chunkIndex++
+	}
+}
+
+// StartAudioStreamForClient starts audio streaming independently from video
+func StartAudioStreamForClient(ctx *HandlerContext, reader io.Reader) {
+	audioStreamMu.Lock()
+	defer audioStreamMu.Unlock()
+
+	// Start new audio stream
+	stream := &currentStream{
+		ctx:        ctx,
+		stopCh:     make(chan struct{}),
+		msgType:    MsgStreamAudioChunk,
+		reader:     reader,
+		lastActive: time.Now(),
+	}
+
+	stream.wg.Add(1)
+	go streamAudioToClient(stream)
+
+	audioStream = stream
+	log.Printf("RelayComm: Started audio stream for device %s", ctx.DeviceID)
+}
+
+// StopAudioStream stops the active audio stream
+func StopAudioStream() {
+	audioStreamMu.Lock()
+	defer audioStreamMu.Unlock()
+	stopAudioStreamLocked()
+}
+
+// stopAudioStreamLocked must be called while holding audioStreamMu
+func stopAudioStreamLocked() {
+	if audioStream != nil {
+		close(audioStream.stopCh)
+		audioStream.wg.Wait()
+
+		// Close the reader to trigger cleanup in recorder
+		if closer, ok := audioStream.reader.(io.Closer); ok {
+			closer.Close()
+		}
+
+		audioStream = nil
+	}
+}
+
+// streamAudioToClient reads pre-chunked audio from broadcast and sends to client
+func streamAudioToClient(stream *currentStream) {
+	defer stream.wg.Done()
+
+	chunkIndex := 0
+	buffer := make([]byte, 64*1024)
+
+	log.Println("RelayComm: Audio stream sender started")
+
+	for {
+		// Check for stop signal before reading
+		select {
+		case <-stream.stopCh:
+			log.Printf("RelayComm: Audio stream stopped after %d chunks", chunkIndex)
+			return
+		default:
+		}
+
+		// Read audio data
+		n, err := stream.reader.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("RelayComm: Audio stream error: %v", err)
+			}
+			return
+		}
+
+		if n > 0 {
+			if sendErr := SendEncryptedSuccess(stream.ctx, stream.msgType, map[string]any{
+				"chunk":      base64.StdEncoding.EncodeToString(buffer[:n]),
+				"chunkIndex": chunkIndex,
+			}); sendErr != nil {
+				log.Printf("RelayComm: Error sending audio chunk %d: %v", chunkIndex, sendErr)
+				return
+			}
+			chunkIndex++
+		}
 	}
 }

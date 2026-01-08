@@ -23,21 +23,36 @@ import (
 // 500KB yields ~5-6 chunks/sec, 256KB yields ~10 chunks/sec (more relay overhead).
 const keyframeBufferSize = 500 * 1024 // 500KB
 
+// audioChunkSize controls PCM audio chunk accumulation before broadcast.
+// 48kHz mono S16_LE = 48000 samples/sec * 2 bytes/sample = 96000 bytes/sec
+// 48KB = 500ms of audio, yielding ~2 chunks/sec.
+const audioChunkSize = 48 * 1024 // 48KB
+
 type Recorder struct {
-	cameraCmd *exec.Cmd
-	broadcast *Broadcast
-	mu        sync.RWMutex
-	recording bool
-	recordCmd *exec.Cmd
-	streaming bool
-	streamCmd *exec.Cmd
+	mu             sync.RWMutex
+	recording      bool
+	recordVideoCmd *exec.Cmd
+	recordAudioCmd *exec.Cmd
+	videoCmd       *exec.Cmd
+	videoBroadcast *VideoBroadcast
+	videoStreaming bool
+	videoStreamCmd *exec.Cmd
+	audioCmd       *exec.Cmd
+	audioBroadcast *AudioBroadcast
+	audioStreaming bool
+	audioStreamCmd *exec.Cmd
 }
 
-type Broadcast struct {
+type VideoBroadcast struct {
 	consumers   []*Consumer
 	consumersMu sync.RWMutex
 	latestFrame []byte
 	frameMu     sync.RWMutex
+}
+
+type AudioBroadcast struct {
+	consumers   []*Consumer
+	consumersMu sync.RWMutex
 }
 
 type Consumer struct {
@@ -62,6 +77,10 @@ func Init() error {
 			initErr = fmt.Errorf("failed to start camera: %w", err)
 			return
 		}
+
+		if err := instance.startMicrophone(); err != nil {
+			log.Printf("Recorder: Failed to start audio: %v", err)
+		}
 	})
 	return initErr
 }
@@ -73,7 +92,7 @@ func Get() *Recorder {
 	return instance
 }
 
-func micEnabled() bool {
+func MicEnabled() bool {
 	val, ok := config.Get().GetKey("microphoneEnabled")
 	if !ok {
 		return true
@@ -124,14 +143,14 @@ func (r *Recorder) startCamera() error {
 		return fmt.Errorf("failed to start camera: %w", err)
 	}
 
-	r.cameraCmd = cameraCmd
-	r.broadcast = &Broadcast{consumers: make([]*Consumer, 0)}
+	r.videoCmd = cameraCmd
+	r.videoBroadcast = &VideoBroadcast{consumers: make([]*Consumer, 0)}
 
-	go r.broadcastLoop(cameraOut)
+	go r.videoBroadcastLoop(cameraOut)
 	return nil
 }
 
-func (r *Recorder) broadcastLoop(cameraOut io.ReadCloser) {
+func (r *Recorder) videoBroadcastLoop(cameraOut io.ReadCloser) {
 	buffer := make([]byte, 64*1024)
 	keyframeBuffer := &bytes.Buffer{}
 	capturingKeyframe := false
@@ -158,128 +177,229 @@ func (r *Recorder) broadcastLoop(cameraOut io.ReadCloser) {
 			if capturingKeyframe {
 				keyframeBuffer.Write(data)
 				if keyframeBuffer.Len() > keyframeBufferSize {
-					r.broadcast.frameMu.Lock()
-					r.broadcast.latestFrame = append([]byte(nil), keyframeBuffer.Bytes()...)
-					r.broadcast.frameMu.Unlock()
+					r.mu.RLock()
+					broadcast := r.videoBroadcast
+					r.mu.RUnlock()
+
+					if broadcast != nil {
+						broadcast.frameMu.Lock()
+						broadcast.latestFrame = append([]byte(nil), keyframeBuffer.Bytes()...)
+						broadcast.frameMu.Unlock()
+					}
 					capturingKeyframe = false
 				}
 			}
 
 			// Broadcast to consumers
-			r.broadcast.consumersMu.RLock()
-			for _, consumer := range r.broadcast.consumers {
-				consumer.writer.Write(data)
+			r.mu.RLock()
+			broadcast := r.videoBroadcast
+			r.mu.RUnlock()
+
+			if broadcast != nil {
+				broadcast.consumersMu.RLock()
+				for _, consumer := range broadcast.consumers {
+					consumer.writer.Write(data)
+				}
+				broadcast.consumersMu.RUnlock()
 			}
-			r.broadcast.consumersMu.RUnlock()
 		}
 
 		if err != nil {
-			log.Printf("Recorder: Camera error: %v, restarting...", err)
+			log.Printf("Recorder: Camera error: %v", err)
 
-			r.broadcast.consumersMu.Lock()
-			for _, consumer := range r.broadcast.consumers {
-				consumer.writer.Close()
+			// Safely access broadcast (may be nil if camera was stopped)
+			r.mu.RLock()
+			broadcast := r.videoBroadcast
+			r.mu.RUnlock()
+
+			if broadcast != nil {
+				broadcast.consumersMu.Lock()
+				for _, consumer := range broadcast.consumers {
+					consumer.writer.Close()
+				}
+				broadcast.consumersMu.Unlock()
 			}
-			r.broadcast.consumersMu.Unlock()
-
-			time.Sleep(1 * time.Second)
-			r.restartCamera()
 			return
 		}
 	}
 }
 
-func (r *Recorder) restartCamera() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.cameraCmd != nil && r.cameraCmd.Process != nil {
-		r.cameraCmd.Process.Kill()
+func (r *Recorder) startMicrophone() error {
+	if !MicEnabled() {
+		return fmt.Errorf("microphone disabled")
 	}
 
-	time.Sleep(500 * time.Millisecond)
-	if err := r.startCamera(); err != nil {
-		log.Printf("Recorder: Failed to restart camera: %v", err)
+	micDevice := getMicDevice()
+	if micDevice == "" {
+		return fmt.Errorf("no microphone available")
+	}
+
+	micCmd := exec.Command("arecord",
+		"-D", "hw:0,0",
+		"-f", "S16_LE",
+		"-r", "48000",
+		"-c", "1",
+		"-t", "raw",
+	)
+
+	audioOut, err := micCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create audio pipe: %w", err)
+	}
+
+	if err := micCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start audio: %w", err)
+	}
+
+	r.audioCmd = micCmd
+	r.audioBroadcast = &AudioBroadcast{consumers: make([]*Consumer, 0)}
+
+	go r.audioBroadcastLoop(audioOut)
+	log.Println("Recorder: Audio broadcast started")
+	return nil
+}
+
+func (r *Recorder) audioBroadcastLoop(audioOut io.ReadCloser) {
+	chunkBuffer := make([]byte, 0, audioChunkSize)
+	readBuffer := make([]byte, 4096)
+
+	for {
+		n, err := audioOut.Read(readBuffer)
+		if n > 0 {
+			data := readBuffer[:n]
+
+			// Accumulate into chunk buffer
+			chunkBuffer = append(chunkBuffer, data...)
+
+			// When we have a full chunk, broadcast it
+			if len(chunkBuffer) >= audioChunkSize {
+				r.mu.RLock()
+				broadcast := r.audioBroadcast
+				r.mu.RUnlock()
+
+				if broadcast != nil {
+					broadcast.consumersMu.RLock()
+					for _, consumer := range broadcast.consumers {
+						consumer.writer.Write(chunkBuffer)
+					}
+					broadcast.consumersMu.RUnlock()
+				}
+				chunkBuffer = chunkBuffer[:0] // Reset buffer, keep capacity
+			}
+		}
+
+		if err != nil {
+			log.Printf("Recorder: Audio error: %v", err)
+
+			// Safely access broadcast (may be nil if stopMicrophone was called)
+			r.mu.RLock()
+			broadcast := r.audioBroadcast
+			r.mu.RUnlock()
+
+			if broadcast != nil {
+				broadcast.consumersMu.Lock()
+				for _, consumer := range broadcast.consumers {
+					consumer.writer.Close()
+				}
+				broadcast.consumersMu.Unlock()
+			}
+			return
+		}
 	}
 }
 
-func (r *Recorder) addConsumer(writer io.WriteCloser) *Consumer {
+func (r *Recorder) stopMicrophone() {
+	if r.audioCmd != nil && r.audioCmd.Process != nil {
+		r.audioCmd.Process.Kill()
+		r.audioCmd.Wait()
+	}
+
+	if r.audioBroadcast != nil {
+		r.audioBroadcast.consumersMu.Lock()
+		for _, consumer := range r.audioBroadcast.consumers {
+			consumer.writer.Close()
+		}
+		r.audioBroadcast.consumers = nil
+		r.audioBroadcast.consumersMu.Unlock()
+		r.audioBroadcast = nil
+	}
+
+	r.audioCmd = nil
+	log.Println("Recorder: Stopped audio broadcast")
+}
+
+func (r *Recorder) addVideoConsumer(writer io.WriteCloser) *Consumer {
 	consumer := &Consumer{writer: writer}
-	r.broadcast.consumersMu.Lock()
-	r.broadcast.consumers = append(r.broadcast.consumers, consumer)
-	r.broadcast.consumersMu.Unlock()
+	r.videoBroadcast.consumersMu.Lock()
+	r.videoBroadcast.consumers = append(r.videoBroadcast.consumers, consumer)
+	r.videoBroadcast.consumersMu.Unlock()
 	return consumer
 }
 
-func (r *Recorder) removeConsumer(consumer *Consumer) {
-	r.broadcast.consumersMu.Lock()
-	defer r.broadcast.consumersMu.Unlock()
+func (r *Recorder) removeVideoConsumer(consumer *Consumer) {
+	r.mu.RLock()
+	broadcast := r.videoBroadcast
+	r.mu.RUnlock()
 
-	for i, c := range r.broadcast.consumers {
+	if broadcast == nil {
+		return
+	}
+
+	broadcast.consumersMu.Lock()
+	defer broadcast.consumersMu.Unlock()
+
+	for i, c := range broadcast.consumers {
 		if c == consumer {
-			r.broadcast.consumers = append(r.broadcast.consumers[:i], r.broadcast.consumers[i+1:]...)
+			broadcast.consumers = append(broadcast.consumers[:i], broadcast.consumers[i+1:]...)
 			break
 		}
 	}
 }
 
-// startFFmpeg creates an ffmpeg process with optional output file
-func startFFmpeg(input io.Reader, outputFile string) (*exec.Cmd, io.ReadCloser, error) {
-	var cmd *exec.Cmd
-	var outputReader io.ReadCloser
+func (r *Recorder) addAudioConsumer(writer io.WriteCloser) *Consumer {
+	consumer := &Consumer{writer: writer}
+	r.audioBroadcast.consumersMu.Lock()
+	r.audioBroadcast.consumers = append(r.audioBroadcast.consumers, consumer)
+	r.audioBroadcast.consumersMu.Unlock()
+	return consumer
+}
 
-	var micDevice string
-	if micEnabled() {
-		micDevice = getMicDevice()
+func (r *Recorder) removeAudioConsumer(consumer *Consumer) {
+	r.mu.RLock()
+	broadcast := r.audioBroadcast
+	r.mu.RUnlock()
+
+	if broadcast == nil {
+		return
 	}
 
-	if outputFile != "" {
-		// Recording to file
-		if micDevice != "" {
-			cmd = exec.Command("ffmpeg",
-				"-f", "h264", "-i", "pipe:0",
-				"-f", "alsa", "-i", micDevice,
-				"-c:v", "copy", "-c:a", "aac",
-				"-f", "mp4", outputFile,
-			)
-		} else {
-			cmd = exec.Command("ffmpeg",
-				"-f", "h264", "-i", "pipe:0",
-				"-c:v", "copy",
-				"-f", "mp4", outputFile,
-			)
-		}
-		cmd.Stdin = input
-	} else {
-		// Streaming to pipe
-		if micDevice != "" {
-			cmd = exec.Command("ffmpeg",
-				"-f", "h264", "-i", "pipe:0",
-				"-f", "alsa", "-i", micDevice,
-				"-c:v", "copy", "-c:a", "aac",
-				"-f", "mp4",
-				"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-				"-frag_duration", "200000",
-				"pipe:1",
-			)
-		} else {
-			cmd = exec.Command("ffmpeg",
-				"-f", "h264", "-i", "pipe:0",
-				"-c:v", "copy",
-				"-f", "mp4",
-				"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-				"-frag_duration", "200000",
-				"pipe:1",
-			)
-		}
+	broadcast.consumersMu.Lock()
+	defer broadcast.consumersMu.Unlock()
 
-		var err error
-		outputReader, err = cmd.StdoutPipe()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	for i, c := range broadcast.consumers {
+		if c == consumer {
+			broadcast.consumers = append(broadcast.consumers[:i], broadcast.consumers[i+1:]...)
+			break
 		}
-		cmd.Stdin = input
 	}
+}
+
+// startFFmpegStream creates an ffmpeg process for streaming video
+func startFFmpegStream(input io.Reader) (*exec.Cmd, io.ReadCloser, error) {
+	cmd := exec.Command("ffmpeg",
+		"-f", "h264", "-i", "pipe:0",
+		"-c:v", "copy",
+		"-f", "mp4",
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
+		"-frag_duration", "200000",
+		"pipe:1",
+	)
+
+	outputReader, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	cmd.Stdin = input
 
 	if err := cmd.Start(); err != nil {
 		return nil, nil, fmt.Errorf("failed to start ffmpeg: %w", err)
@@ -288,20 +408,52 @@ func startFFmpeg(input io.Reader, outputFile string) (*exec.Cmd, io.ReadCloser, 
 	return cmd, outputReader, nil
 }
 
-func (r *Recorder) StartStream() (io.ReadCloser, error) {
+// startFFmpegRecording creates an ffmpeg process for recording video to file
+func startFFmpegRecording(input io.Reader, outputFile string) (*exec.Cmd, error) {
+	cmd := exec.Command("ffmpeg",
+		"-f", "h264", "-i", "pipe:0",
+		"-c:v", "copy",
+		"-f", "mp4", outputFile,
+	)
+	cmd.Stdin = input
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start ffmpeg: %w", err)
+	}
+
+	return cmd, nil
+}
+
+// startAudioRecording saves raw PCM audio to file
+func startAudioRecording(input io.Reader, outputFile string) (*exec.Cmd, error) {
+	cmd := exec.Command("ffmpeg",
+		"-f", "s16le", "-ar", "48000", "-ac", "1", "-i", "pipe:0",
+		"-c:a", "aac",
+		"-f", "mp4", outputFile,
+	)
+	cmd.Stdin = input
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start audio recording: %w", err)
+	}
+
+	return cmd, nil
+}
+
+func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.streaming {
+	if r.videoStreaming {
 		return nil, fmt.Errorf("already streaming")
 	}
 
 	reader, writer := io.Pipe()
-	consumer := r.addConsumer(writer)
+	consumer := r.addVideoConsumer(writer)
 
-	cmd, outputReader, err := startFFmpeg(reader, "")
+	cmd, outputReader, err := startFFmpegStream(reader)
 	if err != nil {
-		r.removeConsumer(consumer)
+		r.removeVideoConsumer(consumer)
 		writer.Close()
 		return nil, err
 	}
@@ -309,36 +461,36 @@ func (r *Recorder) StartStream() (io.ReadCloser, error) {
 	go func() {
 		cmd.Wait()
 		writer.Close()
-		r.removeConsumer(consumer)
+		r.removeVideoConsumer(consumer)
 	}()
 
-	r.streamCmd = cmd
-	r.streaming = true
+	r.videoStreamCmd = cmd
+	r.videoStreaming = true
 
 	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok && val.(bool) {
 		sfx.Get().PlayRecording()
 	}
 
-	log.Println("Recorder: Started streaming")
+	log.Println("Recorder: Started video streaming")
 	return outputReader, nil
 }
 
-func (r *Recorder) StopStream() error {
+func (r *Recorder) StopVideoStream() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.streaming {
+	if !r.videoStreaming {
 		return nil
 	}
 
-	if r.streamCmd != nil && r.streamCmd.Process != nil {
-		r.streamCmd.Process.Kill()
+	if r.videoStreamCmd != nil && r.videoStreamCmd.Process != nil {
+		r.videoStreamCmd.Process.Kill()
 	}
 
-	r.streaming = false
-	r.streamCmd = nil
+	r.videoStreaming = false
+	r.videoStreamCmd = nil
 
-	log.Println("Recorder: Stopped streaming")
+	log.Println("Recorder: Stopped video streaming")
 	return nil
 }
 
@@ -350,23 +502,45 @@ func (r *Recorder) StartRecording(outputPath string) error {
 		return fmt.Errorf("already recording")
 	}
 
-	reader, writer := io.Pipe()
-	consumer := r.addConsumer(writer)
+	// Start video recording
+	videoReader, videoWriter := io.Pipe()
+	videoConsumer := r.addVideoConsumer(videoWriter)
 
-	cmd, _, err := startFFmpeg(reader, outputPath)
+	videoCmd, err := startFFmpegRecording(videoReader, outputPath)
 	if err != nil {
-		r.removeConsumer(consumer)
-		writer.Close()
+		r.removeVideoConsumer(videoConsumer)
+		videoWriter.Close()
 		return err
 	}
 
 	go func() {
-		cmd.Wait()
-		writer.Close()
-		r.removeConsumer(consumer)
+		videoCmd.Wait()
+		videoWriter.Close()
+		r.removeVideoConsumer(videoConsumer)
 	}()
 
-	r.recordCmd = cmd
+	r.recordVideoCmd = videoCmd
+
+	// Start audio recording if microphone is enabled and available
+	if r.audioBroadcast != nil {
+		audioOutputPath := outputPath[:len(outputPath)-4] + "_audio.m4a"
+		audioReader, audioWriter := io.Pipe()
+		audioConsumer := r.addAudioConsumer(audioWriter)
+
+		audioCmd, err := startAudioRecording(audioReader, audioOutputPath)
+		if err != nil {
+			log.Printf("Recorder: Failed to start audio recording: %v", err)
+		} else {
+			go func() {
+				audioCmd.Wait()
+				audioWriter.Close()
+				r.removeAudioConsumer(audioConsumer)
+			}()
+
+			r.recordAudioCmd = audioCmd
+		}
+	}
+
 	r.recording = true
 
 	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok && val.(bool) {
@@ -385,21 +559,28 @@ func (r *Recorder) StopRecording() error {
 		return nil
 	}
 
-	if r.recordCmd != nil && r.recordCmd.Process != nil {
-		r.recordCmd.Process.Kill()
+	// Stop video recording
+	if r.recordVideoCmd != nil && r.recordVideoCmd.Process != nil {
+		r.recordVideoCmd.Process.Kill()
+	}
+
+	// Stop audio recording
+	if r.recordAudioCmd != nil && r.recordAudioCmd.Process != nil {
+		r.recordAudioCmd.Process.Kill()
 	}
 
 	r.recording = false
-	r.recordCmd = nil
+	r.recordVideoCmd = nil
+	r.recordAudioCmd = nil
 
 	log.Println("Recorder: Stopped recording")
 	return nil
 }
 
 func (r *Recorder) CapturePreview() ([]byte, error) {
-	r.broadcast.frameMu.RLock()
-	frame := r.broadcast.latestFrame
-	r.broadcast.frameMu.RUnlock()
+	r.videoBroadcast.frameMu.RLock()
+	frame := r.videoBroadcast.latestFrame
+	r.videoBroadcast.frameMu.RUnlock()
 
 	if len(frame) == 0 {
 		return nil, fmt.Errorf("no frame available yet")
@@ -431,5 +612,58 @@ func (r *Recorder) CapturePreview() ([]byte, error) {
 }
 
 func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
-	return config.Get().SetKey("microphoneEnabled", enabled)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := config.Get().SetKey("microphoneEnabled", enabled); err != nil {
+		return err
+	}
+
+	// Stop or start audio broadcast based on new setting
+	if enabled {
+		// Start microphone if not already running
+		if r.audioBroadcast == nil {
+			if err := r.startMicrophone(); err != nil {
+				log.Printf("Recorder: Failed to start microphone: %v", err)
+				return err
+			}
+		}
+	} else {
+		// Stop microphone if running
+		if r.audioBroadcast != nil {
+			r.stopMicrophone()
+		}
+	}
+
+	return nil
+}
+
+// StartAudioStream starts streaming raw PCM audio from the broadcast
+func (r *Recorder) StartAudioStream() (io.ReadCloser, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.audioBroadcast == nil {
+		return nil, fmt.Errorf("audio broadcast not available")
+	}
+
+	reader, writer := io.Pipe()
+	consumer := r.addAudioConsumer(writer)
+
+	// Clean up consumer when stream stops
+	go func() {
+		// Wait for reader to be closed
+		buf := make([]byte, 1)
+		for {
+			_, err := reader.Read(buf)
+			if err != nil {
+				break
+			}
+		}
+		writer.Close()
+		r.removeAudioConsumer(consumer)
+	}()
+
+	log.Println("Recorder: Started audio streaming")
+	return reader, nil
 }
