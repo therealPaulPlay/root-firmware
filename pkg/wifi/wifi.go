@@ -5,6 +5,7 @@ import (
 	"log"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -324,6 +325,11 @@ func (w *WiFi) parseNetworks(output string) []Network {
 			networks = append(networks, network)
 		}
 	}
+
+	// Sort networks by signal strength (strongest first)
+	sort.Slice(networks, func(i, j int) bool {
+		return networks[i].Signal > networks[j].Signal
+	})
 
 	return networks
 }

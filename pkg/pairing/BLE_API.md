@@ -47,7 +47,22 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ## Characteristics
 
-### 1. Get Pairing Code
+### 1. Get Product ID
+**UUID**: `8f3c4d5e-9a2b-4f1e-8d6c-7e5f4a3b2c1d`
+**Properties**: Read
+**Description**: Returns the unique product ID of the camera. This ID is generated on first boot.
+
+**Response**:
+```json
+{
+  "success": true,
+  "productId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+---
+
+### 2. Get Pairing Code
 **UUID**: `51ff12bb-3ed8-46e5-b4f9-d64e2fec021b`
 **Properties**: Read
 **Description**: Generates and returns a new UUID-based pairing code. Code expires after 15 minutes.
@@ -62,7 +77,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 2. Scan QR Code
+### 3. Scan QR Code
 **UUID**: `2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e`
 **Properties**: Read
 **Description**: Triggers camera to capture a frame and scan for QR code. Verifies the scanned code matches the expected pairing code and marks it as verified.
@@ -84,7 +99,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 3. Pair Device
+### 4. Pair Device
 **UUID**: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
 **Properties**: Write, Read
 **Description**: Pairs a device after QR code verification. Write to initiate pairing, then read to get result. Requires prior successful QR scan.
@@ -110,7 +125,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 4. Get Camera Public Key
+### 5. Get Camera Public Key
 **UUID**: `2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a`
 **Properties**: Read
 **Description**: Returns the camera's public key after successful pairing. Must be read after pairing completes.
@@ -125,7 +140,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 5. Get WiFi Networks (Paginated)
+### 6. Get WiFi Networks (Paginated)
 **UUID**: `c2be2bc9-cee3-40ae-af50-f9959f25ee5b`
 **Properties**: Read
 **Description**: Returns WiFi networks one at a time. First read scans, subsequent reads return next network. Read after `hasMore: false` triggers fresh scan.
@@ -148,7 +163,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 6. Get WiFi Status
+### 7. Get WiFi Status
 **UUID**: `d96453d5-1f49-47d6-8cbd-ac5547fc51a9`
 **Properties**: Read
 **Description**: Returns current WiFi connection status and SSID.
@@ -164,7 +179,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 7. Set WiFi
+### 8. Set WiFi
 **UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
 **Properties**: Write, Read
 **Description**: Configures WiFi credentials. Write operation blocks until connection completes, then read to verify success. Requires encrypted payload from paired device.
@@ -205,7 +220,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 8. Get Relay Status
+### 9. Get Relay Status
 **UUID**: `a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab`
 **Properties**: Read
 **Description**: Returns currently configured relay server domain.
@@ -222,7 +237,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 9. Set Relay
+### 10. Set Relay
 **UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
 **Properties**: Write, Read
 **Description**: Configures relay server domain. Write operation blocks until configuration completes, then read to verify success. Requires encrypted payload from paired device.
