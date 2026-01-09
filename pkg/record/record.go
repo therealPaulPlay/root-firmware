@@ -140,6 +140,8 @@ func (r *Recorder) startCamera() error {
 		"--codec", "h264", "-n", "--inline", "--listen",
 		"--framerate", "15",
 		"--width", "1920", "--height", "1080",
+		"-b", "3000000",
+		"-g", "30",
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -286,6 +288,8 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 	r.videoBroadcast.addConsumer(writer)
 
 	cmd := exec.Command("ffmpeg",
+		"-fflags", "+nobuffer",
+		"-flags", "low_delay",
 		"-f", "h264", "-i", "pipe:0",
 		"-c:v", "copy",
 		"-f", "mp4",
