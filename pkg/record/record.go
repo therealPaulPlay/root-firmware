@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	keyframeBufferSize = 256 * 1024 // 256KB - must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction
-	audioChunkSize     = 48 * 1024  // 48KB - yields ~2 audio chunks/sec (500ms at 48kHz mono)
+	maxKeyframeBufferSize = 256 * 1024 // 256KB - must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction
+	audioChunkSize        = 48 * 1024  // 48KB - yields ~2 audio chunks/sec (500ms at 48kHz mono)
 )
 
 type Recorder struct {
@@ -193,7 +193,7 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 			if capturingKeyframe {
 				keyframeBuffer.Write(data)
 				// Safety: cap buffer size to prevent unbounded memory growth
-				if keyframeBuffer.Len() > keyframeBufferSize {
+				if keyframeBuffer.Len() > maxKeyframeBufferSize {
 					r.videoBroadcast.frameMu.Lock()
 					r.videoBroadcast.latestFrame = append([]byte(nil), keyframeBuffer.Bytes()...)
 					r.videoBroadcast.frameMu.Unlock()
