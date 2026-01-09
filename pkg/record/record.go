@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	keyframeBufferSize = 500 * 1024 // 500KB - yields ~5-6 MP4 fragments/sec (must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction)
+	keyframeBufferSize = 256 * 1024 // 256KB - must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction
 	audioChunkSize     = 48 * 1024  // 48KB - yields ~2 audio chunks/sec (500ms at 48kHz mono)
 )
 
@@ -177,6 +177,12 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 				// Check for NAL start code: 0x00 0x00 0x00 0x01
 				if data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1 && i+4 < len(data) {
 					if data[i+4]&0x1F == 7 { // SPS - start of keyframe
+						// If we were already capturing, save the previous keyframe
+						if capturingKeyframe && keyframeBuffer.Len() > 0 {
+							r.videoBroadcast.frameMu.Lock()
+							r.videoBroadcast.latestFrame = append([]byte(nil), keyframeBuffer.Bytes()...)
+							r.videoBroadcast.frameMu.Unlock()
+						}
 						keyframeBuffer.Reset()
 						capturingKeyframe = true
 						break
@@ -186,6 +192,7 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 
 			if capturingKeyframe {
 				keyframeBuffer.Write(data)
+				// Safety: cap buffer size to prevent unbounded memory growth
 				if keyframeBuffer.Len() > keyframeBufferSize {
 					r.videoBroadcast.frameMu.Lock()
 					r.videoBroadcast.latestFrame = append([]byte(nil), keyframeBuffer.Bytes()...)
