@@ -141,7 +141,7 @@ func (r *Recorder) startCamera() error {
 		"--framerate", "15",
 		"--width", "1920", "--height", "1080",
 		"-b", "3000000",
-		"-g", "30",
+		"-g", "15",
 	)
 
 	stdout, err := cmd.StdoutPipe()
