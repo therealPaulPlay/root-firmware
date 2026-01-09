@@ -92,7 +92,7 @@ func Init() error {
 		}
 
 		if err := instance.startMicrophone(); err != nil {
-			log.Printf("Recorder: Failed to start audio: %v", err)
+			log.Printf("Recorder: Failed to start microphone: %v", err)
 		}
 	})
 	return initErr
@@ -205,8 +205,9 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 		}
 
 		if err != nil {
+			log.Printf("Recorder: Video broadcast failed: %v", err)
 			r.videoBroadcast.closeAll()
-			return
+			log.Fatal("Recorder: Camera failure, exiting for restart")
 		}
 	}
 }
@@ -266,6 +267,9 @@ func (r *Recorder) audioBroadcastLoop(stdout io.ReadCloser) {
 		}
 
 		if err != nil {
+			if err != io.EOF {
+				log.Printf("Recorder: Audio broadcast error: %v", err)
+			}
 			r.audioBroadcast.closeAll()
 			return
 		}
