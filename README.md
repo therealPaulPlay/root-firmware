@@ -1,6 +1,22 @@
 # ROOT (Firmware)
 
-Firmware for ROOT camera devices. Built in Go with a focus on privacy, security, and observability.
+Firmware for ROOT camera devices. Written in Go with a focus on privacy, security, and observability.
+
+## Features and benefits
+
+This firmware turns a Raspberry Pi Zero 2w+ or Pi 3+ into a private home security camera. It utilizes end-2-end encryption with forward secrecy and connects to the relay server (https://github.com/therealPaulPlay/root-relay)[repository] to communicate with the (https://github.com/therealPaulPlay/root-site)[web and mobile app].
+
+A relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. 
+
+In the web app, you can connect to paired cameras, adjust settings such as enabling/disabling the microphone (if connected) as well as viewing recorded events, logs, and core health metrics. Streaming both video and audio is supported with low latency.
+
+## Contributing
+
+Contributions are welcome. For inquiries, please reach out via (mailto:paulplaystudio@gmail.com)[email] or Bluesky (@paulplay.bsky.social).
+
+## Tested SBCs
+
+- Pi Zero 2w
 
 ## Building
 
@@ -19,7 +35,7 @@ Prerequisites: Create user `observer`, set hostname to `ROOT-Observer.local`, in
 Deploy:
 
 ```bash
-./deploy.sh [user@hostname]
+./deploy.sh
 ```
 
 This syncs source to `/home/observer/firmware-repository`, builds on the Pi, copies binary to `/home/observer/root-firmware`, and auto-starts via systemd.
@@ -106,7 +122,7 @@ Collect logs and store them in a JSON for easy access.
 
 ### ML (Machine learning)
 
-Uses ONNX for basic event detection. Heavily inspired by [Secluso](https://github.com/secluso/secluso). 
+Uses ONNX for basic event detection. Inspired by [Secluso's](https://github.com/secluso/secluso) implementation. 
 
 ### Pairing
 
@@ -114,7 +130,7 @@ The firmware uses Bluetooth Low Energy for providing endpoints needed during the
 
 ### Record
 
-Handles recording video and audio via the camera and microphone components.
+Handles recording video and audio via the camera and microphone components. Camera and microphone (if enabled) input is constantly being read and fanned out to multiple consumers (e.g. stream and recording).
 
 ### Relaycomm
 
