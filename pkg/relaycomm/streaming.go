@@ -14,7 +14,8 @@ import (
 
 type stream struct {
 	ctx        *HandlerContext
-	reader     io.ReadCloser
+	reader     io.ReadCloser // For video (from ffmpeg)
+	ch         chan []byte   // For audio (direct channel)
 	msgType    string
 	stopCh     chan struct{}
 	lastActive time.Time
@@ -31,13 +32,14 @@ type streamManager struct {
 
 var streams = &streamManager{}
 
-func (sm *streamManager) start(isVideo bool, ctx *HandlerContext, reader io.ReadCloser, msgType string, onStop func()) {
+func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch chan []byte, msgType string, onStop func(), isVideo bool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	s := &stream{
 		ctx:        ctx,
 		reader:     reader,
+		ch:         ch,
 		msgType:    msgType,
 		stopCh:     make(chan struct{}),
 		lastActive: time.Now(),
@@ -71,7 +73,9 @@ func (sm *streamManager) stopLocked(isVideo bool) {
 
 	if s != nil {
 		close(s.stopCh)
-		s.reader.Close()
+		if s.reader != nil {
+			s.reader.Close()
+		}
 		s.wg.Wait()
 		if s.onStop != nil {
 			s.onStop()
@@ -202,24 +206,19 @@ func streamVideo(s *stream) {
 
 func streamAudio(s *stream) {
 	defer s.wg.Done()
-	buffer := make([]byte, 64*1024)
 	chunkIndex := 0
 
 	for {
 		select {
 		case <-s.stopCh:
 			return
-		default:
-		}
+		case data, ok := <-s.ch:
+			if !ok {
+				return
+			}
 
-		n, err := s.reader.Read(buffer)
-		if err != nil {
-			return
-		}
-
-		if n > 0 {
 			if err := SendEncryptedSuccess(s.ctx, s.msgType, map[string]any{
-				"chunk":      base64.StdEncoding.EncodeToString(buffer[:n]),
+				"chunk":      base64.StdEncoding.EncodeToString(data),
 				"chunkIndex": chunkIndex,
 			}); err != nil {
 				return
@@ -229,28 +228,34 @@ func streamAudio(s *stream) {
 	}
 }
 
+// Exported start functions
 func StartVideoStreamForClient(ctx *HandlerContext, reader io.Reader, msgType string) {
-	streams.start(true, ctx, reader.(io.ReadCloser), msgType, func() {
+	streams.start(ctx, reader.(io.ReadCloser), nil, msgType, func() {
 		record.Get().StopVideoStream()
-	})
+	}, true)
 }
 
+func StartAudioStreamForClient(ctx *HandlerContext, ch chan []byte) {
+	streams.start(ctx, nil, ch, MsgStreamAudioChunk, func() {
+		record.Get().StopAudioStream()
+	}, false)
+}
+
+// Exported sto pfunctions
 func StopVideoStream() {
 	streams.stop(true)
-}
-
-func StartAudioStreamForClient(ctx *HandlerContext, reader io.Reader) {
-	streams.start(false, ctx, reader.(io.ReadCloser), MsgStreamAudioChunk, nil)
 }
 
 func StopAudioStream() {
 	streams.stop(false)
 }
 
+// Update activity (heartbeat)
 func UpdateStreamActivity() {
 	streams.updateActivity()
 }
 
+// Update context (encryption session etc.)
 func UpdateStreamContext(deviceID string, newCtx *HandlerContext) {
 	streams.updateContext(deviceID, newCtx)
 }

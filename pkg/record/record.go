@@ -23,32 +23,36 @@ type Recorder struct {
 	mu             sync.RWMutex
 	videoCmd       *exec.Cmd
 	videoBroadcast *broadcast
+	videoStreamCh  chan []byte
 	audioCmd       *exec.Cmd
 	audioBroadcast *broadcast
+	audioStreamCh  chan []byte
 	recording      bool
 	recordVideoCmd *exec.Cmd
 	recordAudioCmd *exec.Cmd
-	videoStreamCmd *exec.Cmd
+	recordVideoCh  chan []byte
+	recordAudioCh  chan []byte
 }
 
 type broadcast struct {
-	consumers   []*io.PipeWriter
+	consumers   []chan []byte
 	mu          sync.RWMutex
 	latestFrame []byte // video only
 	frameMu     sync.RWMutex
 }
 
-func (b *broadcast) addConsumer(w *io.PipeWriter) {
+func (b *broadcast) addConsumer(ch chan []byte) {
 	b.mu.Lock()
-	b.consumers = append(b.consumers, w)
+	b.consumers = append(b.consumers, ch)
 	b.mu.Unlock()
 }
 
-func (b *broadcast) removeConsumer(w *io.PipeWriter) {
+func (b *broadcast) removeConsumer(ch chan []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for i, c := range b.consumers {
-		if c == w {
+		if c == ch {
+			close(c)
 			b.consumers = append(b.consumers[:i], b.consumers[i+1:]...)
 			return
 		}
@@ -58,16 +62,23 @@ func (b *broadcast) removeConsumer(w *io.PipeWriter) {
 func (b *broadcast) write(data []byte) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	for _, w := range b.consumers {
-		w.Write(data)
+
+	for _, ch := range b.consumers {
+		dataCopy := make([]byte, len(data))
+		copy(dataCopy, data)
+		select {
+		case ch <- dataCopy:
+		default:
+			log.Printf("WARNING: Dropped chunk, consumer channel full!")
+		}
 	}
 }
 
 func (b *broadcast) closeAll() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for _, w := range b.consumers {
-		w.Close()
+	for _, ch := range b.consumers {
+		close(ch)
 	}
 	b.consumers = nil
 }
@@ -142,6 +153,7 @@ func (r *Recorder) startCamera() error {
 		"--width", "1920", "--height", "1080",
 		"-b", "3000000",
 		"-g", "15",
+		"--ev", "5.0",
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -154,7 +166,7 @@ func (r *Recorder) startCamera() error {
 	}
 
 	r.videoCmd = cmd
-	r.videoBroadcast = &broadcast{consumers: make([]*io.PipeWriter, 0)}
+	r.videoBroadcast = &broadcast{consumers: make([]chan []byte, 0)}
 
 	go r.videoBroadcastLoop(stdout)
 	return nil
@@ -243,7 +255,7 @@ func (r *Recorder) startMicrophone() error {
 	}
 
 	r.audioCmd = cmd
-	r.audioBroadcast = &broadcast{consumers: make([]*io.PipeWriter, 0)}
+	r.audioBroadcast = &broadcast{consumers: make([]chan []byte, 0)}
 
 	go r.audioBroadcastLoop(stdout)
 	log.Println("Recorder: Audio broadcast started")
@@ -295,9 +307,23 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	reader, writer := io.Pipe()
-	r.videoBroadcast.addConsumer(writer)
+	// Create channel consumer for raw H.264
+	videoCh := make(chan []byte, 50)
+	r.videoBroadcast.addConsumer(videoCh)
+	r.videoStreamCh = videoCh
 
+	// Create pipe for ffmpeg
+	reader, writer := io.Pipe()
+
+	// Goroutine to drain channel into pipe for ffmpeg
+	go func() {
+		for data := range videoCh {
+			writer.Write(data)
+		}
+		writer.Close()
+	}()
+
+	// Convert H.264 to fragmented MP4
 	cmd := exec.Command("ffmpeg",
 		"-fflags", "+nobuffer",
 		"-flags", "low_delay",
@@ -308,28 +334,26 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 		"-frag_duration", "200000",
 		"pipe:1",
 	)
+	cmd.Stdin = reader
 
 	outputReader, err := cmd.StdoutPipe()
 	if err != nil {
-		r.videoBroadcast.removeConsumer(writer)
+		r.videoBroadcast.removeConsumer(videoCh)
 		writer.Close()
 		return nil, err
 	}
-	cmd.Stdin = reader
 
 	if err := cmd.Start(); err != nil {
-		r.videoBroadcast.removeConsumer(writer)
+		r.videoBroadcast.removeConsumer(videoCh)
 		writer.Close()
 		return nil, err
 	}
 
+	// Cleanup when ffmpeg exits
 	go func() {
 		cmd.Wait()
-		writer.Close()
-		r.videoBroadcast.removeConsumer(writer)
+		r.videoBroadcast.removeConsumer(videoCh)
 	}()
-
-	r.videoStreamCmd = cmd
 
 	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok && val.(bool) {
 		sfx.Get().PlayRecording()
@@ -343,10 +367,10 @@ func (r *Recorder) StopVideoStream() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.videoStreamCmd != nil && r.videoStreamCmd.Process != nil {
-		r.videoStreamCmd.Process.Kill()
+	if r.videoStreamCh != nil {
+		r.videoBroadcast.removeConsumer(r.videoStreamCh)
+		r.videoStreamCh = nil
 	}
-	r.videoStreamCmd = nil
 
 	log.Println("Recorder: Stopped video streaming")
 	return nil
@@ -361,8 +385,17 @@ func (r *Recorder) StartRecording(outputPath string) error {
 	}
 
 	// Start video recording
+	videoCh := make(chan []byte, 50)
+	r.videoBroadcast.addConsumer(videoCh)
+	r.recordVideoCh = videoCh
+
 	videoReader, videoWriter := io.Pipe()
-	r.videoBroadcast.addConsumer(videoWriter)
+	go func() {
+		for data := range videoCh {
+			videoWriter.Write(data)
+		}
+		videoWriter.Close()
+	}()
 
 	videoCmd := exec.Command("ffmpeg",
 		"-f", "h264", "-i", "pipe:0",
@@ -372,23 +405,31 @@ func (r *Recorder) StartRecording(outputPath string) error {
 	videoCmd.Stdin = videoReader
 
 	if err := videoCmd.Start(); err != nil {
-		r.videoBroadcast.removeConsumer(videoWriter)
+		r.videoBroadcast.removeConsumer(videoCh)
+		r.recordVideoCh = nil
 		videoWriter.Close()
 		return err
 	}
 
 	go func() {
 		videoCmd.Wait()
-		videoWriter.Close()
-		r.videoBroadcast.removeConsumer(videoWriter)
 	}()
 
 	r.recordVideoCmd = videoCmd
 
 	// Start audio recording if available
 	if r.audioBroadcast != nil {
+		audioCh := make(chan []byte, 100)
+		r.audioBroadcast.addConsumer(audioCh)
+		r.recordAudioCh = audioCh
+
 		audioReader, audioWriter := io.Pipe()
-		r.audioBroadcast.addConsumer(audioWriter)
+		go func() {
+			for data := range audioCh {
+				audioWriter.Write(data)
+			}
+			audioWriter.Close()
+		}()
 
 		audioCmd := exec.Command("ffmpeg",
 			"-f", "s16le", "-ar", "48000", "-ac", "1", "-i", "pipe:0",
@@ -399,11 +440,11 @@ func (r *Recorder) StartRecording(outputPath string) error {
 
 		if err := audioCmd.Start(); err != nil {
 			log.Printf("Recorder: Failed to start audio recording: %v", err)
+			r.audioBroadcast.removeConsumer(audioCh)
+			r.recordAudioCh = nil
 		} else {
 			go func() {
 				audioCmd.Wait()
-				audioWriter.Close()
-				r.audioBroadcast.removeConsumer(audioWriter)
 			}()
 			r.recordAudioCmd = audioCmd
 		}
@@ -427,12 +468,24 @@ func (r *Recorder) StopRecording() error {
 		return nil
 	}
 
+	// Kill ffmpeg processes
 	if r.recordVideoCmd != nil && r.recordVideoCmd.Process != nil {
 		r.recordVideoCmd.Process.Kill()
 	}
 
 	if r.recordAudioCmd != nil && r.recordAudioCmd.Process != nil {
 		r.recordAudioCmd.Process.Kill()
+	}
+
+	// Remove channels from broadcast
+	if r.recordVideoCh != nil {
+		r.videoBroadcast.removeConsumer(r.recordVideoCh)
+		r.recordVideoCh = nil
+	}
+
+	if r.recordAudioCh != nil {
+		r.audioBroadcast.removeConsumer(r.recordAudioCh)
+		r.recordAudioCh = nil
 	}
 
 	r.recording = false
@@ -501,7 +554,7 @@ func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
 	return nil
 }
 
-func (r *Recorder) StartAudioStream() (io.ReadCloser, error) {
+func (r *Recorder) StartAudioStream() (chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -509,17 +562,23 @@ func (r *Recorder) StartAudioStream() (io.ReadCloser, error) {
 		return nil, fmt.Errorf("audio broadcast not available")
 	}
 
-	reader, writer := io.Pipe()
-	broadcast := r.audioBroadcast
-	broadcast.addConsumer(writer)
-
-	// Clean up consumer when reader is closed
-	go func() {
-		io.Copy(io.Discard, reader)
-		writer.Close()
-		broadcast.removeConsumer(writer)
-	}()
+	ch := make(chan []byte, 100) // Buffer 100 chunks (~400KB)
+	r.audioBroadcast.addConsumer(ch)
+	r.audioStreamCh = ch
 
 	log.Println("Recorder: Started audio streaming")
-	return reader, nil
+	return ch, nil
+}
+
+func (r *Recorder) StopAudioStream() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.audioStreamCh != nil {
+		r.audioBroadcast.removeConsumer(r.audioStreamCh)
+		r.audioStreamCh = nil
+	}
+
+	log.Println("Recorder: Stopped audio streaming")
+	return nil
 }
