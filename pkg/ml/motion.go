@@ -65,8 +65,8 @@ func toGrayscale(jpegData []byte) ([]float32, error) {
 	gray := make([]float32, scaledWidth*scaledHeight)
 	bounds := img.Bounds()
 
-	for y := 0; y < scaledHeight; y++ {
-		for x := 0; x < scaledWidth; x++ {
+	for y := range scaledHeight {
+		for x := range scaledWidth {
 			srcX := bounds.Min.X + (x * bounds.Dx() / scaledWidth)
 			srcY := bounds.Min.Y + (y * bounds.Dy() / scaledHeight)
 			r, g, b, _ := img.At(srcX, srcY).RGBA()

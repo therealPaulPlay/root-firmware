@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	_ "image/jpeg"
+	"log"
 	"sort"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -12,10 +13,12 @@ import (
 const (
 	modelWidth  = 416
 	modelHeight = 416
-	confThresh  = 0.4 // Match reference implementation
+	confThresh  = 0.4
 	nmsThresh   = 0.5
-	regMax      = 7  // Distribution head bins [0-7]
-	numClasses  = 80 // COCO classes
+	regMax      = 7    // Distribution head bins [0-7]
+	numClasses  = 80   // COCO classes (classifiers)
+	numAnchors  = 3598 // Anchor count from model
+	outputSize  = 112  // 80 classes + 32 bbox distribution values (4 * 8)
 )
 
 type Detection struct {
@@ -43,11 +46,13 @@ type objectDetector struct {
 
 func newObjectDetector(modelPath string) (*objectDetector, error) {
 	if err := ort.InitializeEnvironment(); err != nil {
+		log.Printf("ML: Failed to initialize ONNX environment: %v", err)
 		return nil, err
 	}
 
 	opts, err := ort.NewSessionOptions()
 	if err != nil {
+		log.Printf("ML: Failed to create session options: %v", err)
 		return nil, err
 	}
 	defer opts.Destroy()
@@ -58,6 +63,7 @@ func newObjectDetector(modelPath string) (*objectDetector, error) {
 
 	session, err := ort.NewDynamicAdvancedSession(modelPath, []string{"data"}, []string{"output"}, opts)
 	if err != nil {
+		log.Printf("ML: Failed to create ONNX session: %v", err)
 		return nil, err
 	}
 
@@ -73,8 +79,7 @@ func (d *objectDetector) detect(jpegData []byte) (*Detection, error) {
 	inputTensor := d.preprocess(img)
 	defer inputTensor.Destroy()
 
-	// Create output tensors placeholder
-	outputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 2100, 84))
+	outputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(1, int64(numAnchors), int64(outputSize)))
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +87,7 @@ func (d *objectDetector) detect(jpegData []byte) (*Detection, error) {
 
 	err = d.session.Run([]ort.Value{inputTensor}, []ort.Value{outputTensor})
 	if err != nil {
+		log.Printf("ML: Inference failed: %v", err)
 		return nil, err
 	}
 
@@ -128,8 +134,7 @@ func (d *objectDetector) preprocess(img image.Image) ort.Value {
 func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detection {
 	outputData := outputTensor.GetData()
 
-	// NanoDet output: [1, 2100, 84] where 84 = 80 class logits + 4 bbox values
-	// Layout per prediction: [class_0, class_1, ..., class_79, bbox_l, bbox_t, bbox_r, bbox_b]
+	// Output shape: [1, 3598, 112] = 80 class scores + 32 bbox distribution bins (4 edges × 8 bins)
 	classesToCheck := []int{0, 2, 15, 16} // person, car, cat, dog
 
 	var boxes [][4]float32
@@ -137,8 +142,8 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	var labels []int
 
 	// Multi-scale feature map strides
-	strides := []int{8, 16, 32, 64}
-	totalIdx := 0
+	strides := []int{8, 16, 32}
+	anchorIdx := 0
 
 	// Process each stride level
 	for _, stride := range strides {
@@ -147,11 +152,11 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 
 		for row := range featureH {
 			for col := range featureW {
-				if totalIdx >= 2100 {
+				if anchorIdx >= numAnchors {
 					break
 				}
 
-				offset := totalIdx * 84
+				offset := anchorIdx * outputSize
 
 				// Find best class score from first 80 values
 				var bestClass int
@@ -166,28 +171,29 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 				}
 
 				if bestScore >= confThresh {
-					// Bbox values are at indices 80-83
-					l := outputData[offset+numClasses]
-					t := outputData[offset+numClasses+1]
-					r := outputData[offset+numClasses+2]
-					b := outputData[offset+numClasses+3]
+					// Decode distribution-based bbox prediction
+					// Distribution values start at index 80, 8 values per edge (l, t, r, b)
+					l := softmaxDistance(outputData[offset+numClasses : offset+numClasses+8])
+					t := softmaxDistance(outputData[offset+numClasses+8 : offset+numClasses+16])
+					r := softmaxDistance(outputData[offset+numClasses+16 : offset+numClasses+24])
+					b := softmaxDistance(outputData[offset+numClasses+24 : offset+numClasses+32])
 
 					// Calculate anchor center
 					cx := (float32(col) + 0.5) * float32(stride)
 					cy := (float32(row) + 0.5) * float32(stride)
 
 					// Convert to absolute bbox coordinates
-					x1 := max(cx-l, 0)
-					y1 := max(cy-t, 0)
-					x2 := min(cx+r, modelWidth)
-					y2 := min(cy+b, modelHeight)
+					x1 := max(cx-l*float32(stride), 0)
+					y1 := max(cy-t*float32(stride), 0)
+					x2 := min(cx+r*float32(stride), modelWidth)
+					y2 := min(cy+b*float32(stride), modelHeight)
 
 					boxes = append(boxes, [4]float32{x1, y1, x2, y2})
 					scores = append(scores, bestScore)
 					labels = append(labels, bestClass)
 				}
 
-				totalIdx++
+				anchorIdx++
 			}
 		}
 	}

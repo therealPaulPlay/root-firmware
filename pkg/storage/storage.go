@@ -85,9 +85,9 @@ func Get() *Storage {
 	return instance
 }
 
-// SaveRecording saves a recording with event metadata and generates a thumbnail
+// SaveRecording saves a recording with event metadata and preview thumbnail
 // Handles cleanup automatically to ensure minFreeSpace
-func (s *Storage) SaveRecording(filePath string, duration float64, eventType string) error {
+func (s *Storage) SaveRecording(filePath string, duration float64, eventType string, preview []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -113,11 +113,21 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		return fmt.Errorf("failed to move recording: %w", err)
 	}
 
-	// Generate thumbnail from first frame of video
-	thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", id.String()))
-	if err := s.generateThumbnail(finalPath, thumbnailPath); err != nil {
-		// Log error but don't fail - thumbnail is optional
-		log.Printf("Storage: Failed to generate thumbnail for %s: %v", id.String(), err)
+	// Rename audio file if it exists
+	audioTempPath := filePath[:len(filePath)-4] + "_audio.m4a"
+	if _, err := os.Stat(audioTempPath); err == nil {
+		audioFinalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", id.String()))
+		if err := os.Rename(audioTempPath, audioFinalPath); err != nil {
+			log.Printf("Storage: Failed to rename audio file for %s: %v", id.String(), err)
+		}
+	}
+
+	// Save preview as thumbnail
+	if preview != nil {
+		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", id.String()))
+		if err := fsutil.AtomicWrite(thumbnailPath, preview, 0644); err != nil {
+			log.Printf("Storage: Failed to save thumbnail for %s: %v", id.String(), err)
+		}
 	}
 
 	// Add to event log
@@ -161,6 +171,15 @@ func (s *Storage) GetRecordingPath(id string) (string, error) {
 	filePath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", id))
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("recording not found: %s", id)
+	}
+	return filePath, nil
+}
+
+// GetAudioPath returns the file path for an audio recording by ID
+func (s *Storage) GetAudioPath(id string) (string, error) {
+	filePath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", id))
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("audio not found: %s", id)
 	}
 	return filePath, nil
 }
@@ -231,11 +250,17 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 		// Remove oldest event (first in array)
 		oldest := eventLog.Events[0]
 		videoPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", oldest.ID))
+		audioPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", oldest.ID))
 		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", oldest.ID))
 
 		// Permanently delete video file (log errors but continue)
 		if err := os.Remove(videoPath); err != nil && !os.IsNotExist(err) {
 			log.Printf("Storage: Failed to delete recording %s: %v", oldest.ID, err)
+		}
+
+		// Permanently delete audio file if it exists (log errors but continue)
+		if err := os.Remove(audioPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("Storage: Failed to delete audio file %s: %v", oldest.ID, err)
 		}
 
 		// Permanently delete thumbnail (log errors but continue)
@@ -259,17 +284,4 @@ func (s *Storage) getFreeSpace() (int64, error) {
 	}
 
 	return int64(stat.Bavail) * int64(stat.Bsize), nil
-}
-
-// generateThumbnail extracts the first frame from a video as a JPEG thumbnail
-func (s *Storage) generateThumbnail(videoPath, thumbnailPath string) error {
-	cmd := exec.Command("ffmpeg",
-		"-i", videoPath,
-		"-vframes", "1",
-		"-f", "image2",
-		"-q:v", "2",
-		"-y",
-		thumbnailPath,
-	)
-	return cmd.Run()
 }

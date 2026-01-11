@@ -2,6 +2,7 @@ package ml
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 	"sync"
 	"time"
@@ -21,15 +22,16 @@ const (
 var modelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
 
 type ML struct {
-	stopChan       chan struct{}
-	objectDetector *objectDetector
-	motionDetector *motionDetector
-	recordingPath  string
-	recordingEvent string
-	recordingStart time.Time
-	lastMotionAt   time.Time
-	lastRecordedAt time.Time
-	mu             sync.Mutex
+	stopChan              chan struct{}
+	objectDetector        *objectDetector
+	motionDetector        *motionDetector
+	recordingPath         string
+	recordingEvent        string
+	recordingStart        time.Time
+	recordingStartPreview []byte
+	lastMotionAt          time.Time
+	lastRecordedAt        time.Time
+	mu                    sync.Mutex
 }
 
 var instance *ML
@@ -84,15 +86,17 @@ func (m *ML) check() {
 	isRecording := m.recordingPath != ""
 	m.mu.Unlock()
 
-	// Capture frame (returns error if camera busy!)
+	// Capture frame
 	frame, err := record.Get().CapturePreview()
 	if err != nil {
+		log.Printf("ML: Failed to capture frame: %v", err)
 		return
 	}
 
-	// Gate 1: Motion detection (fast, cheap)
+	// Gate 1: Motion detection
 	hasMotion, err := m.motionDetector.detectMotion(frame)
 	if err != nil {
+		log.Printf("ML: Motion detection failed: %v", err)
 		return
 	}
 
@@ -100,45 +104,57 @@ func (m *ML) check() {
 		// Stop recording if no motion for timeout period
 		m.mu.Lock()
 		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
-			m.stopRecording()
+			log.Printf("ML: No motion detected, stopping recording")
+			m.stopRecording(true)
 		}
 		m.mu.Unlock()
 		return
 	}
 
-	// Gate 2: ML object detection (slow, expensive)
+	// Gate 2: Object detection
 	detection, err := m.objectDetector.detect(frame)
-	if err != nil || detection.EventType == "" {
+	if err != nil {
+		log.Printf("ML: Object detection failed: %v", err)
 		m.mu.Lock()
 		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
-			m.stopRecording()
+			m.stopRecording(true)
 		}
 		m.mu.Unlock()
 		return
 	}
 
-	// Motion detected with relevant object
+	if detection.EventType == "" {
+		m.mu.Lock()
+		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
+			m.stopRecording(true)
+		}
+		m.mu.Unlock()
+		return
+	}
+
+	// Motion + object detected
+	log.Printf("ML: Detected %s (count: %d)", detection.EventType, detection.Count)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	now := time.Now()
-	m.lastMotionAt = now
+	m.lastMotionAt = time.Now()
 
 	if !isRecording {
-		m.startRecording(detection.EventType)
+		log.Printf("ML: Starting recording for %s event", detection.EventType)
+		m.startRecording(detection.EventType, frame)
 		return
 	}
 
-	// Split recording if reached duration limit
+	// Split recording if duration limit reached
 	if time.Since(m.recordingStart) >= recordDuration {
-		m.stopRecording()
-		m.startRecording(detection.EventType)
-		// Reset background to prevent re-detecting same stationary object
+		log.Printf("ML: Splitting recording (%.1fs)", time.Since(m.recordingStart).Seconds())
+		m.stopRecording(false)
+		m.startRecording(detection.EventType, frame)
 		m.motionDetector.reset(frame)
 	}
 }
 
-func (m *ML) startRecording(eventType string) {
+func (m *ML) startRecording(eventType string, preview []byte) {
 	tempPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
 	if err := record.Get().StartRecording(tempPath); err != nil {
@@ -148,15 +164,20 @@ func (m *ML) startRecording(eventType string) {
 	m.recordingPath = tempPath
 	m.recordingEvent = eventType
 	m.recordingStart = time.Now()
+	m.recordingStartPreview = preview
 	m.lastMotionAt = time.Now()
 }
 
-func (m *ML) stopRecording() {
+func (m *ML) stopRecording(applyCooldown bool) {
 	record.Get().StopRecording()
 
-	duration := time.Since(m.recordingStart).Seconds()
-	storage.Get().SaveRecording(m.recordingPath, duration, m.recordingEvent)
+	// Round duration to 2 decimal places
+	duration := float64(int(time.Since(m.recordingStart).Seconds()*100)) / 100
+	storage.Get().SaveRecording(m.recordingPath, duration, m.recordingEvent, m.recordingStartPreview)
 
 	m.recordingPath = ""
-	m.lastRecordedAt = time.Now()
+	m.recordingStartPreview = nil
+	if applyCooldown {
+		m.lastRecordedAt = time.Now()
+	}
 }

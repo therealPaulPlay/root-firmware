@@ -37,10 +37,10 @@ const (
 	MsgGetEvents         = "getEvents"
 	MsgGetRecording      = "getRecording"
 	MsgGetThumbnail      = "getThumbnail"
-	MsgStartStream      = "startStream"
-	MsgContinueStream   = "continueStream"
-	MsgStreamVideoChunk = "streamVideoChunk"
-	MsgStreamAudioChunk = "streamAudioChunk"
+	MsgStartStream       = "startStream"
+	MsgContinueStream    = "continueStream"
+	MsgStreamVideoChunk  = "streamVideoChunk"
+	MsgStreamAudioChunk  = "streamAudioChunk"
 	MsgGetMicrophone     = "getMicrophone"
 	MsgSetMicrophone     = "setMicrophone"
 	MsgGetRecordingSound = "getRecordingSound"
@@ -487,21 +487,33 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 		return
 	}
 
-	filePath, err := storage.Get().GetRecordingPath(req.ID)
+	// Get video file
+	videoPath, err := storage.Get().GetRecordingPath(req.ID)
 	if err != nil {
 		SendEncryptedError(ctx, MsgGetRecording, ErrInternalError, err.Error())
 		return
 	}
 
-	fileData, err := os.ReadFile(filePath)
+	videoData, err := os.ReadFile(videoPath)
 	if err != nil {
-		SendEncryptedError(ctx, MsgGetRecording, ErrInternalError, fmt.Sprintf("Failed to read file: %v", err))
+		SendEncryptedError(ctx, MsgGetRecording, ErrInternalError, fmt.Sprintf("Failed to read video file: %v", err))
 		return
 	}
 
-	SendEncryptedSuccess(ctx, MsgGetRecording, map[string]any{
-		"data": base64.StdEncoding.EncodeToString(fileData),
-	})
+	response := map[string]any{
+		"video": base64.StdEncoding.EncodeToString(videoData),
+	}
+
+	// Get audio file if it exists
+	audioPath, err := storage.Get().GetAudioPath(req.ID)
+	if err == nil {
+		audioData, err := os.ReadFile(audioPath)
+		if err == nil {
+			response["audio"] = base64.StdEncoding.EncodeToString(audioData)
+		}
+	}
+
+	SendEncryptedSuccess(ctx, MsgGetRecording, response)
 }
 
 func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
@@ -527,7 +539,8 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	SendEncryptedSuccess(ctx, MsgGetThumbnail, map[string]any{
-		"data": base64.StdEncoding.EncodeToString(fileData),
+		"data":    base64.StdEncoding.EncodeToString(fileData),
+		"eventId": req.ID,
 	})
 }
 

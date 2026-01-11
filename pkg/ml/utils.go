@@ -1,17 +1,33 @@
 package ml
 
-func max(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
-}
+import "math"
 
-func min(a, b float32) float32 {
-	if a < b {
-		return a
+// softmaxDistance applies softmax to distribution and computes expected value
+func softmaxDistance(dist []float32) float32 {
+	// Apply softmax
+	var maxVal float32 = dist[0]
+	for _, v := range dist {
+		if v > maxVal {
+			maxVal = v
+		}
 	}
-	return b
+
+	var sum float32
+	softmax := make([]float32, len(dist))
+	for i, v := range dist {
+		exp := float32(math.Exp(float64(v - maxVal)))
+		softmax[i] = exp
+		sum += exp
+	}
+
+	// Normalize and compute expected distance
+	var distance float32
+	for i := range softmax {
+		softmax[i] /= sum
+		distance += softmax[i] * float32(i)
+	}
+
+	return distance
 }
 
 // iou calculates Intersection over Union for bounding boxes
