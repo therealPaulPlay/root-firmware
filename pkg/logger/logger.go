@@ -12,6 +12,7 @@ import (
 )
 
 const maxLogs = 1000
+const maxLogMsgSize = 500 // Max characters per log message
 
 type Entry struct {
 	Time string `json:"time"`
@@ -34,9 +35,14 @@ func (wr *writer) Write(p []byte) (int, error) {
 	wr.mu.Lock()
 	defer wr.mu.Unlock()
 
+	msg := string(p)
+	if len(msg) > maxLogMsgSize {
+		msg = msg[:maxLogMsgSize] + "... (truncated)"
+	}
+
 	wr.logs = append(wr.logs, Entry{
 		Time: time.Now().Format("15:04:05"),
-		Msg:  string(p),
+		Msg:  msg,
 	})
 
 	if len(wr.logs) > maxLogs {

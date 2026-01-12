@@ -432,7 +432,7 @@ func handleRenewKeyAck(msg Message) {
 		return
 	}
 
-	// Update stream context if this device is streaming
+	// Update contexts for ongoing operations (streaming, file transfers)
 	newCtx := &HandlerContext{
 		DeviceID:          msg.DeviceID,
 		RequestID:         msg.RequestID,
@@ -440,6 +440,7 @@ func handleRenewKeyAck(msg Message) {
 		EncryptionSession: newSession,
 	}
 	UpdateStreamContext(msg.DeviceID, newCtx)
+	UpdateFileTransferContext(msg.DeviceID, newCtx)
 
 	// Send success response to confirm commit
 	SendEncryptedSuccess(newCtx, MsgRenewKeyAck, nil)
@@ -494,33 +495,27 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 		return
 	}
 
-	// Get video file
+	// Verify paths exist
 	videoPath, err := storage.Get().GetRecordingPath(req.ID)
 	if err != nil {
 		SendEncryptedError(ctx, MsgGetRecording, ErrInternalError, err.Error())
 		return
 	}
 
-	videoData, err := os.ReadFile(videoPath)
-	if err != nil {
-		SendEncryptedError(ctx, MsgGetRecording, ErrInternalError, fmt.Sprintf("Failed to read video file: %v", err))
-		return
-	}
-
-	response := map[string]any{
-		"video": base64.StdEncoding.EncodeToString(videoData),
-	}
-
-	// Get audio file if it exists
 	audioPath, err := storage.Get().GetAudioPath(req.ID)
-	if err == nil {
-		audioData, err := os.ReadFile(audioPath)
-		if err == nil {
-			response["audio"] = base64.StdEncoding.EncodeToString(audioData)
-		}
-	}
+	hasAudio := err == nil
 
-	SendEncryptedSuccess(ctx, MsgGetRecording, response)
+	// Send immediate success ack
+	SendEncryptedSuccess(ctx, MsgGetRecording, map[string]any{
+		"hasAudio": hasAudio,
+	})
+
+	// Send video, then audio sequentially
+	SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", func() {
+		if hasAudio {
+			SendFileInChunks(ctx, MsgGetRecording, audioPath, "audio", nil)
+		}
+	})
 }
 
 func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
@@ -533,22 +528,25 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 		return
 	}
 
-	filePath, err := storage.Get().GetThumbnailPath(req.ID)
-	if err != nil {
-		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, err.Error())
-		return
-	}
+	// Read and encode thumbnail in goroutine to avoid blocking
+	go func() {
+		filePath, err := storage.Get().GetThumbnailPath(req.ID)
+		if err != nil {
+			SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, err.Error())
+			return
+		}
 
-	fileData, err := os.ReadFile(filePath)
-	if err != nil {
-		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to read thumbnail: %v", err))
-		return
-	}
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to read thumbnail: %v", err))
+			return
+		}
 
-	SendEncryptedSuccess(ctx, MsgGetThumbnail, map[string]any{
-		"data":    base64.StdEncoding.EncodeToString(fileData),
-		"eventId": req.ID,
-	})
+		SendEncryptedSuccess(ctx, MsgGetThumbnail, map[string]any{
+			"data":    base64.StdEncoding.EncodeToString(fileData),
+			"eventId": req.ID,
+		})
+	}()
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
@@ -644,93 +642,98 @@ func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
-	// Get performance metrics using gopsutil
-	performance := map[string]any{}
+	// Collect health metrics in a goroutine to avoid blocking the handler
+	go func() {
+		performance := map[string]any{}
 
-	// CPU usage (average over 500ms)
-	if percentages, err := cpu.Percent(0, false); err == nil && len(percentages) > 0 {
-		performance["cpuUsagePercent"] = percentages[0]
-	}
+		// CPU usage - use 100ms sampling to avoid long blocks
+		if percentages, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(percentages) > 0 {
+			performance["cpuUsagePercent"] = percentages[0]
+		}
 
-	// CPU temperature
-	if temps, err := host.SensorsTemperatures(); err == nil {
-		for _, temp := range temps {
-			// Look for CPU temp (common sensor names on Raspberry Pi)
-			if temp.SensorKey == "cpu_thermal" || temp.SensorKey == "coretemp" {
-				performance["cpuTempCelsius"] = temp.Temperature
-				break
+		// CPU temperature
+		if temps, err := host.SensorsTemperatures(); err == nil {
+			for _, temp := range temps {
+				// Look for CPU temp (common sensor names on Raspberry Pi)
+				if temp.SensorKey == "cpu_thermal" || temp.SensorKey == "coretemp" {
+					performance["cpuTempCelsius"] = temp.Temperature
+					break
+				}
 			}
 		}
-	}
 
-	// Memory stats
-	if vmStat, err := mem.VirtualMemory(); err == nil {
-		performance["memoryUsedMB"] = vmStat.Used / (1024 * 1024)
-		performance["memoryTotalMB"] = vmStat.Total / (1024 * 1024)
-		performance["memoryUsagePercent"] = vmStat.UsedPercent
-	}
-
-	// Disk stats for data partition
-	if diskStat, err := disk.Usage(globals.DataDir); err == nil {
-		performance["diskUsedGB"] = diskStat.Used / (1024 * 1024 * 1024)
-		performance["diskTotalGB"] = diskStat.Total / (1024 * 1024 * 1024)
-		performance["diskUsagePercent"] = diskStat.UsedPercent
-	}
-
-	// Uptime
-	if uptime, err := host.Uptime(); err == nil {
-		performance["uptimeSeconds"] = uptime
-	}
-
-	// Get relay domain from config
-	relayDomain := ""
-	if domain, ok := config.Get().GetKey("relayDomain"); ok {
-		if domainStr, ok := domain.(string); ok {
-			relayDomain = domainStr
+		// Memory stats
+		if vmStat, err := mem.VirtualMemory(); err == nil {
+			performance["memoryUsedMB"] = vmStat.Used / (1024 * 1024)
+			performance["memoryTotalMB"] = vmStat.Total / (1024 * 1024)
+			performance["memoryUsagePercent"] = vmStat.UsedPercent
 		}
-	}
 
-	// Get update status
-	updateStatus, availableVersion, updateError := updater.Get().GetStatus()
-	updateInfo := map[string]any{
-		"status": string(updateStatus),
-	}
-	if availableVersion != "" {
-		updateInfo["availableVersion"] = availableVersion
-	}
-	if updateError != "" {
-		updateInfo["error"] = updateError
-	}
+		// Disk stats for data partition
+		if diskStat, err := disk.Usage(globals.DataDir); err == nil {
+			performance["diskUsedGB"] = diskStat.Used / (1024 * 1024 * 1024)
+			performance["diskTotalGB"] = diskStat.Total / (1024 * 1024 * 1024)
+			performance["diskUsagePercent"] = diskStat.UsedPercent
+		}
 
-	health := map[string]any{
-		"battery": map[string]any{
-			"percent":   0,
-			"onACPower": true,
-		},
-		"wifi": map[string]any{
-			"connected": wifi.Get().IsConnected(),
-			"ssid":      wifi.Get().GetCurrentNetwork(),
-		},
-		"firmwareVersion": globals.FirmwareVersion,
-		"update":          updateInfo,
-		"relayDomain":     relayDomain,
-		"logs":            logger.GetLogs(),
-		"performance":     performance,
-	}
+		// Uptime
+		if uptime, err := host.Uptime(); err == nil {
+			performance["uptimeSeconds"] = uptime
+		}
 
-	SendEncryptedSuccess(ctx, MsgGetHealth, health)
+		// Get relay domain from config
+		relayDomain := ""
+		if domain, ok := config.Get().GetKey("relayDomain"); ok {
+			if domainStr, ok := domain.(string); ok {
+				relayDomain = domainStr
+			}
+		}
+
+		// Get update status
+		updateStatus, availableVersion, updateError := updater.Get().GetStatus()
+		updateInfo := map[string]any{
+			"status": string(updateStatus),
+		}
+		if availableVersion != "" {
+			updateInfo["availableVersion"] = availableVersion
+		}
+		if updateError != "" {
+			updateInfo["error"] = updateError
+		}
+
+		health := map[string]any{
+			"battery": map[string]any{
+				"percent":   0,
+				"onACPower": true,
+			},
+			"wifi": map[string]any{
+				"connected": wifi.Get().IsConnected(),
+				"ssid":      wifi.Get().GetCurrentNetwork(),
+			},
+			"firmwareVersion": globals.FirmwareVersion,
+			"update":          updateInfo,
+			"relayDomain":     relayDomain,
+			"logs":            logger.GetLogs(),
+			"performance":     performance,
+		}
+
+		SendEncryptedSuccess(ctx, MsgGetHealth, health)
+	}()
 }
 
 func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
-	frameData, err := record.Get().CapturePreview()
-	if err != nil {
-		SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
-		return
-	}
+	// Capture and encode preview in goroutine to avoid blocking
+	go func() {
+		frameData, err := record.Get().CapturePreview()
+		if err != nil {
+			SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
+			return
+		}
 
-	SendEncryptedSuccess(ctx, MsgGetPreview, map[string]any{
-		"image": base64.StdEncoding.EncodeToString(frameData),
-	})
+		SendEncryptedSuccess(ctx, MsgGetPreview, map[string]any{
+			"image": base64.StdEncoding.EncodeToString(frameData),
+		})
+	}()
 }
 
 func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {

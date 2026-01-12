@@ -368,8 +368,10 @@ func (r *Recorder) StopVideoStream() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.videoStreamCh != nil {
+	if r.videoBroadcast != nil && r.videoStreamCh != nil {
 		r.videoBroadcast.removeConsumer(r.videoStreamCh)
+	}
+	if r.videoStreamCh != nil {
 		r.videoStreamCh = nil
 	}
 
@@ -593,8 +595,10 @@ func (r *Recorder) StopAudioStream() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.audioStreamCh != nil {
+	if r.audioBroadcast != nil && r.audioStreamCh != nil {
 		r.audioBroadcast.removeConsumer(r.audioStreamCh)
+	}
+	if r.audioStreamCh != nil {
 		r.audioStreamCh = nil
 	}
 
