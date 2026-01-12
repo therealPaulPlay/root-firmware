@@ -8,7 +8,7 @@ This firmware turns a Raspberry Pi into a private home security camera. It utili
 
 The relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. 
 
-In the ROOT Connect web or mobile app, you can connect to paired cameras, view recorded events, logs, and health metrics. Adjust settings like microphone, event recording preferences, and stream video/audio with low latency.
+In the ROOT Connect web or mobile app, you can connect to paired cameras, view recorded events, logs, and health metrics. Adjust settings like microphone, event recording preferences, and stream video and audio with low latency.
 
 ## Contributing
 
@@ -32,13 +32,11 @@ The version is injected at build time via the `-ldflags` flag. If you build with
 
 Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer.local`, install the Go language and the ONNX Runtime on the Pi. Raspian OS Bookworm or higher is required.
 
-Deploy:
-
 ```bash
 ./deploy.sh
 ```
 
-This syncs source to `/home/observer/firmware-repository`, builds on the Pi, copies binary to `/home/observer/root-firmware`, and auto-starts via systemd.
+This syncs the source to `/home/observer/firmware-repository`, builds on the Pi, copies the binary to `/home/observer/root-firmware`, and auto-starts the firmware service via systemd.
 
 Check if running:
 
@@ -56,7 +54,7 @@ Since the camera hardware is slow compared to modern computers, compiling inside
 
 ### 1. Compile the ONNX runtime
 
-Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system. Running this on a rather beefy machine is suggested, as it otherwise takes quite a long time.
+Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system.
 
 ```bash
 docker run -it --rm --platform linux/arm64 \
