@@ -518,6 +518,10 @@ func (r *Recorder) StopRecording() error {
 }
 
 func (r *Recorder) CapturePreview() ([]byte, error) {
+	return r.CapturePreviewWithResolution(640, 360)
+}
+
+func (r *Recorder) CapturePreviewWithResolution(x int, y int) ([]byte, error) {
 	r.videoBroadcast.frameMu.RLock()
 	frame := r.videoBroadcast.latestFrame
 	r.videoBroadcast.frameMu.RUnlock()
@@ -530,7 +534,7 @@ func (r *Recorder) CapturePreview() ([]byte, error) {
 		"-err_detect", "ignore_err",
 		"-f", "h264", "-i", "pipe:0",
 		"-frames:v", "1",
-		"-vf", "scale=640:360",
+		"-vf", fmt.Sprintf("scale=%d:%d", x, y),
 		"-f", "image2",
 		"-c:v", "mjpeg",
 		"-q:v", "5",
