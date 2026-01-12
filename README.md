@@ -4,7 +4,7 @@ Firmware for ROOT camera devices. Written in Go with a focus on privacy, securit
 
 ## Features and benefits
 
-This firmware turns a Raspberry Pi into a private home security camera. It utilizes end-2-end encryption with forward secrecy and connects to a relay server [repository](https://github.com/therealPaulPlay/root-relay) to communicate with the [web and mobile app](https://github.com/therealPaulPlay/root-site).
+This firmware turns a Raspberry Pi into a private home security camera. It utilizes end-2-end encryption with forward secrecy and connects to a [relay server](https://github.com/therealPaulPlay/root-relay) to communicate with the [web and mobile app](https://github.com/therealPaulPlay/root-site).
 
 The relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. 
 
