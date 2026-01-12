@@ -8,7 +8,7 @@ This firmware turns a Raspberry Pi into a private home security camera. It utili
 
 The relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. 
 
-In the web app, you can connect to paired cameras, adjust settings such as enabling/disabling the microphone as well as view recorded events, logs, and core health metrics. Streaming both video and audio is supported with low latency.
+In the ROOT Connect web or mobile app, you can connect to paired cameras, view recorded events, logs, and health metrics. Adjust settings like microphone, event recording preferences, and stream video/audio with low latency.
 
 ## Contributing
 
