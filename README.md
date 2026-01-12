@@ -28,7 +28,7 @@ go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root
 
 The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`. If you want to cross-compile (e.g. build on a Mac or Windows computer for the Pi), you need to prepend `GOOS=linux GOARCH=arm GOARM=7` to the commmand. However, building on the Pi itself via the deploy script is fast and recommended.
 
-## Deploying to Raspberry Pi
+## Deploying to the Pi
 
 Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer.local`, install the Go language and the ONNX Runtime on the Pi. Raspian OS Bookworm or higher is required.
 
@@ -46,15 +46,15 @@ Check if running:
 ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 ```
 
-### Setting up an SSH Key
+### Setting up an SSH key
 
 Using an SSH key for development instead of an SSH password is significantly more convenient. Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it onto the Pi using `ssh-copy-id observer@ROOT-Observer.local`. 
 
-## Installing the ONNX Runtime on the Pi
+## Installing the ONNX runtime on the Pi
 
 Since the camera hardware is slow compared to modern computers, compiling inside a docker container on a fast machine is recommended over compiling on the single-board computer itself.
 
-### 1. Compile the ONNX Runtime
+### 1. Compile the ONNX runtime
 
 Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system. Running this on a rather beefy machine is suggested, as it otherwise takes quite a long time.
 
@@ -81,7 +81,7 @@ echo "Build complete! Files in ./onnx-output/"
 
 This creates two files: `libonnxruntime.so.X.X.X` (the actual library) and `libonnxruntime.so` (a symlink to the versioned file).
 
-### 2. Install on the Pi
+### 2. Install the runtime on the Pi
 
 Copy both library files to the Pi and set up the linker:
 
