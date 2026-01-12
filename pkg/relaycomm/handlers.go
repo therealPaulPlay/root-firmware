@@ -22,6 +22,7 @@ import (
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/logger"
+	"root-firmware/pkg/ml"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/updater"
@@ -30,26 +31,29 @@ import (
 
 // Message type constants
 const (
-	MsgRenewKey          = "renewKey"
-	MsgRenewKeyAck       = "renewKeyAck"
-	MsgGetDevices        = "getDevices"
-	MsgRemoveDevice      = "removeDevice"
-	MsgGetEvents         = "getEvents"
-	MsgGetRecording      = "getRecording"
-	MsgGetThumbnail      = "getThumbnail"
-	MsgStartStream       = "startStream"
-	MsgContinueStream    = "continueStream"
-	MsgStreamVideoChunk  = "streamVideoChunk"
-	MsgStreamAudioChunk  = "streamAudioChunk"
-	MsgGetMicrophone     = "getMicrophone"
-	MsgSetMicrophone     = "setMicrophone"
-	MsgGetRecordingSound = "getRecordingSound"
-	MsgSetRecordingSound = "setRecordingSound"
-	MsgGetHealth         = "getHealth"
-	MsgGetPreview        = "getPreview"
-	MsgStartUpdate       = "startUpdate"
-	MsgRestart           = "restart"
-	MsgReset             = "reset"
+	MsgRenewKey                 = "renewKey"
+	MsgRenewKeyAck              = "renewKeyAck"
+	MsgGetDevices               = "getDevices"
+	MsgRemoveDevice             = "removeDevice"
+	MsgGetEvents                = "getEvents"
+	MsgGetRecording             = "getRecording"
+	MsgGetThumbnail             = "getThumbnail"
+	MsgStartStream              = "startStream"
+	MsgContinueStream           = "continueStream"
+	MsgStreamVideoChunk         = "streamVideoChunk"
+	MsgStreamAudioChunk         = "streamAudioChunk"
+	MsgGetMicrophone            = "getMicrophone"
+	MsgSetMicrophone            = "setMicrophone"
+	MsgGetRecordingSound        = "getRecordingSound"
+	MsgSetRecordingSound        = "setRecordingSound"
+	MsgGetHealth                = "getHealth"
+	MsgGetPreview               = "getPreview"
+	MsgStartUpdate              = "startUpdate"
+	MsgRestart                  = "restart"
+	MsgReset                    = "reset"
+	MsgGetEventDetectionConfig  = "getEventDetectionConfig"
+	MsgSetEventDetectionEnabled = "setEventDetectionEnabled"
+	MsgSetEventDetectionTypes   = "setEventDetectionTypes"
 )
 
 // Error code constants
@@ -286,6 +290,9 @@ func RegisterHandlers() {
 	relay.On(MsgSetMicrophone, useEncryption(MsgSetMicrophone, handleSetMicrophone))
 	relay.On(MsgGetRecordingSound, useEncryption(MsgGetRecordingSound, handleGetRecordingSound))
 	relay.On(MsgSetRecordingSound, useEncryption(MsgSetRecordingSound, handleSetRecordingSound))
+	relay.On(MsgGetEventDetectionConfig, useEncryption(MsgGetEventDetectionConfig, handleGetEventDetectionConfig))
+	relay.On(MsgSetEventDetectionEnabled, useEncryption(MsgSetEventDetectionEnabled, handleSetEventDetectionEnabled))
+	relay.On(MsgSetEventDetectionTypes, useEncryption(MsgSetEventDetectionTypes, handleSetEventDetectionTypes))
 
 	// System
 	relay.On(MsgGetHealth, useEncryption(MsgGetHealth, handleGetHealth))
@@ -772,4 +779,56 @@ func handleReset(ctx *HandlerContext, payload json.RawMessage) {
 			log.Printf("Failed to find data partition for reset")
 		}
 	}()
+}
+
+func handleGetEventDetectionConfig(ctx *HandlerContext, payload json.RawMessage) {
+	SendEncryptedSuccess(ctx, MsgGetEventDetectionConfig, map[string]any{
+		"enabled":      ml.IsEventDetectionEnabled(),
+		"enabledTypes": ml.GetEnabledEventTypes(),
+	})
+}
+
+func handleSetEventDetectionEnabled(ctx *HandlerContext, payload json.RawMessage) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+
+	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncryptedError(ctx, MsgSetEventDetectionEnabled, ErrInvalidPayload, "Invalid payload")
+		return
+	}
+
+	if err := config.Get().SetKey("eventDetectionEnabled", req.Enabled); err != nil {
+		SendEncryptedError(ctx, MsgSetEventDetectionEnabled, ErrInternalError, err.Error())
+		return
+	}
+
+	SendEncryptedSuccess(ctx, MsgSetEventDetectionEnabled, map[string]any{
+		"enabled": req.Enabled,
+	})
+}
+
+func handleSetEventDetectionTypes(ctx *HandlerContext, payload json.RawMessage) {
+	var req struct {
+		EnabledTypes []string `json:"enabledTypes"`
+	}
+
+	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncryptedError(ctx, MsgSetEventDetectionTypes, ErrInvalidPayload, "Invalid payload")
+		return
+	}
+
+	// Lowercase all types for consistency
+	for i := range req.EnabledTypes {
+		req.EnabledTypes[i] = strings.ToLower(req.EnabledTypes[i])
+	}
+
+	if err := config.Get().SetKey("eventDetectionEnabledTypes", req.EnabledTypes); err != nil {
+		SendEncryptedError(ctx, MsgSetEventDetectionTypes, ErrInternalError, err.Error())
+		return
+	}
+
+	SendEncryptedSuccess(ctx, MsgSetEventDetectionTypes, map[string]any{
+		"enabledTypes": req.EnabledTypes,
+	})
 }

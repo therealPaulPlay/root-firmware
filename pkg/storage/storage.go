@@ -133,7 +133,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 	// Add to event log
 	event := Event{
 		ID:        id.String(),
-		Timestamp: time.Now(),
+		Timestamp: time.Now().UTC(),
 		Duration:  duration,
 		EventType: eventType,
 	}

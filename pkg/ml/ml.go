@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	checkInterval    = 5 * time.Second  // Check for motion
+	checkInterval    = 3 * time.Second  // Check for motion/events
 	recordDuration   = 10 * time.Second // Fixed recording chunks
 	cooldownDuration = 5 * time.Second  // Wait after recording stops
-	motionTimeout    = 3 * time.Second  // Stop recording if no motion
+	motionTimeout    = 6 * time.Second  // Stop recording if no motion (must be > checkInterval)
 )
 
 var modelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
@@ -76,6 +76,13 @@ func (m *ML) loop() {
 	}
 }
 
+func (m *ML) stopRecordingIfNoMotion() {
+	if m.recordingPath != "" && time.Since(m.lastMotionAt) >= motionTimeout {
+		log.Printf("ML: No motion detected, stopping recording")
+		m.stopRecording(true)
+	}
+}
+
 func (m *ML) check() {
 	// Check cooldown
 	m.mu.Lock()
@@ -83,8 +90,17 @@ func (m *ML) check() {
 		m.mu.Unlock()
 		return
 	}
-	isRecording := m.recordingPath != ""
 	m.mu.Unlock()
+
+	// If event detection is disabled, stop any active recording and return
+	if !IsEventDetectionEnabled() {
+		m.mu.Lock()
+		if m.recordingPath != "" {
+			m.stopRecording(true)
+		}
+		m.mu.Unlock()
+		return
+	}
 
 	// Capture frame
 	frame, err := record.Get().CapturePreview()
@@ -101,12 +117,8 @@ func (m *ML) check() {
 	}
 
 	if !hasMotion {
-		// Stop recording if no motion for timeout period
 		m.mu.Lock()
-		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
-			log.Printf("ML: No motion detected, stopping recording")
-			m.stopRecording(true)
-		}
+		m.stopRecordingIfNoMotion()
 		m.mu.Unlock()
 		return
 	}
@@ -116,18 +128,14 @@ func (m *ML) check() {
 	if err != nil {
 		log.Printf("ML: Object detection failed: %v", err)
 		m.mu.Lock()
-		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
-			m.stopRecording(true)
-		}
+		m.stopRecordingIfNoMotion()
 		m.mu.Unlock()
 		return
 	}
 
-	if detection.EventType == "" {
+	if detection.EventType == "" || !isEventTypeEnabled(detection.EventType) {
 		m.mu.Lock()
-		if isRecording && time.Since(m.lastMotionAt) >= motionTimeout {
-			m.stopRecording(true)
-		}
+		m.stopRecordingIfNoMotion()
 		m.mu.Unlock()
 		return
 	}
@@ -139,14 +147,11 @@ func (m *ML) check() {
 
 	m.lastMotionAt = time.Now()
 
-	if !isRecording {
+	if m.recordingPath == "" {
 		log.Printf("ML: Starting recording for %s event", detection.EventType)
 		m.startRecording(detection.EventType, frame)
-		return
-	}
-
-	// Split recording if duration limit reached
-	if time.Since(m.recordingStart) >= recordDuration {
+	} else if time.Since(m.recordingStart) >= recordDuration {
+		// Split recording if duration limit reached
 		log.Printf("ML: Splitting recording (%.1fs)", time.Since(m.recordingStart).Seconds())
 		m.stopRecording(false)
 		m.startRecording(detection.EventType, frame)

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sync"
+	"syscall"
 	"time"
 
 	"root-firmware/pkg/config"
@@ -468,14 +469,32 @@ func (r *Recorder) StopRecording() error {
 		return nil
 	}
 
-	// Kill ffmpeg processes
-	if r.recordVideoCmd != nil && r.recordVideoCmd.Process != nil {
-		r.recordVideoCmd.Process.Kill()
+	// Gracefully stop ffmpeg with SIGINT to finalize MP4 files properly
+	stopFFmpeg := func(cmd *exec.Cmd) {
+		if cmd != nil && cmd.Process != nil {
+			cmd.Process.Signal(syscall.SIGINT)
+			go func() {
+				done := make(chan error)
+				go func() {
+					done <- cmd.Wait()
+				}()
+				select {
+				case err := <-done:
+					if err != nil {
+						log.Printf("ffmpeg exited with error: %v", err)
+					}
+				case <-time.After(5 * time.Second):
+					if err := cmd.Process.Kill(); err != nil {
+						log.Printf("Failed to kill ffmpeg: %v", err)
+					}
+					<-done
+				}
+			}()
+		}
 	}
 
-	if r.recordAudioCmd != nil && r.recordAudioCmd.Process != nil {
-		r.recordAudioCmd.Process.Kill()
-	}
+	stopFFmpeg(r.recordVideoCmd)
+	stopFFmpeg(r.recordAudioCmd)
 
 	// Remove channels from broadcast
 	if r.recordVideoCh != nil {

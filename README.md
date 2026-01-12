@@ -4,17 +4,17 @@ Firmware for ROOT camera devices. Written in Go with a focus on privacy, securit
 
 ## Features and benefits
 
-This firmware turns a Raspberry Pi Zero 2w+ or Pi 3+ into a private home security camera. It utilizes end-2-end encryption with forward secrecy and connects to the relay server (https://github.com/therealPaulPlay/root-relay)[repository] to communicate with the (https://github.com/therealPaulPlay/root-site)[web and mobile app].
+This firmware turns a Raspberry Pi into a private home security camera. It utilizes end-2-end encryption with forward secrecy and connects to a relay server [repository](https://github.com/therealPaulPlay/root-relay) to communicate with the [web and mobile app](https://github.com/therealPaulPlay/root-site).
 
-A relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. 
+The relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. 
 
-In the web app, you can connect to paired cameras, adjust settings such as enabling/disabling the microphone (if connected) as well as viewing recorded events, logs, and core health metrics. Streaming both video and audio is supported with low latency.
+In the web app, you can connect to paired cameras, adjust settings such as enabling/disabling the microphone as well as view recorded events, logs, and core health metrics. Streaming both video and audio is supported with low latency.
 
 ## Contributing
 
-Contributions are welcome. For inquiries, please reach out via (mailto:paulplaystudio@gmail.com)[email] or Bluesky (@paulplay.bsky.social).
+Contributions are welcome. For inquiries, please reach out via [email](mailto:paulplaystudio@gmail.com) or Bluesky (@paulplay.bsky.social).
 
-## Tested SBCs
+## Tested Raspberry Pi models
 
 - Pi Zero 2w
 
@@ -26,11 +26,11 @@ To build the firmware with a specific version:
 go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root-firmware cmd/main.go
 ```
 
-The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`.
+The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`. If you want to cross-compile (e.g. build on a Mac or Windows computer for the Pi), you need to prepend `GOOS=linux GOARCH=arm GOARM=7` to the commmand. However, building on the Pi itself via the deploy script is fast and recommended.
 
 ## Deploying to Raspberry Pi
 
-Prerequisites: Create user `observer`, set hostname to `ROOT-Observer.local`, install Go and ONNX Runtime on the Pi. Raspian OS Bookworm or higher is required.
+Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer.local`, install the Go language and the ONNX Runtime on the Pi. Raspian OS Bookworm or higher is required.
 
 Deploy:
 
@@ -50,13 +50,13 @@ ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 
 Using an SSH key for development instead of an SSH password is significantly more convenient. Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it onto the Pi using `ssh-copy-id observer@ROOT-Observer.local`. 
 
-## Installing ONNX Runtime on the Pi
+## Installing the ONNX Runtime on the Pi
 
 Since the camera hardware is slow compared to modern computers, compiling inside a docker container on a fast machine is recommended over compiling on the single-board computer itself.
 
-### 1. Compile ONNX Runtime
+### 1. Compile the ONNX Runtime
 
-Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system.
+Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system. Running this on a rather beefy machine is suggested, as it otherwise takes quite a long time.
 
 ```bash
 docker run -it --rm --platform linux/arm64 \
@@ -81,7 +81,7 @@ echo "Build complete! Files in ./onnx-output/"
 
 This creates two files: `libonnxruntime.so.X.X.X` (the actual library) and `libonnxruntime.so` (a symlink to the versioned file).
 
-### 2. Install on Pi
+### 2. Install on the Pi
 
 Copy both library files to the Pi and set up the linker:
 

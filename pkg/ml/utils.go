@@ -1,6 +1,11 @@
 package ml
 
-import "math"
+import (
+	"math"
+	"slices"
+
+	"root-firmware/pkg/config"
+)
 
 // softmaxDistance applies softmax to distribution and computes expected value
 func softmaxDistance(dist []float32) float32 {
@@ -51,4 +56,41 @@ func iou(box1, box2 [4]float32) float32 {
 	}
 
 	return inter / union
+}
+
+// IsEventDetectionEnabled returns whether event detection is enabled (default true)
+func IsEventDetectionEnabled() bool {
+	if val, ok := config.Get().GetKey("eventDetectionEnabled"); ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return true
+}
+
+// GetEnabledEventTypes returns enabled event types (empty = all enabled)
+func GetEnabledEventTypes() []string {
+	val, ok := config.Get().GetKey("eventDetectionEnabledTypes")
+	if !ok {
+		return []string{}
+	}
+	if arr, ok := val.([]any); ok {
+		types := make([]string, 0, len(arr))
+		for _, item := range arr {
+			if str, ok := item.(string); ok {
+				types = append(types, str)
+			}
+		}
+		return types
+	}
+	return []string{}
+}
+
+// isEventTypeEnabled checks if event type should trigger recording
+func isEventTypeEnabled(eventType string) bool {
+	types := GetEnabledEventTypes()
+	if len(types) == 0 {
+		return true // Empty means all enabled
+	}
+	return slices.Contains(types, eventType)
 }
