@@ -528,7 +528,7 @@ func (r *Recorder) CapturePreview() ([]byte, error) {
 		"-err_detect", "ignore_err",
 		"-f", "h264", "-i", "pipe:0",
 		"-frames:v", "1",
-		"-vf", "scale=640:480",
+		"-vf", "scale=640:360",
 		"-f", "image2",
 		"-c:v", "mjpeg",
 		"-q:v", "5",

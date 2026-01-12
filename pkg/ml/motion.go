@@ -8,10 +8,10 @@ import (
 
 const (
 	motionThreshold  = 12   // Pixel difference threshold (scaled for smaller resolution)
-	minChangedPixels = 200  // Minimum pixels changed (160x120 = 19200 pixels, ~1% threshold)
+	minChangedPixels = 150  // Minimum pixels changed (160x90 = 14400 pixels, ~1% threshold)
 	backgroundAlpha  = 0.05 // Background update rate (slower = more stable)
 	scaledWidth      = 160  // Downscale for performance
-	scaledHeight     = 120
+	scaledHeight     = 90   // 16:9 aspect ratio
 )
 
 type motionDetector struct {

@@ -95,15 +95,33 @@ func (d *objectDetector) detect(jpegData []byte) (*Detection, error) {
 }
 
 func (d *objectDetector) preprocess(img image.Image) ort.Value {
-	resized := image.NewRGBA(image.Rect(0, 0, modelWidth, modelHeight))
 	bounds := img.Bounds()
+	srcWidth := bounds.Dx()
+	srcHeight := bounds.Dy()
 
-	// Simple resize
-	for y := range modelHeight {
-		for x := range modelWidth {
-			srcX := x * bounds.Dx() / modelWidth
-			srcY := y * bounds.Dy() / modelHeight
-			resized.Set(x, y, img.At(bounds.Min.X+srcX, bounds.Min.Y+srcY))
+	// Calculate scaling to fit within modelWidth x modelHeight while preserving aspect ratio
+	scaleX := float64(modelWidth) / float64(srcWidth)
+	scaleY := float64(modelHeight) / float64(srcHeight)
+	scale := scaleX
+	if scaleY < scaleX {
+		scale = scaleY
+	}
+
+	// Calculate scaled dimensions and padding (letterboxing)
+	scaledWidth := int(float64(srcWidth) * scale)
+	scaledHeight := int(float64(srcHeight) * scale)
+	padX := (modelWidth - scaledWidth) / 2
+	padY := (modelHeight - scaledHeight) / 2
+
+	// Create black canvas
+	resized := image.NewRGBA(image.Rect(0, 0, modelWidth, modelHeight))
+
+	// Draw scaled image onto canvas with padding
+	for y := range scaledHeight {
+		for x := range scaledWidth {
+			srcX := bounds.Min.X + (x * srcWidth / scaledWidth)
+			srcY := bounds.Min.Y + (y * srcHeight / scaledHeight)
+			resized.Set(padX+x, padY+y, img.At(srcX, srcY))
 		}
 	}
 
