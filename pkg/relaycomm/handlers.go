@@ -508,12 +508,14 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 	// Send immediate success ack
 	SendEncryptedSuccess(ctx, MsgGetRecording, map[string]any{
 		"hasAudio": hasAudio,
+		"eventId":  req.ID,
 	})
 
 	// Send video, then audio sequentially
-	SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", func() {
+	metadata := map[string]any{"eventId": req.ID}
+	SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", metadata, func() {
 		if hasAudio {
-			SendFileInChunks(ctx, MsgGetRecording, audioPath, "audio", nil)
+			SendFileInChunks(ctx, MsgGetRecording, audioPath, "audio", metadata, nil)
 		}
 	})
 }

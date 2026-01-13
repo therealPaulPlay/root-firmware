@@ -38,7 +38,7 @@ func UpdateFileTransferContext(deviceID string, newCtx *HandlerContext) {
 }
 
 // SendFileInChunks reads a file and sends it in chunks
-func SendFileInChunks(ctx *HandlerContext, msgType string, filePath string, fileType string, onComplete func()) {
+func SendFileInChunks(ctx *HandlerContext, msgType string, filePath string, fileType string, metadata map[string]any, onComplete func()) {
 	go func() {
 		const chunkSize = 2 * 1024 * 1024                 // 2MB chunks (~10MB/sec at 5 msg/sec)
 		const delayBetweenChunks = 200 * time.Millisecond // 5/s rate limit
@@ -96,12 +96,16 @@ func SendFileInChunks(ctx *HandlerContext, msgType string, filePath string, file
 			currentCtx := transfer.ctx
 			transfer.mu.RUnlock()
 
-			SendEncryptedSuccess(currentCtx, msgType, map[string]any{
+			payload := map[string]any{
 				"fileType":    fileType,
 				"chunk":       base64.StdEncoding.EncodeToString(buffer[:n]),
 				"chunkIndex":  chunkIndex,
 				"totalChunks": totalChunks,
-			})
+			}
+			if metadata != nil {
+				payload["metadata"] = metadata
+			}
+			SendEncryptedSuccess(currentCtx, msgType, payload)
 
 			if chunkIndex < totalChunks-1 {
 				time.Sleep(delayBetweenChunks)
