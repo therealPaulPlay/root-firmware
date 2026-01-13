@@ -103,7 +103,7 @@ func (m *ML) check() {
 	}
 
 	// Capture frame
-	frame, err := record.Get().CapturePreview()
+	frame, err := record.Get().CapturePreview(640, 360)
 	if err != nil {
 		log.Printf("ML: Failed to capture frame: %v", err)
 		return

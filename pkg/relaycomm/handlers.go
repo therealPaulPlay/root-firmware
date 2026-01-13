@@ -726,7 +726,7 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
 	// Capture and encode preview in goroutine to avoid blocking
 	go func() {
-		frameData, err := record.Get().CapturePreview()
+		frameData, err := record.Get().CapturePreview(640, 360)
 		if err != nil {
 			SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
 			return

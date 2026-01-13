@@ -517,11 +517,7 @@ func (r *Recorder) StopRecording() error {
 	return nil
 }
 
-func (r *Recorder) CapturePreview() ([]byte, error) {
-	return r.CapturePreviewWithResolution(640, 360)
-}
-
-func (r *Recorder) CapturePreviewWithResolution(x int, y int) ([]byte, error) {
+func (r *Recorder) CapturePreview(x int, y int) ([]byte, error) {
 	r.videoBroadcast.frameMu.RLock()
 	frame := r.videoBroadcast.latestFrame
 	r.videoBroadcast.frameMu.RUnlock()

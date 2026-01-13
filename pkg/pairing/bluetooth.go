@@ -163,7 +163,7 @@ func initBLE() error {
 
 		// Capture and chunk new preview when cache is empty
 		if len(viewfinderChunksCache) == 0 {
-			jpegData, err := record.Get().CapturePreviewWithResolution(viewfinderWidth, viewfinderHeight)
+			jpegData, err := record.Get().CapturePreview(viewfinderWidth, viewfinderHeight)
 			if err != nil {
 				writeError(rsp, err.Error())
 				return
