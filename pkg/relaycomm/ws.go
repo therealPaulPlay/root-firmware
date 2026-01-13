@@ -27,13 +27,15 @@ type Message struct {
 
 type RelayComm struct {
 	conn                  *websocket.Conn
-	connMu                sync.Mutex // Protects WebSocket writes
+	connMu                sync.Mutex // Protects conn access
 	running               bool
 	stopChan              chan struct{}
 	handlers              map[string]func(Message)
 	rateLimitMessageCount int
 	rateLimitLastReset    time.Time
 	rateLimitMu           sync.Mutex
+	sendChan              chan Message // Async send queue
+	sendWg                sync.WaitGroup
 }
 
 var instance *RelayComm
@@ -44,7 +46,11 @@ func Init() {
 		instance = &RelayComm{
 			handlers:           make(map[string]func(Message)),
 			rateLimitLastReset: time.Now(),
+			sendChan:           make(chan Message, 100), // Buffer 100 messages (~20 seconds at 5 msg/sec)
 		}
+		// Start async sender goroutine
+		instance.sendWg.Add(1)
+		go instance.sendLoop()
 	})
 }
 
@@ -96,33 +102,67 @@ func (r *RelayComm) Stop() {
 	close(r.stopChan)
 
 	// Close connection if exists
+	r.connMu.Lock()
 	if r.conn != nil {
 		r.conn.Close()
 		r.conn = nil
 	}
+	r.connMu.Unlock()
+
+	// Close send channel and wait for sender to finish
+	close(r.sendChan)
+	r.sendWg.Wait()
 }
 
-// Send sends a message to the relay server
+// Send queues a message to be sent asynchronously
 func (r *RelayComm) Send(msg Message) error {
-	r.connMu.Lock()
-	defer r.connMu.Unlock()
-
-	if r.conn == nil {
-		return fmt.Errorf("not connected")
+	select {
+	case r.sendChan <- msg:
+		return nil
+	default:
+		return fmt.Errorf("send queue full, message dropped")
 	}
+}
 
-	// Set write deadline
-	if err := r.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return fmt.Errorf("failed to set write deadline: %w", err)
+// sendLoop processes messages from the send queue and writes them to the WebSocket
+func (r *RelayComm) sendLoop() {
+	defer r.sendWg.Done()
+
+	for msg := range r.sendChan {
+		r.connMu.Lock()
+		conn := r.conn
+		r.connMu.Unlock()
+
+		if conn == nil {
+			continue // Drop message if not connected
+		}
+
+		// Set write deadline
+		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Printf("RelayComm: Failed to set write deadline: %v", err)
+			continue
+		}
+
+		// Write message
+		if err := conn.WriteJSON(msg); err != nil {
+			log.Printf("RelayComm: Failed to send message: %v", err)
+		}
+
+		// Clear deadline
+		_ = conn.SetWriteDeadline(time.Time{})
 	}
+}
 
-	// Write
-	err := r.conn.WriteJSON(msg)
-
-	// Clear deadline
-	_ = r.conn.SetWriteDeadline(time.Time{})
-
-	return err
+// drainSendQueue discards all queued messages
+func (r *RelayComm) drainSendQueue() {
+	for {
+		select {
+		case <-r.sendChan:
+			// Discard message
+		default:
+			return
+		}
+	}
 }
 
 func (r *RelayComm) connectLoop(relayDomain string) {
@@ -136,10 +176,21 @@ func (r *RelayComm) connectLoop(relayDomain string) {
 				continue
 			}
 
-			// Handle messages until connection closes
+			// Loop for handle messages (until connection closes)
 			r.handleMessages()
 
-			// Connection closed, reconnect
+			// Connection died - clear it and drain send queue
+			r.connMu.Lock()
+			if r.conn != nil {
+				r.conn.Close()
+				r.conn = nil
+			}
+			r.connMu.Unlock()
+
+			// Drain send queue
+			r.drainSendQueue()
+
+			// Wait before reconnecting
 			time.Sleep(reconnectDelay)
 		}
 	}
@@ -159,7 +210,9 @@ func (r *RelayComm) connect(relayDomain string) error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
+	r.connMu.Lock()
 	r.conn = conn
+	r.connMu.Unlock()
 	return nil
 }
 

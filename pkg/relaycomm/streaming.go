@@ -198,6 +198,7 @@ func streamVideo(s *stream) {
 			"chunk":      base64.StdEncoding.EncodeToString(boxData),
 			"chunkIndex": chunkIndex,
 		}); err != nil {
+			log.Printf("RelayComm: Video stream send failed, stopping stream: %v", err)
 			return
 		}
 		chunkIndex++
@@ -221,6 +222,7 @@ func streamAudio(s *stream) {
 				"chunk":      base64.StdEncoding.EncodeToString(data),
 				"chunkIndex": chunkIndex,
 			}); err != nil {
+				log.Printf("RelayComm: Audio stream send failed, stopping stream: %v", err)
 				return
 			}
 			chunkIndex++

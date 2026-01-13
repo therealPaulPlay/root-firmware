@@ -40,8 +40,8 @@ func UpdateFileTransferContext(deviceID string, newCtx *HandlerContext) {
 // SendFileInChunks reads a file and sends it in chunks
 func SendFileInChunks(ctx *HandlerContext, msgType string, filePath string, fileType string, metadata map[string]any, onComplete func()) {
 	go func() {
-		const chunkSize = 2 * 1024 * 1024                 // 2MB chunks (~10MB/sec at 5 msg/sec)
-		const delayBetweenChunks = 200 * time.Millisecond // 5/s rate limit
+		const chunkSize = 1 * 1024 * 1024                 // 1MB chunks
+		const delayBetweenChunks = 200 * time.Millisecond // 5/s rate limit = ~5MB/sec throughput
 
 		// Register active transfer for context updates
 		transfer := &fileTransfer{
