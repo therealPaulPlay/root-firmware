@@ -15,6 +15,7 @@ import (
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
+	"root-firmware/pkg/record"
 	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/wifi"
 )
@@ -26,6 +27,7 @@ var (
 	productIdCharUUID        = ble.MustParse("8f3c4d5e-9a2b-4f1e-8d6c-7e5f4a3b2c1d")
 	getCodeCharUUID          = ble.MustParse("51ff12bb-3ed8-46e5-b4f9-d64e2fec021b")
 	scanQRCharUUID           = ble.MustParse("2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e")
+	viewfinderCharUUID       = ble.MustParse("3d9e1f7a-4b6c-5e8d-9f0a-1b2c3d4e5f6a")
 	pairCharUUID             = ble.MustParse("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
 	productPublicKeyCharUUID = ble.MustParse("2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a")
 	wifiNetworksCharUUID     = ble.MustParse("c2be2bc9-cee3-40ae-af50-f9959f25ee5b")
@@ -48,6 +50,8 @@ var wifiStatus operationStatus
 var relayStatus operationStatus
 var wifiNetworksCache []wifi.Network
 var wifiNetworksCacheMu sync.Mutex
+var viewfinderChunksCache []map[string]any
+var viewfinderChunksCacheMu sync.Mutex
 
 // writeError writes a JSON error response to the BLE response writer
 func writeError(rsp ble.ResponseWriter, message string) {
@@ -127,6 +131,11 @@ func initBLE() error {
 	// Get Code characteristic (read to get pairing code)
 	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
 	getCodeChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		// Clear viewfinder cache when starting new pairing session
+		viewfinderChunksCacheMu.Lock()
+		viewfinderChunksCache = nil
+		viewfinderChunksCacheMu.Unlock()
+
 		code := GetHelper().GenerateCode()
 		if err := writeJSON(rsp, map[string]any{"code": code}); err != nil {
 			writeError(rsp, err.Error())
@@ -144,6 +153,38 @@ func initBLE() error {
 		}
 		log.Printf("BLE: QR code verified successfully")
 		writeSuccess(rsp)
+	}))
+
+	// Viewfinder characteristic (read to get next chunk of 48x48 2-bit preview)
+	viewfinderChar := svc.NewCharacteristic(viewfinderCharUUID)
+	viewfinderChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+		viewfinderChunksCacheMu.Lock()
+		defer viewfinderChunksCacheMu.Unlock()
+
+		// Capture and chunk new preview when cache is empty
+		if len(viewfinderChunksCache) == 0 {
+			jpegData, err := record.Get().CapturePreviewWithResolution(viewfinderWidth, viewfinderHeight)
+			if err != nil {
+				writeError(rsp, err.Error())
+				return
+			}
+
+			chunks, err := GetViewfinderChunks(jpegData)
+			if err != nil {
+				writeError(rsp, err.Error())
+				return
+			}
+			viewfinderChunksCache = chunks
+		}
+
+		// Return next chunk
+		chunk := viewfinderChunksCache[0]
+		viewfinderChunksCache = viewfinderChunksCache[1:]
+		chunk["hasMore"] = len(viewfinderChunksCache) > 0
+
+		if err := writeJSON(rsp, chunk); err != nil {
+			writeError(rsp, err.Error())
+		}
 	}))
 
 	// Pair Device characteristic (write to pair, read to get result)

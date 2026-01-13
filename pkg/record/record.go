@@ -153,7 +153,7 @@ func (r *Recorder) startCamera() error {
 		"--framerate", "15",
 		"--width", "1920", "--height", "1080",
 		"-b", "3000000",
-		"-g", "15",
+		"-g", "5",
 		"--ev", "5.0",
 	)
 
@@ -537,7 +537,7 @@ func (r *Recorder) CapturePreviewWithResolution(x int, y int) ([]byte, error) {
 		"-vf", fmt.Sprintf("scale=%d:%d", x, y),
 		"-f", "image2",
 		"-c:v", "mjpeg",
-		"-q:v", "5",
+		"-q:v", "10",
 		"pipe:1",
 	)
 	cmd.Stdin = bytes.NewReader(frame)
