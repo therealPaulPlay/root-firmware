@@ -72,13 +72,11 @@ func writeJSON(rsp ble.ResponseWriter, data map[string]any) error {
 	if err != nil {
 		return err
 	}
-	n, err := rsp.Write(jsonData)
+	_, err = rsp.Write(jsonData)
 	if err != nil {
 		log.Printf("BLE: Write failed (%d bytes): %v", len(jsonData), err)
-		return err
 	}
-	log.Printf("BLE: Wrote %d bytes", n)
-	return nil
+	return err
 }
 
 // Init initializes the pairing system (BLE + helper)
@@ -159,21 +157,22 @@ func initBLE() error {
 	viewfinderChar := svc.NewCharacteristic(viewfinderCharUUID)
 	viewfinderChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		viewfinderChunksCacheMu.Lock()
-		defer viewfinderChunksCacheMu.Unlock()
-
-		// Capture and chunk new preview when cache is empty
 		if len(viewfinderChunksCache) == 0 {
-			jpegData, err := record.Get().CapturePreview(viewfinderWidth, viewfinderHeight)
+			viewfinderChunksCacheMu.Unlock()
+
+			frameData, err := record.Get().CaptureViewfinderFrame(viewfinderWidth, viewfinderHeight)
 			if err != nil {
 				writeError(rsp, err.Error())
 				return
 			}
 
-			chunks, err := GetViewfinderChunks(jpegData)
+			chunks, err := GetViewfinderChunks(frameData)
 			if err != nil {
 				writeError(rsp, err.Error())
 				return
 			}
+
+			viewfinderChunksCacheMu.Lock()
 			viewfinderChunksCache = chunks
 		}
 
@@ -181,6 +180,7 @@ func initBLE() error {
 		chunk := viewfinderChunksCache[0]
 		viewfinderChunksCache = viewfinderChunksCache[1:]
 		chunk["hasMore"] = len(viewfinderChunksCache) > 0
+		viewfinderChunksCacheMu.Unlock()
 
 		if err := writeJSON(rsp, chunk); err != nil {
 			writeError(rsp, err.Error())

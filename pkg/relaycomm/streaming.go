@@ -17,9 +17,9 @@ type stream struct {
 	reader     io.ReadCloser // For video (from ffmpeg)
 	ch         chan []byte   // For audio (direct channel)
 	msgType    string
-	stopCh     chan struct{}
+	endCh      chan struct{}
 	lastActive time.Time
-	onStop     func()
+	onEnd      func()
 	wg         sync.WaitGroup
 }
 
@@ -32,7 +32,7 @@ type streamManager struct {
 
 var streams = &streamManager{}
 
-func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch chan []byte, msgType string, onStop func(), isVideo bool) {
+func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch chan []byte, msgType string, onEnd func(), isVideo bool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -41,9 +41,9 @@ func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch cha
 		reader:     reader,
 		ch:         ch,
 		msgType:    msgType,
-		stopCh:     make(chan struct{}),
+		endCh:      make(chan struct{}),
 		lastActive: time.Now(),
-		onStop:     onStop,
+		onEnd:      onEnd,
 	}
 
 	s.wg.Add(1)
@@ -59,26 +59,26 @@ func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch cha
 	log.Printf("RelayComm: Started %s stream for device %s", msgType, ctx.DeviceID)
 }
 
-func (sm *streamManager) stop(isVideo bool) {
+func (sm *streamManager) end(isVideo bool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	sm.stopLocked(isVideo)
+	sm.endLocked(isVideo)
 }
 
-func (sm *streamManager) stopLocked(isVideo bool) {
+func (sm *streamManager) endLocked(isVideo bool) {
 	s := sm.video
 	if !isVideo {
 		s = sm.audio
 	}
 
 	if s != nil {
-		close(s.stopCh)
+		close(s.endCh)
 		if s.reader != nil {
 			s.reader.Close()
 		}
 		s.wg.Wait()
-		if s.onStop != nil {
-			s.onStop()
+		if s.onEnd != nil {
+			s.onEnd()
 		}
 
 		if isVideo {
@@ -124,12 +124,12 @@ func (sm *streamManager) startMonitor() {
 		for range sm.monitor.C {
 			sm.mu.Lock()
 			if sm.video != nil && time.Since(sm.video.lastActive) > 10*time.Second {
-				log.Println("RelayComm: Stopping video stream due to inactivity")
-				sm.stopLocked(true)
+				log.Println("RelayComm: Ending video stream due to inactivity")
+				sm.endLocked(true)
 			}
 			if sm.audio != nil && time.Since(sm.audio.lastActive) > 10*time.Second {
-				log.Println("RelayComm: Stopping audio stream due to inactivity")
-				sm.stopLocked(false)
+				log.Println("RelayComm: Ending audio stream due to inactivity")
+				sm.endLocked(false)
 			}
 			sm.mu.Unlock()
 		}
@@ -175,7 +175,7 @@ func streamVideo(s *stream) {
 
 	for {
 		select {
-		case <-s.stopCh:
+		case <-s.endCh:
 			return
 		default:
 		}
@@ -198,7 +198,7 @@ func streamVideo(s *stream) {
 			"chunk":      base64.StdEncoding.EncodeToString(boxData),
 			"chunkIndex": chunkIndex,
 		}); err != nil {
-			log.Printf("RelayComm: Video stream send failed, stopping stream: %v", err)
+			log.Printf("RelayComm: Video stream send failed, ending stream: %v", err)
 			return
 		}
 		chunkIndex++
@@ -211,7 +211,7 @@ func streamAudio(s *stream) {
 
 	for {
 		select {
-		case <-s.stopCh:
+		case <-s.endCh:
 			return
 		case data, ok := <-s.ch:
 			if !ok {
@@ -222,7 +222,7 @@ func streamAudio(s *stream) {
 				"chunk":      base64.StdEncoding.EncodeToString(data),
 				"chunkIndex": chunkIndex,
 			}); err != nil {
-				log.Printf("RelayComm: Audio stream send failed, stopping stream: %v", err)
+				log.Printf("RelayComm: Audio stream send failed, ending stream: %v", err)
 				return
 			}
 			chunkIndex++
@@ -243,13 +243,13 @@ func StartAudioStreamForClient(ctx *HandlerContext, ch chan []byte) {
 	}, false)
 }
 
-// Exported sto pfunctions
-func StopVideoStream() {
-	streams.stop(true)
+// Exported end functions
+func EndVideoStream() {
+	streams.end(true)
 }
 
-func StopAudioStream() {
-	streams.stop(false)
+func EndAudioStream() {
+	streams.end(false)
 }
 
 // Update activity (heartbeat)

@@ -1,80 +1,62 @@
 package pairing
 
 import (
-	"bytes"
 	"encoding/base64"
-	"fmt"
-	"image/jpeg"
 )
 
 const (
-	viewfinderWidth  = 48
-	viewfinderHeight = 27
+	viewfinderWidth  = 96
+	viewfinderHeight = 54
 )
 
-// jpegTo3BitGray converts JPEG to 3-bit grayscale (8 shades)
-func jpegTo3BitGray(jpegData []byte) (string, error) {
-	img, err := jpeg.Decode(bytes.NewReader(jpegData))
-	if err != nil {
-		return "", err
-	}
+// GetViewfinderChunks returns chunked 3-bit grayscale bitmap from raw grayscale data
+func GetViewfinderChunks(grayData []byte) ([]map[string]any, error) {
+	// Convert to 3-bit grayscale (8 shades)
+	bitLen := (len(grayData) * 3 + 7) / 8
+	bitData := make([]byte, bitLen)
 
-	bounds := img.Bounds()
-	totalPixels := viewfinderWidth * viewfinderHeight
-	out := make([]byte, (totalPixels*3+7)/8)
+	for i := 0; i < len(grayData); i += 8 {
+		// Process 8 pixels at a time (24 bits = 3 bytes)
+		end := min(i+8, len(grayData))
+		bitBuf := uint32(0)
+		bitCount := 0
+		outIdx := (i * 3) / 8
 
-	outIdx := 0
-	bitBuf := uint32(0)
-	bitCount := 0
-
-	for y := 0; y < bounds.Dy(); y++ {
-		for x := 0; x < bounds.Dx(); x++ {
-			r, g, b, _ := img.At(x, y).RGBA()
-			gray := (r*299 + g*587 + b*114) / 1000 // 0-65535
-			threeBit := uint32(gray / 8192)        // 0-7
-
-			bitBuf = (bitBuf << 3) | threeBit
+		for j := i; j < end; j++ {
+			bitBuf = (bitBuf << 3) | uint32(grayData[j]>>5)
 			bitCount += 3
+		}
 
-			if bitCount >= 8 {
-				bitCount -= 8
-				out[outIdx] = uint8(bitBuf >> bitCount)
-				outIdx++
-				bitBuf &= (1 << bitCount) - 1
-			}
+		// Write out complete bytes
+		for bitCount >= 8 {
+			bitCount -= 8
+			bitData[outIdx] = uint8(bitBuf >> bitCount)
+			outIdx++
+			bitBuf &= (1 << bitCount) - 1
+		}
+
+		// Handle remaining bits
+		if bitCount > 0 && outIdx < len(bitData) {
+			bitData[outIdx] = uint8(bitBuf << (8 - bitCount))
 		}
 	}
 
-	if bitCount > 0 {
-		out[outIdx] = uint8(bitBuf << (8 - bitCount))
-	}
+	// Base64 encode the entire thing once
+	encoded := base64.StdEncoding.EncodeToString(bitData)
 
-	return base64.StdEncoding.EncodeToString(out), nil
-}
-
-// chunkData splits base64 string into chunks <110 bytes each
-func chunkData(data string) []map[string]any {
+	// Chunk the base64 string into 90-char pieces
 	const size = 90 // Leave room for JSON overhead
-	total := (len(data) + size - 1) / size
-	chunks := make([]map[string]any, total)
+	total := (len(encoded) + size - 1) / size
+	chunks := make([]map[string]any, 0, total)
 
 	for i := range total {
 		start := i * size
-		end := min(start+size, len(data))
-		chunks[i] = map[string]any{
-			"data":  data[start:end],
+		end := min(start+size, len(encoded))
+		chunks = append(chunks, map[string]any{
+			"data":  encoded[start:end],
 			"index": i,
-		}
+		})
 	}
 
-	return chunks
-}
-
-// GetViewfinderChunks returns chunked 3-bit grayscale bitmap from JPEG
-func GetViewfinderChunks(jpegData []byte) ([]map[string]any, error) {
-	bitmap, err := jpegTo3BitGray(jpegData)
-	if err != nil {
-		return nil, fmt.Errorf("convert failed: %w", err)
-	}
-	return chunkData(bitmap), nil
+	return chunks, nil
 }

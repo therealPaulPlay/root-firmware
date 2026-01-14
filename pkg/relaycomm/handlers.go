@@ -552,8 +552,8 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	StopVideoStream() // Stop existing video stream first (if any)
-	StopAudioStream() // Stop existing audio stream first (if any)
+	EndVideoStream() // End existing video stream first (if any)
+	EndAudioStream() // End existing audio stream first (if any)
 
 	// Start fresh video stream
 	stream, err := record.Get().StartVideoStream()
