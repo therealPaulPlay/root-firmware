@@ -26,9 +26,21 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
-      - name: Build for ARM (Pi Zero 2W)
+      - name: Install ARM cross-compiler
         run: |
-          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build \
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+
+      - name: Build for ARM (Pi Zero 2W)
+        env:
+          CC: arm-linux-gnueabihf-gcc
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: arm
+          GOARM: 7
+          CGO_LDFLAGS: "-L${{ github.workspace }}/build/onnx-precompiled"
+        run: |
+          go build \
             -ldflags "-X 'root-firmware/pkg/globals.FirmwareVersion=${{ steps.version.outputs.version }}'" \
             -o root-firmware \
             cmd/main.go

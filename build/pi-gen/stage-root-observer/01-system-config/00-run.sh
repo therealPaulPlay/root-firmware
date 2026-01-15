@@ -6,6 +6,18 @@ on_chroot << EOF
 raspi-config nonint do_i2c 0
 EOF
 
+# Install ONNX runtime libraries
+install -d "${ROOTFS_DIR}/usr/local/lib"
+install -m 755 "../../onnx-precompiled/libonnxruntime.so.1.23.2" "${ROOTFS_DIR}/usr/local/lib/"
+ln -sf libonnxruntime.so.1.23.2 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so.1"
+ln -sf libonnxruntime.so.1 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so"
+
+# Configure dynamic linker to find libraries in /usr/local/lib
+echo "/usr/local/lib" > "${ROOTFS_DIR}/etc/ld.so.conf.d/local.conf"
+on_chroot << EOF
+ldconfig
+EOF
+
 # Copy RAUC system configuration
 install -d "${ROOTFS_DIR}/etc/rauc"
 install -m 644 files/rauc/system.conf "${ROOTFS_DIR}/etc/rauc/system.conf"
