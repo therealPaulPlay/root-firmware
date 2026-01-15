@@ -27,10 +27,5 @@ var RecordingsPath = DataDir + "/recordings"
 // Event log
 var EventLogPath = RecordingsPath + "/events.json"
 
-// Firmware update paths
-const UpdateImagePath = "/tmp/firmware-update.img"   // Temporary download, cleaned on reboot
-const BootCmdlinePath = "/boot/firmware/cmdline.txt" // Boot partition configuration
-const BootCountPath = "/boot/firmware/bootcount.txt" // Boot attempt counter for rollback
-
-// Boot counter configuration
-const MaxBootAttempts = 3 // Number of boot attempts before rollback
+// RAUC update configuration
+const RAUCCompatible = "root-observer" // Must match system.conf and bundle manifest

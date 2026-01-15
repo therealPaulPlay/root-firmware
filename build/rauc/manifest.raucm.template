@@ -1,0 +1,8 @@
+[update]
+compatible=root-observer
+version=${VERSION}
+description=ROOT Observer Firmware ${VERSION}
+build=${BUILD_DATE}
+
+[image.rootfs]
+filename=rootfs.img

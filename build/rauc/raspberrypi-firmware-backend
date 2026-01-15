@@ -1,0 +1,116 @@
+#!/bin/bash
+# RAUC bootloader backend for Raspberry Pi
+# Handles A/B slot switching via cmdline.txt modification
+#
+# This script is called by RAUC to manage boot slot selection
+# Commands: get-state, set-state, get-primary, set-primary
+
+set -e
+
+BOOT_PARTITION="/boot/firmware"
+CMDLINE_FILE="$BOOT_PARTITION/cmdline.txt"
+
+# Validate cmdline.txt exists and is accessible
+validate_cmdline() {
+    if [ ! -f "$CMDLINE_FILE" ]; then
+        echo "Error: $CMDLINE_FILE does not exist" >&2
+        exit 1
+    fi
+    if [ ! -r "$CMDLINE_FILE" ]; then
+        echo "Error: $CMDLINE_FILE is not readable" >&2
+        exit 1
+    fi
+}
+
+validate_cmdline_writable() {
+    validate_cmdline
+    if [ ! -w "$CMDLINE_FILE" ]; then
+        echo "Error: $CMDLINE_FILE is not writable (boot partition may be read-only)" >&2
+        exit 1
+    fi
+}
+
+get_current_slot() {
+    # Read current root partition from /proc/cmdline
+    local root_part=$(grep -o 'root=/dev/[^ ]*' /proc/cmdline | cut -d'=' -f2)
+    case "$root_part" in
+        /dev/mmcblk0p2) echo "A" ;;
+        /dev/mmcblk0p3) echo "B" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+get_cmdline_slot() {
+    validate_cmdline
+    # Read configured slot from cmdline.txt
+    local root_part=$(grep -o 'root=/dev/[^ ]*' "$CMDLINE_FILE" | cut -d'=' -f2)
+    case "$root_part" in
+        /dev/mmcblk0p2) echo "A" ;;
+        /dev/mmcblk0p3) echo "B" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+set_cmdline_slot() {
+    validate_cmdline_writable
+    local slot="$1"
+    local new_root
+    case "$slot" in
+        A) new_root="/dev/mmcblk0p2" ;;
+        B) new_root="/dev/mmcblk0p3" ;;
+        *)
+            echo "Error: Invalid slot '$slot', expected A or B" >&2
+            exit 1
+            ;;
+    esac
+
+    # Update cmdline.txt with new root partition
+    sed -i "s|root=/dev/mmcblk0p[23]|root=$new_root|" "$CMDLINE_FILE"
+
+    # Verify the change was applied
+    local verify_root=$(grep -o 'root=/dev/[^ ]*' "$CMDLINE_FILE" | cut -d'=' -f2)
+    if [ "$verify_root" != "$new_root" ]; then
+        echo "Error: Failed to update cmdline.txt, expected $new_root but got $verify_root" >&2
+        exit 1
+    fi
+}
+
+case "$1" in
+    get-state)
+        # Get boot state of a slot (good/bad)
+        # For now, assume all slots are good unless explicitly marked bad
+        slot="$2"
+        echo "good"
+        ;;
+
+    set-state)
+        # Set boot state of a slot (good/bad)
+        slot="$2"
+        state="$3"
+        # State is tracked by RAUC in its status file
+        ;;
+
+    get-primary)
+        # Get which slot is set as primary (will boot next)
+        get_cmdline_slot
+        ;;
+
+    set-primary)
+        # Set which slot should boot next
+        slot="$2"
+        set_cmdline_slot "$slot"
+        sync
+        ;;
+
+    get-current)
+        # Get currently booted slot
+        get_current_slot
+        ;;
+
+    *)
+        echo "Unknown command: $1" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

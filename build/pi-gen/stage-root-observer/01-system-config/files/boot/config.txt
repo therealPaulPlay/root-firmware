@@ -1,0 +1,23 @@
+# ROOT Observer boot configuration
+
+# Enable camera
+start_x=1
+gpu_mem=128
+camera_auto_detect=1
+
+# Enable I2C
+dtparam=i2c_arm=on
+
+# Disable splash screen for faster boot
+disable_splash=1
+
+# Serial console
+enable_uart=1
+
+# Audio
+dtparam=audio=on
+
+# Try boot support for A/B updates
+# The tryboot mechanism allows safe rollback
+[all]
+os_prefix=

@@ -1,0 +1,14 @@
+[Unit]
+Description=Expand data partition on first boot
+ConditionPathExists=!/data/.partition-expanded
+After=local-fs.target
+Before=root-firmware.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/root-firmware/expand-data-partition.sh
+RemainAfterExit=yes
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

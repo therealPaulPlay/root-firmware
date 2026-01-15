@@ -144,8 +144,27 @@ Save recordings and update the event log.
 
 ### Updater
 
-Check for and download firmware updates.
+Check for and download firmware updates via RAUC.
 
 ### WiFi
 
 Scan for WiFi networks and establish a wifi connection.
+
+## CI/CD
+
+Publishing a GitHub Release triggers a workflow that builds the firmware, creates a full SD card image and a RAUC update bundle, and uploads both to S3.
+
+**Required secrets:**
+
+| Secret | Description |
+|--------|-------------|
+| `RAUC_CA_CERT` | CA certificate for bundle verification (`ca.cert.pem`) |
+| `RAUC_SIGNING_CERT` | Certificate for signing bundles |
+| `RAUC_SIGNING_KEY` | Private key for signing bundles |
+| `S3_ACCESS_KEY_ID` | Access key |
+| `S3_SECRET_ACCESS_KEY` | Secret |
+| `S3_BUCKET_NAME` | S3 bucket name |
+| `S3_REGION` | S3 region (e.g., `fra1`) |
+| `S3_DOMAIN` | S3 domain (e.g., `digitaloceanspaces.com`) |
+
+Generate signing certificates with `./build/scripts/generate-certs.sh`.

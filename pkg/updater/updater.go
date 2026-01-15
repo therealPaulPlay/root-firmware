@@ -19,8 +19,9 @@ import (
 
 const (
 	firmwareEndpoint   = "/firmware/observer"
-	updateCheckTimeout = 10 * time.Second // Timeout for checking update availability
-	downloadTimeout    = 30 * time.Minute // Timeout for downloading firmware
+	updateCheckTimeout = 10 * time.Second
+	downloadTimeout    = 30 * time.Minute
+	raucBundlePath     = "/tmp/update.raucb"
 )
 
 type UpdateStatus string
@@ -34,9 +35,11 @@ const (
 )
 
 type FirmwareInfo struct {
-	Version string `json:"version"`
-	URL     string `json:"url"`
-	SHA256  string `json:"sha256"`
+	Version    string `json:"version"`
+	URL        string `json:"url"`
+	SHA256     string `json:"sha256"`
+	Size       int64  `json:"size"`
+	Compatible string `json:"compatible"`
 }
 
 type Updater struct {
@@ -46,6 +49,7 @@ type Updater struct {
 	downloadURL      string
 	downloadSHA256   string
 	errorMsg         string
+	slotMarkedGood   bool
 }
 
 var instance *Updater
@@ -68,6 +72,8 @@ func (u *Updater) GetStatus() (UpdateStatus, string, string) {
 	return u.status, u.availableVersion, u.errorMsg
 }
 
+// CheckForUpdates queries the relay server for available firmware updates.
+// On successful relay connection, marks the current slot as good (safe to commit).
 func (u *Updater) CheckForUpdates() {
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
@@ -94,7 +100,7 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
-	// Validate SHA256 format (64 hex chars) - critical security check
+	// Validate SHA256 format (64 hex chars)
 	if len(info.SHA256) != 64 {
 		u.setError(fmt.Sprintf("invalid SHA256 length: %d", len(info.SHA256)))
 		return
@@ -104,8 +110,26 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
+	// Validate compatible string matches our system
+	if info.Compatible != "" && info.Compatible != globals.RAUCCompatible {
+		log.Printf("Updater: Incompatible update (got %s, want %s)", info.Compatible, globals.RAUCCompatible)
+		return
+	}
+
+	// Successfully reached relay server - mark slot as good if not already done
+	// This ensures we only commit to a firmware version that can receive future updates
 	u.mu.Lock()
-	defer u.mu.Unlock()
+	if !u.slotMarkedGood {
+		u.mu.Unlock()
+		if err := confirmSuccessfulBoot(); err != nil {
+			log.Printf("Updater: Failed to mark slot as good: %v", err)
+		} else {
+			u.mu.Lock()
+			u.slotMarkedGood = true
+			u.mu.Unlock()
+		}
+		u.mu.Lock()
+	}
 
 	if info.Version != globals.FirmwareVersion {
 		u.status = StatusUpdateAvailable
@@ -117,8 +141,10 @@ func (u *Updater) CheckForUpdates() {
 		u.status = StatusUpToDate
 		u.errorMsg = ""
 	}
+	u.mu.Unlock()
 }
 
+// StartUpdate downloads and installs the available update via RAUC.
 func (u *Updater) StartUpdate() error {
 	u.mu.Lock()
 	if u.status != StatusUpdateAvailable {
@@ -127,31 +153,31 @@ func (u *Updater) StartUpdate() error {
 	}
 	downloadURL := u.downloadURL
 	expectedSHA256 := u.downloadSHA256
-	log.Printf("Updater: Starting firmware update to version %s", u.availableVersion)
+	log.Printf("Updater: Starting RAUC update to version %s", u.availableVersion)
 	u.status = StatusDownloading
 	u.mu.Unlock()
 
-	// Download and verify firmware
-	if err := u.downloadFile(downloadURL, globals.UpdateImagePath, expectedSHA256); err != nil {
+	// Download RAUC bundle
+	if err := u.downloadFile(downloadURL, raucBundlePath, expectedSHA256); err != nil {
 		u.setError(fmt.Sprintf("download failed: %v", err))
-		os.Remove(globals.UpdateImagePath)
+		os.Remove(raucBundlePath)
 		return err
 	}
 
-	// Flash to inactive partition
+	// Install using RAUC
 	u.mu.Lock()
 	u.status = StatusInstalling
 	u.mu.Unlock()
 
-	if err := u.flashFirmware(); err != nil {
-		u.setError(fmt.Sprintf("installation failed: %v", err))
-		os.Remove(globals.UpdateImagePath)
+	if err := u.installWithRAUC(); err != nil {
+		u.setError(fmt.Sprintf("RAUC installation failed: %v", err))
+		os.Remove(raucBundlePath)
 		return err
 	}
 
 	// Clean up and schedule reboot
-	os.Remove(globals.UpdateImagePath)
-	log.Println("Updater: Update successful, rebooting in 2 seconds...")
+	os.Remove(raucBundlePath)
+	log.Println("Updater: RAUC update successful, rebooting in 2 seconds...")
 
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -160,6 +186,20 @@ func (u *Updater) StartUpdate() error {
 		}
 	}()
 
+	return nil
+}
+
+// installWithRAUC installs the downloaded bundle using the RAUC update framework.
+func (u *Updater) installWithRAUC() error {
+	log.Println("Updater: Installing update via RAUC...")
+
+	cmd := exec.Command("sudo", "rauc", "install", raucBundlePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("rauc install failed: %w (output: %s)", err, string(output))
+	}
+
+	log.Printf("Updater: RAUC install completed: %s", string(output))
 	return nil
 }
 
@@ -176,7 +216,7 @@ func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 	}
 
 	// Download to temp file first
-	tmp, err := os.CreateTemp("", "firmware-*.img")
+	tmp, err := os.CreateTemp("", "rauc-bundle-*.raucb")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -190,7 +230,7 @@ func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 	bytesWritten, err := io.Copy(writer, resp.Body)
 	if err != nil {
 		tmp.Close()
-		return fmt.Errorf("failed to write firmware: %w", err)
+		return fmt.Errorf("failed to write bundle: %w", err)
 	}
 	tmp.Close()
 
@@ -202,43 +242,10 @@ func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 
 	// Move verified file to destination
 	if err := os.Rename(tmpPath, destination); err != nil {
-		return fmt.Errorf("failed to move firmware: %w", err)
+		return fmt.Errorf("failed to move bundle: %w", err)
 	}
 
 	log.Printf("Updater: Downloaded and verified %d bytes (SHA256: %s)", bytesWritten, actualSHA256)
-	return nil
-}
-
-func (u *Updater) flashFirmware() error {
-	activePartition, err := getActivePartition()
-	if err != nil {
-		return fmt.Errorf("failed to detect active partition: %w", err)
-	}
-
-	inactivePartition, err := getInactivePartition(activePartition)
-	if err != nil {
-		return fmt.Errorf("failed to determine inactive partition: %w", err)
-	}
-
-	log.Printf("Updater: Flashing firmware to %s (active: %s)", inactivePartition, activePartition)
-
-	// Flash firmware to inactive partition
-	cmd := exec.Command("sudo", "dd", "if="+globals.UpdateImagePath, "of="+inactivePartition, "bs=4M", "conv=fsync")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("flash failed: %w (output: %s)", err, string(output))
-	}
-
-	// Switch boot partition
-	if err := switchBootPartition(inactivePartition); err != nil {
-		return fmt.Errorf("boot switch failed: %w", err)
-	}
-
-	// Set boot counter for automatic rollback if new firmware fails
-	if err := setBootCounter(); err != nil {
-		log.Printf("Updater: Failed to set boot counter: %v", err)
-	}
-
-	log.Println("Updater: Firmware flashed and boot partition switched successfully")
 	return nil
 }
 
@@ -247,4 +254,30 @@ func (u *Updater) setError(msg string) {
 	defer u.mu.Unlock()
 	u.status = StatusError
 	u.errorMsg = msg
+	log.Printf("Updater: Error - %s", msg)
+}
+
+// GetRAUCStatus returns the current RAUC slot status as JSON.
+func GetRAUCStatus() (string, error) {
+	cmd := exec.Command("rauc", "status", "--output-format=json")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get RAUC status: %w", err)
+	}
+	return string(output), nil
+}
+
+// confirmSuccessfulBoot marks the current RAUC slot as good.
+// This should be called after confirming the firmware is working correctly
+// (e.g., after successfully connecting to the relay server).
+// Until this is called, RAUC may automatically rollback to the previous slot on reboot.
+func confirmSuccessfulBoot() error {
+	cmd := exec.Command("sudo", "rauc", "status", "mark-good", "booted")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to mark slot as good: %w (output: %s)", err, string(output))
+	}
+
+	log.Println("Updater: Boot confirmed successfully via RAUC")
+	return nil
 }
