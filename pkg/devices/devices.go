@@ -3,17 +3,20 @@ package devices
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"root-firmware/pkg/config"
+	"root-firmware/pkg/globals"
 )
 
 type Device struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	PublicKey   []byte    `json:"publicKey"` // Device's public key
-	ConnectedAt time.Time `json:"connectedAt"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`         // Device name
+	PublicKey    []byte    `json:"publicKey"`    // Device's public key
+	ProductAlias string    `json:"productAlias"` // User-defined name for the ROOT product (e.g. "Living Room Camera")
+	ConnectedAt  time.Time `json:"connectedAt"`
 }
 
 type Devices struct {
@@ -73,10 +76,11 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 
 	// Add new device
 	filtered = append(filtered, Device{
-		ID:          id,
-		Name:        name,
-		PublicKey:   publicKey,
-		ConnectedAt: time.Now(),
+		ID:           id,
+		Name:         name,
+		PublicKey:    publicKey,
+		ProductAlias: "My ROOT " + strings.ToUpper(globals.ProductModel[:1]) + globals.ProductModel[1:], // Prefix needs to match client-side default prefix
+		ConnectedAt:  time.Now(),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
@@ -93,6 +97,29 @@ func (d *Devices) RenewKey(id string, publicKey []byte) error {
 	for i, dev := range devices {
 		if dev.ID == id {
 			devices[i].PublicKey = publicKey
+			return config.Get().SetKey("connectedDevices", devices)
+		}
+	}
+
+	return fmt.Errorf("device not found: %s", id)
+}
+
+// SetProductAlias updates the user-defined product alias for a device
+// This alias can be included in notifications and other places where it's useful to differentiate between
+// different paired ROOT products
+func (d *Devices) SetProductAlias(id string, alias string) error {
+	if len(alias) < 3 || len(alias) > 30 {
+		return fmt.Errorf("alias must be between 3 and 30 characters")
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	devices := d.getDevices()
+
+	for i, dev := range devices {
+		if dev.ID == id {
+			devices[i].ProductAlias = alias
 			return config.Get().SetKey("connectedDevices", devices)
 		}
 	}

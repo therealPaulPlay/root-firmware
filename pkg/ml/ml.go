@@ -14,7 +14,7 @@ import (
 
 const (
 	checkInterval    = 3 * time.Second  // Check for motion/events
-	recordDuration   = 10 * time.Second // Fixed recording chunks
+	recordDuration   = 15 * time.Second // Max recording chunk duration
 	cooldownDuration = 5 * time.Second  // Wait after recording stops
 	motionTimeout    = 6 * time.Second  // Stop recording if no motion (must be > checkInterval)
 )

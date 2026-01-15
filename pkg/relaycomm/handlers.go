@@ -54,6 +54,7 @@ const (
 	MsgGetEventDetectionConfig  = "getEventDetectionConfig"
 	MsgSetEventDetectionEnabled = "setEventDetectionEnabled"
 	MsgSetEventDetectionTypes   = "setEventDetectionTypes"
+	MsgSetProductAlias          = "setProductAlias"
 )
 
 // Error code constants
@@ -275,6 +276,7 @@ func RegisterHandlers() {
 	// Device management
 	relay.On(MsgGetDevices, useEncryption(MsgGetDevices, handleGetDevices))
 	relay.On(MsgRemoveDevice, useEncryption(MsgRemoveDevice, handleRemoveDevice))
+	relay.On(MsgSetProductAlias, useEncryption(MsgSetProductAlias, handleSetProductAlias))
 
 	// Storage
 	relay.On(MsgGetEvents, useEncryption(MsgGetEvents, handleGetEvents))
@@ -471,6 +473,27 @@ func handleRemoveDevice(ctx *HandlerContext, payload json.RawMessage) {
 
 	SendEncryptedSuccess(ctx, MsgRemoveDevice, map[string]any{
 		"removedDeviceId": req.TargetDeviceID,
+	})
+}
+
+func handleSetProductAlias(ctx *HandlerContext, payload json.RawMessage) {
+	var req struct {
+		Alias string `json:"alias"`
+	}
+
+	if err := json.Unmarshal(payload, &req); err != nil {
+		SendEncryptedError(ctx, MsgSetProductAlias, ErrInvalidPayload, "Invalid payload")
+		return
+	}
+
+	// Only allow devices to set their own product alias (ctx.DeviceID is the authenticated sender)
+	if err := devices.Get().SetProductAlias(ctx.DeviceID, req.Alias); err != nil {
+		SendEncryptedError(ctx, MsgSetProductAlias, ErrInternalError, err.Error())
+		return
+	}
+
+	SendEncryptedSuccess(ctx, MsgSetProductAlias, map[string]any{
+		"alias": req.Alias,
 	})
 }
 
