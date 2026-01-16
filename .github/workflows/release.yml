@@ -86,7 +86,6 @@ jobs:
           enable-ssh: 1
           compression: none
           locale: en_US.UTF-8
-          setfcap: 0
           verbose-output: true
 
       - name: Install dependencies
