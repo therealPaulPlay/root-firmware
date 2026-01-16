@@ -58,26 +58,29 @@ MOUNT_ROOT_A_DST=""
 MOUNT_ROOT_B_DST=""
 
 cleanup() {
+    local exit_code=$?
     echo "Cleaning up..."
-    # Unmount any mounted filesystems
-    [ -n "$MOUNT_BOOT_SRC" ] && mountpoint -q "$MOUNT_BOOT_SRC" && umount "$MOUNT_BOOT_SRC" 2>/dev/null
-    [ -n "$MOUNT_BOOT_DST" ] && mountpoint -q "$MOUNT_BOOT_DST" && umount "$MOUNT_BOOT_DST" 2>/dev/null
-    [ -n "$MOUNT_ROOT_SRC" ] && mountpoint -q "$MOUNT_ROOT_SRC" && umount "$MOUNT_ROOT_SRC" 2>/dev/null
-    [ -n "$MOUNT_ROOT_A_DST" ] && mountpoint -q "$MOUNT_ROOT_A_DST" && umount "$MOUNT_ROOT_A_DST" 2>/dev/null
-    [ -n "$MOUNT_ROOT_B_DST" ] && mountpoint -q "$MOUNT_ROOT_B_DST" && umount "$MOUNT_ROOT_B_DST" 2>/dev/null
+    # Unmount any mounted filesystems (|| true ensures cleanup never fails the script)
+    [ -n "$MOUNT_BOOT_SRC" ] && mountpoint -q "$MOUNT_BOOT_SRC" && umount "$MOUNT_BOOT_SRC" 2>/dev/null || true
+    [ -n "$MOUNT_BOOT_DST" ] && mountpoint -q "$MOUNT_BOOT_DST" && umount "$MOUNT_BOOT_DST" 2>/dev/null || true
+    [ -n "$MOUNT_ROOT_SRC" ] && mountpoint -q "$MOUNT_ROOT_SRC" && umount "$MOUNT_ROOT_SRC" 2>/dev/null || true
+    [ -n "$MOUNT_ROOT_A_DST" ] && mountpoint -q "$MOUNT_ROOT_A_DST" && umount "$MOUNT_ROOT_A_DST" 2>/dev/null || true
+    [ -n "$MOUNT_ROOT_B_DST" ] && mountpoint -q "$MOUNT_ROOT_B_DST" && umount "$MOUNT_ROOT_B_DST" 2>/dev/null || true
 
     # Remove mount directories
-    [ -n "$MOUNT_BOOT_SRC" ] && rm -rf "$MOUNT_BOOT_SRC" 2>/dev/null
-    [ -n "$MOUNT_BOOT_DST" ] && rm -rf "$MOUNT_BOOT_DST" 2>/dev/null
-    [ -n "$MOUNT_ROOT_SRC" ] && rm -rf "$MOUNT_ROOT_SRC" 2>/dev/null
-    [ -n "$MOUNT_ROOT_A_DST" ] && rm -rf "$MOUNT_ROOT_A_DST" 2>/dev/null
-    [ -n "$MOUNT_ROOT_B_DST" ] && rm -rf "$MOUNT_ROOT_B_DST" 2>/dev/null
+    [ -n "$MOUNT_BOOT_SRC" ] && rm -rf "$MOUNT_BOOT_SRC" 2>/dev/null || true
+    [ -n "$MOUNT_BOOT_DST" ] && rm -rf "$MOUNT_BOOT_DST" 2>/dev/null || true
+    [ -n "$MOUNT_ROOT_SRC" ] && rm -rf "$MOUNT_ROOT_SRC" 2>/dev/null || true
+    [ -n "$MOUNT_ROOT_A_DST" ] && rm -rf "$MOUNT_ROOT_A_DST" 2>/dev/null || true
+    [ -n "$MOUNT_ROOT_B_DST" ] && rm -rf "$MOUNT_ROOT_B_DST" 2>/dev/null || true
 
     # Clean up loop devices
-    [ -n "$INPUT_LOOP" ] && kpartx -d "$INPUT_LOOP" 2>/dev/null
-    [ -n "$INPUT_LOOP" ] && losetup -d "$INPUT_LOOP" 2>/dev/null
-    [ -n "$LOOP_DEV" ] && kpartx -d "$LOOP_DEV" 2>/dev/null
-    [ -n "$LOOP_DEV" ] && losetup -d "$LOOP_DEV" 2>/dev/null
+    [ -n "$INPUT_LOOP" ] && kpartx -d "$INPUT_LOOP" 2>/dev/null || true
+    [ -n "$INPUT_LOOP" ] && losetup -d "$INPUT_LOOP" 2>/dev/null || true
+    [ -n "$LOOP_DEV" ] && kpartx -d "$LOOP_DEV" 2>/dev/null || true
+    [ -n "$LOOP_DEV" ] && losetup -d "$LOOP_DEV" 2>/dev/null || true
+
+    exit $exit_code
 }
 trap cleanup EXIT
 
@@ -226,9 +229,9 @@ if file "$INPUT_IMG" | grep -q "boot sector"; then
     MOUNT_ROOT_B_DST=""
 fi
 
-# Clean up output image loop device
-kpartx -d "$LOOP_DEV"
-losetup -d "$LOOP_DEV"
+# Clean up output image loop device (|| true in case already released)
+kpartx -d "$LOOP_DEV" || true
+losetup -d "$LOOP_DEV" || true
 LOOP_DEV=""
 
 echo ""
