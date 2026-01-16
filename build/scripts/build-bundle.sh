@@ -68,11 +68,11 @@ rauc bundle \
     "$BUILD_DIR" \
     "$OUTPUT"
 
-# Show bundle info
+# Show bundle info (--no-verify since we don't have or need the CA cert here)
 echo ""
 echo "Bundle created: $OUTPUT"
 echo "Bundle info:"
-rauc info "$OUTPUT"
+rauc info --no-verify "$OUTPUT"
 
 # Calculate and display hash
 SHA256=$(sha256sum "$OUTPUT" | cut -d' ' -f1)
