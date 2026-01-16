@@ -152,7 +152,7 @@ Scan for WiFi networks and establish a wifi connection.
 
 ## CI/CD
 
-Publishing a GitHub Release triggers a workflow that builds the firmware, creates a full SD card image and a RAUC update bundle, and uploads both to S3.
+Publishing a GitHub Release triggers a workflow that builds the firmware, creates a full firmware image and a RAUC update bundle, and uploads both to S3.
 
 **Required secrets:**
 
