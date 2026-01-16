@@ -171,47 +171,45 @@ jobs:
       - name: List artifacts
         run: find ./artifacts -type f
 
-      - name: Install AWS CLI
+      - name: Install and configure s3cmd
         run: |
-          if which aws > /dev/null 2>&1; then
-            echo "AWS CLI already installed: $(aws --version)"
-          else
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip -q awscliv2.zip
-            sudo ./aws/install
-          fi
+          sudo apt-get update
+          sudo apt-get install -y s3cmd
 
-      - name: Configure AWS CLI for DigitalOcean Spaces
-        run: |
-          aws configure set aws_access_key_id ${{ secrets.S3_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.S3_SECRET_ACCESS_KEY }}
-          aws configure set default.region ${{ secrets.S3_REGION }}
+          # Create s3cmd config for DigitalOcean Spaces
+          cat > ~/.s3cfg << EOF
+          [default]
+          access_key = ${{ secrets.S3_ACCESS_KEY_ID }}
+          secret_key = ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          host_base = ${{ secrets.S3_REGION }}.${{ secrets.S3_DOMAIN }}
+          host_bucket = %(bucket)s.${{ secrets.S3_REGION }}.${{ secrets.S3_DOMAIN }}
+          use_https = True
+          EOF
 
       - name: Clean old files and upload new ones to S3
         env:
           S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
-          S3_ENDPOINT: https://${{ secrets.S3_REGION }}.${{ secrets.S3_DOMAIN }}
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
           echo "Cleaning old files..."
-          aws s3 rm "s3://${S3_BUCKET}/rootprivacy/images/" --endpoint-url "$S3_ENDPOINT" --recursive
-          aws s3 rm "s3://${S3_BUCKET}/rootprivacy/updates/" --endpoint-url "$S3_ENDPOINT" --recursive
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/" --recursive --force || true
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/updates/" --recursive --force || true
 
           echo "Uploading full image..."
-          aws s3 cp "artifacts/root-observer-${VERSION}.img.gz" \
+          s3cmd put "artifacts/root-observer-${VERSION}.img.gz" \
             "s3://${S3_BUCKET}/rootprivacy/images/root-observer-${VERSION}.img.gz" \
-            --endpoint-url "$S3_ENDPOINT" --acl public-read
+            --acl-public
 
           echo "Uploading RAUC bundle..."
-          aws s3 cp "artifacts/root-observer-update-${VERSION}.raucb" \
+          s3cmd put "artifacts/root-observer-update-${VERSION}.raucb" \
             "s3://${S3_BUCKET}/rootprivacy/updates/root-observer-update-${VERSION}.raucb" \
-            --endpoint-url "$S3_ENDPOINT" --acl public-read
+            --acl-public
 
           echo "Uploading latest.json..."
-          aws s3 cp "artifacts/latest.json" \
+          s3cmd put "artifacts/latest.json" \
             "s3://${S3_BUCKET}/rootprivacy/updates/latest.json" \
-            --endpoint-url "$S3_ENDPOINT" --acl public-read --content-type "application/json"
+            --acl-public --mime-type="application/json"
 
           echo "Upload complete!"
 
