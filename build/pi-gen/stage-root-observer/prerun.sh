@@ -5,4 +5,7 @@ if [ ! -d "${PREV_ROOTFS_DIR}" ]; then
     exit 1
 fi
 
+# Create the rootfs directory for this stage
+mkdir -p "${ROOTFS_DIR}"
+
 rsync -aHAXx --exclude var/cache/apt/archives "${PREV_ROOTFS_DIR}/" "${ROOTFS_DIR}/"
