@@ -1,8 +1,8 @@
 #!/bin/bash -e
 # Install pre-built ROOT Observer firmware binary
 
-# The firmware binary should be placed in STAGE_WORK_DIR by the build process
-FIRMWARE_BINARY="${STAGE_WORK_DIR}/root-firmware"
+# The firmware binary should be placed in STAGE_DIR by the CI build process
+FIRMWARE_BINARY="${STAGE_DIR}/root-firmware"
 
 if [ -f "$FIRMWARE_BINARY" ]; then
     install -d "${ROOTFS_DIR}/home/observer"

@@ -1,14 +1,10 @@
 #!/bin/bash -e
 # ROOT Observer system configuration
+# Note: I2C is enabled via dtparam=i2c_arm=on in config.txt
 
-# Enable I2C
-on_chroot << EOF
-raspi-config nonint do_i2c 0
-EOF
-
-# Install ONNX runtime libraries (copied to work dir by CI)
+# Install ONNX runtime libraries (copied to stage dir by CI)
 install -d "${ROOTFS_DIR}/usr/local/lib"
-install -m 755 "${STAGE_WORK_DIR}/libonnxruntime.so.1.23.2" "${ROOTFS_DIR}/usr/local/lib/"
+install -m 755 "${STAGE_DIR}/libonnxruntime.so.1.23.2" "${ROOTFS_DIR}/usr/local/lib/"
 ln -sf libonnxruntime.so.1.23.2 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so.1"
 ln -sf libonnxruntime.so.1 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so"
 
@@ -22,14 +18,14 @@ EOF
 install -d "${ROOTFS_DIR}/etc/rauc"
 install -m 644 files/rauc/system.conf "${ROOTFS_DIR}/etc/rauc/system.conf"
 
-# Install RAUC verification certificate (will be added during build)
-if [ -f "${STAGE_WORK_DIR}/rauc-ca.cert.pem" ]; then
-    install -m 644 "${STAGE_WORK_DIR}/rauc-ca.cert.pem" "${ROOTFS_DIR}/etc/rauc/ca.cert.pem"
+# Install RAUC verification certificate (copied to stage dir by CI)
+if [ -f "${STAGE_DIR}/rauc-ca.cert.pem" ]; then
+    install -m 644 "${STAGE_DIR}/rauc-ca.cert.pem" "${ROOTFS_DIR}/etc/rauc/ca.cert.pem"
 fi
 
-# Install RAUC custom bootloader backend (copied to work dir by CI)
+# Install RAUC custom bootloader backend (copied to stage dir by CI)
 install -d "${ROOTFS_DIR}/usr/lib/rauc/backend"
-install -m 755 "${STAGE_WORK_DIR}/raspberrypi-firmware-backend" "${ROOTFS_DIR}/usr/lib/rauc/backend/raspberrypi-firmware"
+install -m 755 "${STAGE_DIR}/raspberrypi-firmware-backend" "${ROOTFS_DIR}/usr/lib/rauc/backend/raspberrypi-firmware"
 
 # Copy boot configuration files
 install -m 644 files/boot/config.txt "${ROOTFS_DIR}/boot/firmware/config.txt"

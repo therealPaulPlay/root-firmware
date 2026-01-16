@@ -68,11 +68,12 @@ jobs:
 
       - name: Prepare pi-gen stage
         run: |
-          mkdir -p build/pi-gen/stage-root-observer/work
-          cp ./firmware-artifact/root-firmware build/pi-gen/stage-root-observer/work/
-          echo "${{ secrets.RAUC_CA_CERT }}" > build/pi-gen/stage-root-observer/work/rauc-ca.cert.pem
-          cp build/onnx-precompiled/libonnxruntime.so.1.23.2 build/pi-gen/stage-root-observer/work/
-          cp build/rauc/raspberrypi-firmware-backend build/pi-gen/stage-root-observer/work/
+          # Place files directly in stage directory - pi-gen will copy these
+          # and they'll be accessible via the stage directory path in scripts
+          cp ./firmware-artifact/root-firmware build/pi-gen/stage-root-observer/
+          echo "${{ secrets.RAUC_CA_CERT }}" > build/pi-gen/stage-root-observer/rauc-ca.cert.pem
+          cp build/onnx-precompiled/libonnxruntime.so.1.23.2 build/pi-gen/stage-root-observer/
+          cp build/rauc/raspberrypi-firmware-backend build/pi-gen/stage-root-observer/
 
       - name: Build image with pi-gen
         uses: usimd/pi-gen-action@v1
