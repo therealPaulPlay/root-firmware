@@ -52,8 +52,8 @@ jobs:
           path: root-firmware
           retention-days: 1
 
-  build-full-image:
-    name: Build Full SD Card Image
+  build-image-and-bundle:
+    name: Build Image and RAUC Bundle
     runs-on: ubuntu-latest
     needs: build-firmware
     steps:
@@ -68,12 +68,11 @@ jobs:
 
       - name: Prepare pi-gen stage
         run: |
-          # Create work directory for pi-gen stage
           mkdir -p build/pi-gen/stage-root-observer/work
           cp ./firmware-artifact/root-firmware build/pi-gen/stage-root-observer/work/
-
-          # Write CA certificate for RAUC verification
           echo "${{ secrets.RAUC_CA_CERT }}" > build/pi-gen/stage-root-observer/work/rauc-ca.cert.pem
+          cp build/onnx-precompiled/libonnxruntime.so.1.23.2 build/pi-gen/stage-root-observer/work/
+          cp build/rauc/raspberrypi-firmware-backend build/pi-gen/stage-root-observer/work/
 
       - name: Build image with pi-gen
         uses: usimd/pi-gen-action@v1
@@ -86,12 +85,14 @@ jobs:
           username: observer
           enable-ssh: 1
           compression: none
+          locale: en_US.UTF-8
+          setfcap: 0
           verbose-output: true
 
-      - name: Install dependencies for repartitioning
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y parted kpartx dosfstools e2fsprogs
+          sudo apt-get install -y parted kpartx dosfstools e2fsprogs rauc squashfs-tools
 
       - name: Repartition image for A/B layout
         run: |
@@ -101,64 +102,24 @@ jobs:
           echo "Input image: $INPUT_IMG"
           ls -la "$INPUT_IMG"
 
-          # Run repartition script
           sudo ./build/scripts/repartition-image.sh "$INPUT_IMG" "root-observer-${VERSION}.img"
 
-          # Compress the final image
-          gzip -9 "root-observer-${VERSION}.img"
-
-          ls -la "root-observer-${VERSION}.img.gz"
-
-      - name: Upload full image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-image
-          path: root-observer-*.img.gz
-          retention-days: 1
-
-  build-rauc-bundle:
-    name: Build RAUC Update Bundle
-    runs-on: ubuntu-latest
-    needs: [build-firmware, build-full-image]
-    outputs:
-      sha256: ${{ steps.bundle-hash.outputs.sha256 }}
-      size: ${{ steps.bundle-hash.outputs.size }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rauc squashfs-tools parted
-
-      - name: Download full image
-        uses: actions/download-artifact@v4
-        with:
-          name: full-image
-          path: ./
-
-      - name: Extract rootfs from image
+      - name: Extract rootfs and create RAUC bundle
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
-          IMG_FILE="root-observer-${VERSION}.img.gz"
 
-          echo "Extracting image..."
-          gunzip "$IMG_FILE"
-
-          echo "Extracting rootfs partition..."
+          # Extract rootfs partition (partition 2) before compressing the full image
           sudo ./build/scripts/extract-rootfs.sh "root-observer-${VERSION}.img" rootfs.img 2
 
-      - name: Write signing credentials
-        run: |
+          # Compress the full image
+          gzip -9 "root-observer-${VERSION}.img"
+
+          # Write signing credentials
           echo "${{ secrets.RAUC_SIGNING_KEY }}" > signing.key.pem
           echo "${{ secrets.RAUC_SIGNING_CERT }}" > signing.cert.pem
           chmod 600 signing.key.pem
 
-      - name: Create signed RAUC bundle
-        run: |
-          VERSION="${{ needs.build-firmware.outputs.version }}"
-
+          # Create signed RAUC bundle
           ./build/scripts/build-bundle.sh \
             rootfs.img \
             "$VERSION" \
@@ -166,11 +127,10 @@ jobs:
             signing.cert.pem \
             "root-observer-update-${VERSION}.raucb"
 
-      - name: Clean up signing credentials
-        if: always()
-        run: rm -f signing.key.pem signing.cert.pem
+          # Clean up
+          rm -f signing.key.pem signing.cert.pem rootfs.img
 
-      - name: Calculate bundle hash
+      - name: Calculate bundle hash and create metadata
         id: bundle-hash
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
@@ -182,47 +142,30 @@ jobs:
           echo "sha256=${SHA256}" >> $GITHUB_OUTPUT
           echo "size=${SIZE}" >> $GITHUB_OUTPUT
 
-          echo "Bundle: $BUNDLE"
-          echo "SHA256: $SHA256"
-          echo "Size: $SIZE bytes"
+          echo "Bundle: $BUNDLE (SHA256: $SHA256, Size: $SIZE bytes)"
 
-      - name: Upload bundle artifact
+          printf '{\n  "version": "%s",\n  "sha256": "%s",\n  "size": %s,\n  "filename": "root-observer-update-%s.raucb",\n  "compatible": "root-observer",\n  "releasedAt": "%s"\n}\n' \
+            "$VERSION" "$SHA256" "$SIZE" "$VERSION" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > latest.json
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rauc-bundle
-          path: root-observer-update-*.raucb
-          retention-days: 1
-
-      - name: Create metadata file
-        run: |
-          VERSION="${{ needs.build-firmware.outputs.version }}"
-          cat > latest.json << EOF
-          {
-            "version": "${VERSION}",
-            "sha256": "${{ steps.bundle-hash.outputs.sha256 }}",
-            "size": ${{ steps.bundle-hash.outputs.size }},
-            "filename": "root-observer-update-${VERSION}.raucb",
-            "compatible": "root-observer",
-            "releasedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          }
-          EOF
-          cat latest.json
-
-      - name: Upload metadata artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bundle-metadata
-          path: latest.json
+          name: release-artifacts
+          path: |
+            root-observer-*.img.gz
+            root-observer-update-*.raucb
+            latest.json
           retention-days: 1
 
   upload-to-s3:
     name: Upload to S3
     runs-on: ubuntu-latest
-    needs: [build-firmware, build-full-image, build-rauc-bundle]
+    needs: [build-firmware, build-image-and-bundle]
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
+          name: release-artifacts
           path: ./artifacts
 
       - name: List artifacts
@@ -247,34 +190,24 @@ jobs:
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
-          echo "Cleaning old images..."
-          aws s3 rm "s3://${S3_BUCKET}/rootprivacy/images/" \
-            --endpoint-url "$S3_ENDPOINT" \
-            --recursive
-
-          echo "Cleaning old updates..."
-          aws s3 rm "s3://${S3_BUCKET}/rootprivacy/updates/" \
-            --endpoint-url "$S3_ENDPOINT" \
-            --recursive
+          echo "Cleaning old files..."
+          aws s3 rm "s3://${S3_BUCKET}/rootprivacy/images/" --endpoint-url "$S3_ENDPOINT" --recursive
+          aws s3 rm "s3://${S3_BUCKET}/rootprivacy/updates/" --endpoint-url "$S3_ENDPOINT" --recursive
 
           echo "Uploading full image..."
-          aws s3 cp "artifacts/full-image/root-observer-${VERSION}.img.gz" \
+          aws s3 cp "artifacts/root-observer-${VERSION}.img.gz" \
             "s3://${S3_BUCKET}/rootprivacy/images/root-observer-${VERSION}.img.gz" \
-            --endpoint-url "$S3_ENDPOINT" \
-            --acl public-read
+            --endpoint-url "$S3_ENDPOINT" --acl public-read
 
           echo "Uploading RAUC bundle..."
-          aws s3 cp "artifacts/rauc-bundle/root-observer-update-${VERSION}.raucb" \
+          aws s3 cp "artifacts/root-observer-update-${VERSION}.raucb" \
             "s3://${S3_BUCKET}/rootprivacy/updates/root-observer-update-${VERSION}.raucb" \
-            --endpoint-url "$S3_ENDPOINT" \
-            --acl public-read
+            --endpoint-url "$S3_ENDPOINT" --acl public-read
 
-          echo "Uploading latest.json metadata..."
-          aws s3 cp "artifacts/bundle-metadata/latest.json" \
+          echo "Uploading latest.json..."
+          aws s3 cp "artifacts/latest.json" \
             "s3://${S3_BUCKET}/rootprivacy/updates/latest.json" \
-            --endpoint-url "$S3_ENDPOINT" \
-            --acl public-read \
-            --content-type "application/json"
+            --endpoint-url "$S3_ENDPOINT" --acl public-read --content-type "application/json"
 
           echo "Upload complete!"
 
@@ -282,5 +215,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/full-image/*.img.gz
-            artifacts/rauc-bundle/*.raucb
+            artifacts/*.img.gz
+            artifacts/*.raucb
