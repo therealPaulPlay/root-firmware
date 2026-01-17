@@ -154,7 +154,7 @@ func readMP4Box(r io.Reader) ([]byte, error) {
 		return nil, io.ErrUnexpectedEOF
 	}
 	if size > 10*1024*1024 {
-		return nil, fmt.Errorf("invalid MP4 box size: %d bytes", size)
+		return nil, fmt.Errorf("MP4 box size exceeds safety limit: %d bytes", size)
 	}
 
 	boxData := make([]byte, size)

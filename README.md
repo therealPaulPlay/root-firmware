@@ -1,3 +1,5 @@
+![ROOT logo](logo.svg)
+
 # ROOT (Firmware)
 
 Firmware for ROOT camera devices. Written in Go with a focus on privacy, security, and observability.
@@ -6,13 +8,13 @@ Firmware for ROOT camera devices. Written in Go with a focus on privacy, securit
 
 This firmware turns a Raspberry Pi into a private home security camera. It utilizes end-2-end encryption with forward secrecy and connects to a [relay server](https://github.com/therealPaulPlay/root-relay) to communicate with the [web and mobile app](https://github.com/therealPaulPlay/root-site).
 
-The relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. 
+The relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. This allows for remotely accessing cameras in a secure and convenient way.
 
 In the ROOT Connect web or mobile app, you can connect to paired cameras, view recorded events, logs, and health metrics. Adjust settings like microphone, event recording preferences, and stream video and audio with low latency.
 
 ## Contributing
 
-Contributions are welcome. For inquiries, please reach out via [email](mailto:paulplaystudio@gmail.com) or Bluesky (@paulplay.bsky.social).
+Contributions are welcome. For inquiries, please reach out via [email](mailto:paulplaystudio@gmail.com).
 
 ## Tested Raspberry Pi models
 
@@ -26,7 +28,7 @@ To build the firmware with a specific version:
 go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root-firmware cmd/main.go
 ```
 
-The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`. If you want to cross-compile (e.g. build on a Mac or Windows computer for the Pi), you need to prepend `GOOS=linux GOARCH=arm GOARM=7` to the commmand. However, building on the Pi itself via the deploy script is fast and recommended.
+The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`. If you want to cross-compile for the Pi, you need to prepend `GOOS=linux GOARCH=arm GOARM=7` to the commmand.
 
 ## Deploying to the Pi
 
@@ -50,7 +52,7 @@ Using an SSH key for development instead of an SSH password is significantly mor
 
 ## Installing the ONNX runtime on the Pi
 
-Since the camera hardware is slow compared to modern computers, compiling inside a docker container on a fast machine is recommended over compiling on the single-board computer itself.
+Compiling inside a docker container on a fast machine is recommended over compiling on the single-board computer itself.
 
 ### 1. Compile the ONNX runtime
 
@@ -77,11 +79,9 @@ echo "Build complete! Files in ./onnx-output/"
 '
 ```
 
-This creates two files: `libonnxruntime.so.X.X.X` (the actual library) and `libonnxruntime.so` (a symlink to the versioned file).
-
 ### 2. Install the runtime on the Pi
 
-Copy both library files to the Pi and set up the linker:
+Copy all output files to the Pi and set up the linker:
 
 ```bash
 # Copy both library files to Pi
@@ -100,11 +100,11 @@ This installs both files to `/usr/local/lib`, creates the required `onnxruntime.
 
 ### Config
 
-All configuration values are stored in a config `JSON` file in the `/data`/ partition.
+All configuration values are stored in a config `JSON` file in the `/data` partition.
 
 ### Devices
 
-The `devices` package is for managing paired devices.
+This package is used for managing paired devices.
 
 ### Encryption
 
@@ -132,7 +132,7 @@ Handles recording video and audio via the camera and microphone components. Came
 
 ### Relaycomm
 
-Communication with the device the firmware runs on happens via a relay. In the `relaycomm` package, the WebSocket connection is being handled.
+Communication with the product the firmware runs on happens via a relay server (using WebSockets).
 
 ### SFX
 
