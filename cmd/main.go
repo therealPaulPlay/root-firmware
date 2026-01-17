@@ -73,6 +73,9 @@ func main() {
 		log.Fatalf("Failed to initialize pairing: %v", err)
 	}
 
+	// Mark initialization complete for boot confirmation tracking
+	updater.MarkInitComplete()
+
 	// Register relay handlers and start connection (if relay domain configured)
 	relaycomm.RegisterHandlers()
 

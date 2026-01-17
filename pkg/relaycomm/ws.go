@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"root-firmware/pkg/config"
+	"root-firmware/pkg/updater"
 
 	"github.com/gorilla/websocket"
 )
@@ -213,6 +214,10 @@ func (r *RelayComm) connect(relayDomain string) error {
 	r.connMu.Lock()
 	r.conn = conn
 	r.connMu.Unlock()
+
+	// Signal successful relay connection for boot confirmation tracking
+	updater.MarkRelayConnected()
+
 	return nil
 }
 

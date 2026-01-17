@@ -49,7 +49,6 @@ type Updater struct {
 	downloadURL      string
 	downloadSHA256   string
 	errorMsg         string
-	slotMarkedGood   bool
 }
 
 var instance *Updater
@@ -73,7 +72,6 @@ func (u *Updater) GetStatus() (UpdateStatus, string, string) {
 }
 
 // CheckForUpdates queries the relay server for available firmware updates.
-// On successful relay connection, marks the current slot as good (safe to commit).
 func (u *Updater) CheckForUpdates() {
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
@@ -116,21 +114,7 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
-	// Successfully reached relay server - mark slot as good if not already done
-	// This ensures we only commit to a firmware version that can receive future updates
 	u.mu.Lock()
-	if !u.slotMarkedGood {
-		u.mu.Unlock()
-		if err := confirmSuccessfulBoot(); err != nil {
-			log.Printf("Updater: Failed to mark slot as good: %v", err)
-		} else {
-			u.mu.Lock()
-			u.slotMarkedGood = true
-			u.mu.Unlock()
-		}
-		u.mu.Lock()
-	}
-
 	if info.Version != globals.FirmwareVersion {
 		u.status = StatusUpdateAvailable
 		u.availableVersion = info.Version
@@ -142,6 +126,9 @@ func (u *Updater) CheckForUpdates() {
 		u.errorMsg = ""
 	}
 	u.mu.Unlock()
+
+	// Signal successful update check for boot confirmation tracking
+	markUpdateCheckSuccessful()
 }
 
 // StartUpdate downloads and installs the available update via RAUC.
@@ -156,6 +143,9 @@ func (u *Updater) StartUpdate() error {
 	log.Printf("Updater: Starting RAUC update to version %s", u.availableVersion)
 	u.status = StatusDownloading
 	u.mu.Unlock()
+
+	// Remove any stale bundle from previous interrupted update
+	os.Remove(raucBundlePath)
 
 	// Download RAUC bundle
 	if err := u.downloadFile(downloadURL, raucBundlePath, expectedSHA256); err != nil {
@@ -255,30 +245,5 @@ func (u *Updater) setError(msg string) {
 	defer u.mu.Unlock()
 	u.status = StatusError
 	u.errorMsg = msg
-	log.Printf("Updater: Error - %s", msg)
-}
-
-// GetRAUCStatus returns the current RAUC slot status as JSON.
-func GetRAUCStatus() (string, error) {
-	cmd := exec.Command("rauc", "status", "--output-format=json")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get RAUC status: %w", err)
-	}
-	return string(output), nil
-}
-
-// confirmSuccessfulBoot marks the current RAUC slot as good.
-// This should be called after confirming the firmware is working correctly
-// (e.g., after successfully connecting to the relay server).
-// Until this is called, RAUC may automatically rollback to the previous slot on reboot.
-func confirmSuccessfulBoot() error {
-	cmd := exec.Command("sudo", "rauc", "status", "mark-good", "booted")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to mark slot as good: %w (output: %s)", err, string(output))
-	}
-
-	log.Println("Updater: Boot confirmed successfully via RAUC")
-	return nil
+	log.Printf("Updater: Error %s", msg)
 }
