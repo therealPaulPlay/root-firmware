@@ -1,7 +1,3 @@
-# Security
-
-ROOT provides end-to-end encryption between the camera and paired devices. The relay server cannot decrypt any transmitted data.
-
 ## Encryption
 
 **Key exchange**: ECDH using the P-256 curve. Shared secrets are derived via HKDF-SHA256.
