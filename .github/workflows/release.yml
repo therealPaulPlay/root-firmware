@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 env:
   GO_VERSION: '1.23'
 
@@ -217,9 +220,7 @@ jobs:
 
           echo "Upload complete!"
 
-      - name: Update GitHub release assets
+      - name: Update GitHub release with metadata
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/*.img.gz
-            artifacts/*.raucb
+          files: artifacts/latest.json
