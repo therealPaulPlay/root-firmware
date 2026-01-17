@@ -26,7 +26,7 @@ The QR verification step ensures a human is physically present and in control of
 
 Multiple devices can pair with a single camera. Each paired device has its own public key stored on the camera.
 
-## Post-pairing BLE communication
+### Post-pairing BLE communication
 
 Sensitive BLE operations (WiFi credentials, relay server configuration) are encrypted using the established shared secret. The paired device sends its device ID and an encrypted payload; the camera decrypts using the corresponding shared secret.
 
