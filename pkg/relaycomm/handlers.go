@@ -1,7 +1,6 @@
 package relaycomm
 
 import (
-	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -771,41 +770,33 @@ func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
-	SendEncryptedSuccess(ctx, MsgRestart, nil)
+	// Prevent restart while update is in progress
+	status, _, _ := updater.Get().GetStatus()
+	if status == updater.StatusDownloading || status == updater.StatusInstalling {
+		SendEncryptedError(ctx, MsgRestart, ErrInternalError, "cannot restart while update is in progress")
+		return
+	}
 
-	// Reboot the system
+	SendEncryptedSuccess(ctx, MsgRestart, nil)
 	go func() {
+		time.Sleep(500 * time.Millisecond)
 		exec.Command("sudo", "reboot").Run()
 	}()
 }
 
 func handleReset(ctx *HandlerContext, payload json.RawMessage) {
-	SendEncryptedSuccess(ctx, MsgReset, nil)
+	// Prevent reset while update is in progress
+	status, _, _ := updater.Get().GetStatus()
+	if status == updater.StatusDownloading || status == updater.StatusInstalling {
+		SendEncryptedError(ctx, MsgReset, ErrInternalError, "cannot reset while update is in progress")
+		return
+	}
 
+	SendEncryptedSuccess(ctx, MsgReset, nil)
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-
-		// Find data partition device from /proc/mounts
-		var partition string
-		if file, err := os.Open("/proc/mounts"); err == nil {
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				fields := strings.Fields(scanner.Text())
-				if len(fields) >= 2 && fields[1] == globals.DataDir {
-					partition = fields[0]
-					break
-				}
-			}
-			file.Close()
-		}
-
-		if partition != "" {
-			exec.Command("umount", globals.DataDir).Run()
-			exec.Command("mkfs.ext4", "-F", partition).Run()
-			exec.Command("sudo", "reboot").Run()
-		} else {
-			log.Printf("Failed to find data partition for reset")
-		}
+		exec.Command("rm", "-rf", globals.DataDir+"/*").Run()
+		exec.Command("sudo", "reboot").Run()
 	}()
 }
 
