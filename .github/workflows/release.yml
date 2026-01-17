@@ -29,18 +29,17 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
-      - name: Install ARM cross-compiler
+      - name: Install ARM64 cross-compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Build for ARM (Pi Zero 2W)
+      - name: Build for ARM64 (Pi Zero 2W)
         env:
-          CC: arm-linux-gnueabihf-gcc
+          CC: aarch64-linux-gnu-gcc
           CGO_ENABLED: 1
           GOOS: linux
-          GOARCH: arm
-          GOARM: 7
+          GOARCH: arm64
           CGO_LDFLAGS: "-L${{ github.workspace }}/build/onnx-precompiled"
         run: |
           go build \
@@ -84,10 +83,10 @@ jobs:
         with:
           image-name: root-observer-${{ needs.build-firmware.outputs.version }}
           stage-list: 'stage0 stage1 stage2 ./build/pi-gen/stage-root-observer'
+          pi-gen-version: arm64
           release: trixie
           hostname: ROOT-Observer
           username: observer
-          enable-ssh: 1
           compression: none
           locale: en_US.UTF-8
           verbose-output: true

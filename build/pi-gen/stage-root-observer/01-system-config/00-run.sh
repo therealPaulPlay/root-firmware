@@ -39,11 +39,21 @@ install -m 644 files/systemd/data-partition-expand.service "${ROOTFS_DIR}/etc/sy
 install -d "${ROOTFS_DIR}/usr/lib/root-firmware"
 install -m 755 files/systemd/expand-data-partition.sh "${ROOTFS_DIR}/usr/lib/root-firmware/"
 
-# Enable services
+# Enable services and disable swap
 on_chroot << EOF
 systemctl enable root-firmware.service
 systemctl enable data-partition-expand.service
+systemctl disable dphys-swapfile.service || true
+systemctl mask dphys-swapfile.service || true
 EOF
+
+# Configure journald for volatile storage
+install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
+cat > "${ROOTFS_DIR}/etc/systemd/journald.conf.d/volatile.conf" << 'JOURNALD'
+[Journal]
+Storage=volatile
+RuntimeMaxUse=16M
+JOURNALD
 
 # Create observer user
 on_chroot << EOF
@@ -55,9 +65,12 @@ EOF
 # Create data directory mount point
 install -d "${ROOTFS_DIR}/data"
 
-# Add fstab entry for data partition (partition 4)
+# Add fstab entries - tmpfs for volatile paths
 cat >> "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
-/dev/mmcblk0p4  /data  ext4  defaults,noatime,data=ordered  0  2
+/dev/mmcblk0p4  /data       ext4    defaults,noatime    0  2
+tmpfs           /tmp        tmpfs   nosuid,nodev        0  0
+tmpfs           /run        tmpfs   nosuid,nodev        0  0
+tmpfs           /var/tmp    tmpfs   nosuid,nodev        0  0
 FSTAB
 
 # Set hostname
@@ -72,3 +85,10 @@ cat > "${ROOTFS_DIR}/etc/hosts" << 'HOSTS'
 ff02::1         ip6-allnodes
 ff02::2         ip6-allrouters
 HOSTS
+
+# Configure uncomplicated firewall
+on_chroot << EOF
+ufw default deny incoming
+ufw default allow outgoing
+ufw --force enable
+EOF

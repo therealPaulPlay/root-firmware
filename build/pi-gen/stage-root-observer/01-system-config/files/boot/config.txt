@@ -1,8 +1,9 @@
 # ROOT Observer boot configuration
 
+# Enable 64-bit mode
+arm_64bit=1
+
 # Enable camera
-start_x=1
-gpu_mem=128
 camera_auto_detect=1
 
 # Enable I2C
@@ -16,8 +17,3 @@ enable_uart=1
 
 # Audio
 dtparam=audio=on
-
-# Try boot support for A/B updates
-# The tryboot mechanism allows safe rollback
-[all]
-os_prefix=

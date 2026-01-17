@@ -1,7 +1,7 @@
 [Unit]
 Description=ROOT Firmware
-After=network.target bluetooth.target data-partition.mount
-Wants=data-partition.mount
+After=network.target bluetooth.target data.mount
+Wants=data.mount
 
 [Service]
 User=root

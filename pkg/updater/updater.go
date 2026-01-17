@@ -21,7 +21,7 @@ const (
 	firmwareEndpoint   = "/firmware/observer"
 	updateCheckTimeout = 10 * time.Second
 	downloadTimeout    = 30 * time.Minute
-	raucBundlePath     = "/tmp/update.raucb"
+	raucBundlePath     = "/data/.update.raucb"
 )
 
 type UpdateStatus string
@@ -215,8 +215,9 @@ func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	// Download to temp file first
-	tmp, err := os.CreateTemp("", "rauc-bundle-*.raucb")
+	// Download to temp file on /data
+	// Any of the /tmp directories can't be used since we utilize tmpfs and they exceed the memory size
+	tmp, err := os.CreateTemp("/data", ".rauc-bundle-*.raucb")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}

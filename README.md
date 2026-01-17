@@ -28,7 +28,7 @@ To build the firmware with a specific version:
 go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root-firmware cmd/main.go
 ```
 
-The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`. If you want to cross-compile for the Pi, you need to prepend `GOOS=linux GOARCH=arm GOARM=7` to the commmand.
+The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`. If you want to cross-compile for the Pi (64-bit), you need to prepend `GOOS=linux GOARCH=arm64` to the command.
 
 ## Deploying to the Pi
 
