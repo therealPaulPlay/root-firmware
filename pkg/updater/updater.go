@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	firmwareEndpoint   = "/firmware/observer"
+	firmwareEndpoint   = "/firmware/observer/update"
 	updateCheckTimeout = 10 * time.Second
 	downloadTimeout    = 30 * time.Minute
 	raucBundlePath     = "/data/.update.raucb"
