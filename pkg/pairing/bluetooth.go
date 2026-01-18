@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"strings"
 	"sync"
 
 	"github.com/go-ble/ble"
@@ -369,7 +370,15 @@ func initBLE() error {
 			return
 		}
 
-		if err := config.Get().SetKey("relayDomain", relayReq.RelayDomain); err != nil {
+		// Validate relay domain (no protocol, no spaces, must have a dot)
+		domain := strings.TrimSpace(relayReq.RelayDomain)
+		if domain == "" || strings.Contains(domain, "://") || strings.Contains(domain, " ") || !strings.Contains(domain, ".") {
+			log.Printf("BLE: Invalid relay domain: %s", domain)
+			relayStatus = operationStatus{completed: true, success: false, error: "Invalid relay domain"}
+			return
+		}
+
+		if err := config.Get().SetKey("relayDomain", domain); err != nil {
 			log.Printf("BLE: Failed to save relay config: %v", err)
 			relayStatus = operationStatus{completed: true, success: false, error: err.Error()}
 			return
