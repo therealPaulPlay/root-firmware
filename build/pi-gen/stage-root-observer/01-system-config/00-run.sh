@@ -39,12 +39,20 @@ install -m 644 files/systemd/data-partition-expand.service "${ROOTFS_DIR}/etc/sy
 install -d "${ROOTFS_DIR}/usr/lib/root-firmware"
 install -m 755 files/systemd/expand-data-partition.sh "${ROOTFS_DIR}/usr/lib/root-firmware/"
 
-# Enable services and disable swap
+# Enable services
 on_chroot << EOF
 systemctl enable root-firmware.service
 systemctl enable data-partition-expand.service
+EOF
+
+# Disable unwanted services
+on_chroot << EOF
 systemctl disable dphys-swapfile.service || true
 systemctl mask dphys-swapfile.service || true
+systemctl disable avahi-daemon.service || true
+systemctl disable avahi-daemon.socket || true
+systemctl mask avahi-daemon.service || true
+systemctl mask avahi-daemon.socket || true
 EOF
 
 # Configure journald for volatile storage
@@ -86,9 +94,3 @@ ff02::1         ip6-allnodes
 ff02::2         ip6-allrouters
 HOSTS
 
-# Configure uncomplicated firewall
-on_chroot << EOF
-ufw default deny incoming
-ufw default allow outgoing
-ufw --force enable
-EOF
