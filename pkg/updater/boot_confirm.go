@@ -48,11 +48,10 @@ func tryMarkSlotGood() {
 	if slotMarkedGood || !initComplete || !relayConnected || !updateCheckSuccess {
 		return
 	}
-	slotMarkedGood = true
+	slotMarkedGood = true // Set true even if command execution fails, since executing the command again won't magically work
 
 	if err := confirmSuccessfulBoot(); err != nil {
 		log.Printf("Updater: Failed to mark slot as good: %v", err)
-		slotMarkedGood = false
 	}
 }
 

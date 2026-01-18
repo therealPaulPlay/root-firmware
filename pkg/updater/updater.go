@@ -114,6 +114,7 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
+	// Available version must ONLY be set if an update is available
 	u.mu.Lock()
 	if info.Version != globals.FirmwareVersion {
 		u.status = StatusUpdateAvailable

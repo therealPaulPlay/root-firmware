@@ -54,6 +54,7 @@ const (
 	MsgSetEventDetectionEnabled = "setEventDetectionEnabled"
 	MsgSetEventDetectionTypes   = "setEventDetectionTypes"
 	MsgSetProductAlias          = "setProductAlias"
+	MsgGetUpdateStatus          = "getUpdateStatus"
 )
 
 // Error code constants
@@ -301,6 +302,7 @@ func RegisterHandlers() {
 	relay.On(MsgStartUpdate, useEncryption(MsgStartUpdate, handleStartUpdate))
 	relay.On(MsgRestart, useEncryption(MsgRestart, handleRestart))
 	relay.On(MsgReset, useEncryption(MsgReset, handleReset))
+	relay.On(MsgGetUpdateStatus, useEncryption(MsgGetUpdateStatus, handleGetUpdateStatus))
 
 	// Start the connection
 	if err := relay.Start(); err != nil {
@@ -713,18 +715,6 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 			}
 		}
 
-		// Get update status
-		updateStatus, availableVersion, updateError := updater.Get().GetStatus()
-		updateInfo := map[string]any{
-			"status": string(updateStatus),
-		}
-		if availableVersion != "" {
-			updateInfo["availableVersion"] = availableVersion
-		}
-		if updateError != "" {
-			updateInfo["error"] = updateError
-		}
-
 		health := map[string]any{
 			"battery": map[string]any{
 				"percent":   0,
@@ -734,11 +724,9 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 				"connected": wifi.Get().IsConnected(),
 				"ssid":      wifi.Get().GetCurrentNetwork(),
 			},
-			"firmwareVersion": globals.FirmwareVersion,
-			"update":          updateInfo,
-			"relayDomain":     relayDomain,
-			"logs":            logger.GetLogs(),
-			"performance":     performance,
+			"relayDomain": relayDomain,
+			"logs":        logger.GetLogs(),
+			"performance": performance,
 		}
 
 		SendEncryptedSuccess(ctx, MsgGetHealth, health)
@@ -767,6 +755,22 @@ func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	SendEncryptedSuccess(ctx, MsgStartUpdate, nil)
+}
+
+func handleGetUpdateStatus(ctx *HandlerContext, payload json.RawMessage) {
+	status, availableVersion, updateError := updater.Get().GetStatus()
+	result := map[string]any{
+		"status":          string(status),
+		"currentVersion":  globals.FirmwareVersion,
+	}
+	if availableVersion != "" {
+		result["availableVersion"] = availableVersion
+	}
+	if updateError != "" {
+		result["error"] = updateError
+	}
+
+	SendEncryptedSuccess(ctx, MsgGetUpdateStatus, result)
 }
 
 func handleRestart(ctx *HandlerContext, payload json.RawMessage) {

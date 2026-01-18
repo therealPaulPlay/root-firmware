@@ -79,7 +79,7 @@ func main() {
 	// Register relay handlers and start connection (if relay domain configured)
 	relaycomm.RegisterHandlers()
 
-	// Check for updates every 5 minutes
+	// Check for updates immediately and then every 5 minutes
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
