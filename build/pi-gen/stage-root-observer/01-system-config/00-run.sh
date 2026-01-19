@@ -55,6 +55,10 @@ systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
 EOF
 
+# Disable cloud-init
+install -d "${ROOTFS_DIR}/etc/cloud"
+touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"
+
 # Configure journald for volatile storage
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
 cat > "${ROOTFS_DIR}/etc/systemd/journald.conf.d/volatile.conf" << 'JOURNALD'
@@ -70,15 +74,22 @@ if ! id -u observer &>/dev/null; then
 fi
 EOF
 
+# TODO: Remove - Unlock root account for emergency console access (temporary for debugging)
+on_chroot << EOF
+usermod -U root
+echo 'root:root' | chpasswd
+EOF
+
 # Create data directory mount point
 install -d "${ROOTFS_DIR}/data"
 
-# Add fstab entries - tmpfs for volatile paths
-cat >> "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
-/dev/mmcblk0p4  /data       ext4    defaults,noatime    0  2
-tmpfs           /tmp        tmpfs   nosuid,nodev        0  0
-tmpfs           /run        tmpfs   nosuid,nodev        0  0
-tmpfs           /var/tmp    tmpfs   nosuid,nodev        0  0
+# Replace fstab with our custom partition layout
+cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
+/dev/mmcblk0p1  /boot/firmware  vfat    defaults            0  2
+/dev/mmcblk0p2  /               ext4    defaults,noatime    0  1
+/dev/mmcblk0p4  /data           ext4    defaults,noatime    0  2
+tmpfs           /tmp            tmpfs   nosuid,nodev        0  0
+tmpfs           /var/tmp        tmpfs   nosuid,nodev        0  0
 FSTAB
 
 # Set hostname
