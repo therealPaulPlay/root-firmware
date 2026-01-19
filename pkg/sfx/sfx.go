@@ -68,8 +68,6 @@ func (s *SFX) playTone(frequency int, duration time.Duration) {
 		s.pin.Out(gpio.Low)
 		time.Sleep(halfPeriod)
 	}
-
-	s.pin.Out(gpio.Low)
 }
 
 // PlayStartup plays a startup sound (three ascending tones like a boot-up sequence)
