@@ -22,6 +22,7 @@ log "Starting data partition expansion..."
 
 # Get the root device (e.g., /dev/mmcblk0)
 ROOT_DEV="/dev/mmcblk0"
+DATA_PART="${ROOT_DEV}p4"
 
 # Expand partition 4 to fill remaining space
 log "Expanding partition table..."
@@ -29,16 +30,11 @@ parted -s "$ROOT_DEV" resizepart 4 100%
 
 # Resize the data filesystem
 log "Resizing ext4 filesystem..."
-DATA_PART="${ROOT_DEV}p4"
 resize2fs "$DATA_PART"
 
-# Create data directory structure
-log "Creating data directory structure..."
-mkdir -p /data/.firmware-data
-mkdir -p /data/recordings
-mkdir -p /data/assets
-chown -R observer:observer /data
-
-# Mark expansion as complete
+# Mount temporarily to create marker file
+mount "$DATA_PART" /data
 touch "$MARKER_FILE"
+umount /data
+
 log "Data partition expansion complete"

@@ -7,6 +7,7 @@ install -d "${ROOTFS_DIR}/usr/local/lib"
 install -m 755 "${STAGE_DIR}/libonnxruntime.so.1.23.2" "${ROOTFS_DIR}/usr/local/lib/"
 ln -sf libonnxruntime.so.1.23.2 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so.1"
 ln -sf libonnxruntime.so.1 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so"
+ln -sf libonnxruntime.so "${ROOTFS_DIR}/usr/local/lib/onnxruntime.so"
 
 # Configure dynamic linker to find libraries in /usr/local/lib
 echo "/usr/local/lib" > "${ROOTFS_DIR}/etc/ld.so.conf.d/local.conf"
@@ -53,6 +54,10 @@ systemctl disable avahi-daemon.service || true
 systemctl disable avahi-daemon.socket || true
 systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
+systemctl disable userconfig.service || true
+systemctl mask userconfig.service || true
+systemctl disable keyboard-setup.service || true
+systemctl mask keyboard-setup.service || true
 EOF
 
 # Disable cloud-init
@@ -66,13 +71,6 @@ cat > "${ROOTFS_DIR}/etc/systemd/journald.conf.d/volatile.conf" << 'JOURNALD'
 Storage=volatile
 RuntimeMaxUse=16M
 JOURNALD
-
-# Create observer user
-on_chroot << EOF
-if ! id -u observer &>/dev/null; then
-    useradd -m -s /bin/bash observer
-fi
-EOF
 
 # TODO: Remove - Unlock root account for emergency console access (temporary for debugging)
 on_chroot << EOF
