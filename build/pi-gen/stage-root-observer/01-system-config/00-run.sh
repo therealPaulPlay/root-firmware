@@ -44,10 +44,9 @@ install -m 755 files/systemd/expand-data-partition.sh "${ROOTFS_DIR}/usr/lib/roo
 on_chroot << EOF
 systemctl enable root-firmware.service
 systemctl enable data-partition-expand.service
-systemctl enable wpa_supplicant@wlan0.service
 EOF
 
-# Disable unwanted services
+# Disable unwanted services (don't mask userconfig, other services depend on it)
 on_chroot << EOF
 systemctl disable dphys-swapfile.service || true
 systemctl mask dphys-swapfile.service || true
@@ -56,18 +55,11 @@ systemctl disable avahi-daemon.socket || true
 systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
 systemctl disable userconfig.service || true
-systemctl mask userconfig.service || true
 EOF
 
 # Disable cloud-init
 install -d "${ROOTFS_DIR}/etc/cloud"
 touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"
-
-# Configure wpa_supplicant for dynamic WiFi configuration via wpa_cli
-cat > "${ROOTFS_DIR}/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" << 'WPA'
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-WPA
 
 # Configure journald for volatile storage
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
