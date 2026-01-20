@@ -20,6 +20,12 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
@@ -27,11 +33,6 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 	}
 
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-
-	if err := os.Chmod(tmpPath, perm); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}

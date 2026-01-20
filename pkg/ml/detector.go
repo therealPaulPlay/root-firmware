@@ -159,6 +159,12 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	var scores []float32
 	var labels []int
 
+	// Track top scores per class for logging
+	topScores := make(map[int]float32)
+	for _, classID := range classesToCheck {
+		topScores[classID] = 0
+	}
+
 	// Multi-scale feature map strides
 	strides := []int{8, 16, 32}
 	anchorIdx := 0
@@ -185,6 +191,10 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 					if score > bestScore {
 						bestScore = score
 						bestClass = classID
+					}
+					// Track top score per class
+					if score > topScores[classID] {
+						topScores[classID] = score
 					}
 				}
 
@@ -216,6 +226,10 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 		}
 	}
 
+	// Log top scores per class
+	log.Printf("ML: top scores - person=%.4f car=%.4f cat=%.4f dog=%.4f | candidates=%d thresh=%.2f",
+		topScores[0], topScores[2], topScores[15], topScores[16], len(boxes), confThresh)
+
 	if len(boxes) == 0 {
 		return &Detection{EventType: "", Count: 0}
 	}
@@ -229,6 +243,9 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 
 	// Return event type of first kept detection
 	eventType := decodeLabel(labels[kept[0]])
+
+	// Log detection result
+	log.Printf("ML: detected %s (score=%.4f, count=%d after NMS)", eventType, scores[kept[0]], len(kept))
 
 	return &Detection{
 		EventType: eventType,

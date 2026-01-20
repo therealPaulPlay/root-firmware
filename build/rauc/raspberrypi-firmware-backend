@@ -64,8 +64,12 @@ set_cmdline_slot() {
             ;;
     esac
 
-    # Update cmdline.txt with new root partition
-    sed -i "s|root=/dev/mmcblk0p[23]|root=$new_root|" "$CMDLINE_FILE"
+    # Update cmdline.txt atomically (write to temp, sync, rename)
+    local tmp_file=$(mktemp "$BOOT_PARTITION/cmdline.XXXXXX")
+    sed "s|root=/dev/mmcblk0p[23]|root=$new_root|" "$CMDLINE_FILE" > "$tmp_file"
+    sync "$tmp_file"
+    mv "$tmp_file" "$CMDLINE_FILE"
+    sync "$BOOT_PARTITION"
 
     # Verify the change was applied
     local verify_root=$(grep -o 'root=/dev/[^ ]*' "$CMDLINE_FILE" | cut -d'=' -f2)

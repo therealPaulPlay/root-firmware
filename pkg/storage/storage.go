@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -48,9 +47,6 @@ func Init() error {
 	if err := os.MkdirAll(globals.RecordingsPath, 0755); err != nil {
 		return fmt.Errorf("failed to create recordings directory: %w", err)
 	}
-
-	// Run fsck on data partition (non-blocking, best effort)
-	exec.Command("fsck", "-p", globals.DataDir).Run()
 
 	// Create or recover event log
 	if err := recoverEventLog(); err != nil {

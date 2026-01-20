@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
 )
 
@@ -74,5 +75,5 @@ func load() []Entry {
 
 func save(logs []Entry) {
 	data, _ := json.Marshal(logs)
-	os.WriteFile(globals.LogsPath, data, 0644)
+	fsutil.AtomicWrite(globals.LogsPath, data, 0644)
 }
