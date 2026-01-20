@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 )
 
@@ -60,7 +61,7 @@ func confirmSuccessfulBoot() error {
 	cmd := exec.Command("sudo", "rauc", "status", "mark-good", "booted")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to mark slot as good: %w (output: %s)", err, string(output))
+		return fmt.Errorf("failed to mark slot as good: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 	log.Println("Updater: RAUC slot marked as good")
 	return nil

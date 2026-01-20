@@ -227,7 +227,7 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	}
 
 	// Log top scores per class
-	log.Printf("ML: top scores - person=%.4f car=%.4f cat=%.4f dog=%.4f | candidates=%d thresh=%.2f",
+	log.Printf("ML: Top scores - person=%.4f car=%.4f cat=%.4f dog=%.4f | candidates=%d thresh=%.2f",
 		topScores[0], topScores[2], topScores[15], topScores[16], len(boxes), confThresh)
 
 	if len(boxes) == 0 {
@@ -245,7 +245,7 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	eventType := decodeLabel(labels[kept[0]])
 
 	// Log detection result
-	log.Printf("ML: detected %s (score=%.4f, count=%d after NMS)", eventType, scores[kept[0]], len(kept))
+	log.Printf("ML: Detected %s (score=%.4f, count=%d after NMS)", eventType, scores[kept[0]], len(kept))
 
 	return &Detection{
 		EventType: eventType,
