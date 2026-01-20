@@ -31,6 +31,8 @@ var once sync.Once
 func Init() {
 	once.Do(func() {
 		instance = &WiFi{}
+		// Unblock WiFi (safety measure in case it's blocked)
+		exec.Command("rfkill", "unblock", "wifi").Run()
 		instance.detectCapabilities()
 		instance.applyStoredWiFiConfig()
 	})
@@ -47,10 +49,10 @@ func Get() *WiFi {
 func (w *WiFi) Scan() ([]Network, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	exec.Command("sudo", "iwlist", "wlan0", "scan").Run() // Trigger scan
+	exec.Command("iwlist", "wlan0", "scan").Run() // Trigger scan
 
 	// Read scan results
-	output, err := exec.Command("sudo", "iwlist", "wlan0", "scan").Output()
+	output, err := exec.Command("iwlist", "wlan0", "scan").Output()
 	if err != nil {
 		return nil, fmt.Errorf("scan failed: %w", err)
 	}
@@ -99,7 +101,7 @@ func (w *WiFi) setCountryCode(countryCode string) error {
 	}
 	countryCode = strings.ToUpper(countryCode)
 
-	if err := exec.Command("sudo", "iw", "reg", "set", countryCode).Run(); err != nil {
+	if err := exec.Command("iw", "reg", "set", countryCode).Run(); err != nil {
 		return fmt.Errorf("failed to set country code: %w", err)
 	}
 

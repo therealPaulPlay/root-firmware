@@ -784,7 +784,7 @@ func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
 	SendEncryptedSuccess(ctx, MsgRestart, nil)
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		exec.Command("sudo", "reboot").Run()
+		exec.Command("reboot").Run()
 	}()
 }
 
@@ -800,7 +800,7 @@ func handleReset(ctx *HandlerContext, payload json.RawMessage) {
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		exec.Command("rm", "-rf", globals.DataDir+"/*").Run()
-		exec.Command("sudo", "reboot").Run()
+		exec.Command("reboot").Run()
 	}()
 }
 

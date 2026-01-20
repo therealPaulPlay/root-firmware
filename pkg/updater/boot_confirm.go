@@ -58,7 +58,7 @@ func tryMarkSlotGood() {
 
 // confirmSuccessfulBoot marks the current RAUC slot as good.
 func confirmSuccessfulBoot() error {
-	cmd := exec.Command("sudo", "rauc", "status", "mark-good", "booted")
+	cmd := exec.Command("rauc", "status", "mark-good", "booted")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to mark slot as good: %w (output: %s)", err, strings.TrimSpace(string(output)))

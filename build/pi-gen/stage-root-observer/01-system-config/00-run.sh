@@ -46,7 +46,7 @@ systemctl enable root-firmware.service
 systemctl enable data-partition-expand.service
 EOF
 
-# Disable unwanted services (don't mask userconfig, other services depend on it)
+# Disable unwanted services
 on_chroot << EOF
 systemctl disable dphys-swapfile.service || true
 systemctl mask dphys-swapfile.service || true
@@ -54,7 +54,6 @@ systemctl disable avahi-daemon.service || true
 systemctl disable avahi-daemon.socket || true
 systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
-systemctl disable userconfig.service || true
 EOF
 
 # Disable cloud-init
@@ -68,12 +67,6 @@ cat > "${ROOTFS_DIR}/etc/systemd/journald.conf.d/volatile.conf" << 'JOURNALD'
 Storage=volatile
 RuntimeMaxUse=16M
 JOURNALD
-
-# TODO: Remove - Unlock root account for emergency console access (temporary for debugging)
-on_chroot << EOF
-usermod -U root
-echo 'root:root' | chpasswd
-EOF
 
 # Create data directory mount point
 install -d "${ROOTFS_DIR}/data"

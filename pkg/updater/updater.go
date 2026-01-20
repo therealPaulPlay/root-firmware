@@ -172,7 +172,7 @@ func (u *Updater) StartUpdate() error {
 
 	go func() {
 		time.Sleep(2 * time.Second)
-		if err := exec.Command("sudo", "reboot").Run(); err != nil {
+		if err := exec.Command("reboot").Run(); err != nil {
 			log.Printf("Updater: Failed to reboot: %v", err)
 		}
 	}()
@@ -184,7 +184,7 @@ func (u *Updater) StartUpdate() error {
 func (u *Updater) installWithRAUC() error {
 	log.Println("Updater: Installing update via RAUC...")
 
-	cmd := exec.Command("sudo", "rauc", "install", raucBundlePath)
+	cmd := exec.Command("rauc", "install", raucBundlePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("rauc install failed: %w (output: %s)", err, string(output))
