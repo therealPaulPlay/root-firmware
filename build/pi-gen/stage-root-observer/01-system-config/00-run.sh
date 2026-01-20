@@ -56,8 +56,6 @@ systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
 systemctl disable userconfig.service || true
 systemctl mask userconfig.service || true
-systemctl disable keyboard-setup.service || true
-systemctl mask keyboard-setup.service || true
 EOF
 
 # Disable cloud-init
