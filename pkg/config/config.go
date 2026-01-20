@@ -76,8 +76,8 @@ func (c *Config) createInitialConfig() error {
 	}
 
 	c.data = map[string]any{
-		"id":               id.String(),
-		"firmwareVersion": "1.0.0",
+		"id":            id.String(),
+		"bluetoothName": "ROOT-Observer-" + generateRandomSuffix(4),
 	}
 
 	return c.save()

@@ -87,14 +87,14 @@ func Init() error {
 }
 
 func initBLE() error {
-	// Get device name for advertising
-	deviceName := "ROOT-Observer"
-	if ssid, ok := config.Get().GetKey("apSSID"); ok {
-		deviceName = ssid.(string)
+	// Get bluetooth name from config
+	name, ok := config.Get().GetKey("bluetoothName")
+	if !ok {
+		return fmt.Errorf("bluetoothName not set in config")
 	}
 
-	// Create Linux BLE device with specified name
-	d, err := linux.NewDeviceWithName(deviceName)
+	// Create Linux BLE device with configured name
+	d, err := linux.NewDeviceWithName(name.(string))
 	if err != nil {
 		return fmt.Errorf("failed to create BLE device: %w", err)
 	}
@@ -410,13 +410,13 @@ func initBLE() error {
 
 	// Start advertising
 	ctx := context.Background()
-	log.Printf("BLE: Starting advertising as '%s' with service UUID %s", deviceName, serviceUUID)
+	log.Printf("BLE: Starting advertising as '%s' with service UUID %s", name.(string), serviceUUID)
 
 	go func() {
-		if err := ble.AdvertiseNameAndServices(ctx, deviceName, serviceUUID); err != nil {
+		if err := ble.AdvertiseNameAndServices(ctx, name.(string), serviceUUID); err != nil {
 			log.Printf("BLE: Advertising error: %v", err)
 		} else {
-			log.Printf("BLE: Advertising stopped normally")
+			log.Printf("BLE: Advertising stopped without error")
 		}
 	}()
 
