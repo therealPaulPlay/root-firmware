@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,15 +14,13 @@ import (
 )
 
 type Network struct {
-	SSID        string `json:"ssid"`
-	Signal      int    `json:"signal"` // 0-100
-	Secured     bool   `json:"secured"`
-	Unsupported bool   `json:"unsupported"` // 5GHz networks (The hardware doesn't support it)
+	SSID    string `json:"ssid"`
+	Signal  int    `json:"signal"` // 0-100
+	Secured bool   `json:"secured"`
 }
 
 type WiFi struct {
-	mu           sync.Mutex
-	supports5GHz bool
+	mu sync.Mutex
 }
 
 var instance *WiFi
@@ -32,8 +29,6 @@ var once sync.Once
 func Init() {
 	once.Do(func() {
 		instance = &WiFi{}
-		exec.Command("rfkill", "unblock", "wifi").Run()
-		instance.detectCapabilities()
 		instance.applyStoredWiFiConfig()
 	})
 }
@@ -183,25 +178,6 @@ func (w *WiFi) getActiveSSID() string {
 	return ""
 }
 
-func (w *WiFi) detectCapabilities() {
-	output, err := exec.Command("iw", "phy").Output()
-	if err != nil {
-		w.supports5GHz = false
-		return
-	}
-
-	freqRe := regexp.MustCompile(`(\d{4,5}) MHz`)
-	for _, match := range freqRe.FindAllStringSubmatch(string(output), -1) {
-		freq, _ := strconv.Atoi(match[1])
-		if freq >= 5000 {
-			w.supports5GHz = true
-			log.Println("WiFi: 5GHz supported")
-			return
-		}
-	}
-	w.supports5GHz = false
-}
-
 func (w *WiFi) parseNetworks(output string) []Network {
 	var networks []Network
 	seen := make(map[string]int)
@@ -218,7 +194,6 @@ func (w *WiFi) parseNetworks(output string) []Network {
 			continue
 		}
 
-		freq := parts[len(parts)-1]
 		security := parts[len(parts)-2]
 		signalStr := parts[len(parts)-3]
 		ssid := strings.Join(parts[:len(parts)-3], ":")
@@ -234,12 +209,6 @@ func (w *WiFi) parseNetworks(output string) []Network {
 		}
 
 		network.Secured = security != "" && security != "--"
-
-		// Mark 5GHz networks as unsupported if hardware doesn't support it
-		// nmcli terse output gives freq as plain number (e.g., "2437" or "5180")
-		if freqMHz, err := strconv.Atoi(strings.TrimSpace(freq)); err == nil {
-			network.Unsupported = freqMHz >= 5000 && !w.supports5GHz
-		}
 
 		if idx, exists := seen[network.SSID]; exists {
 			if network.Signal > networks[idx].Signal {

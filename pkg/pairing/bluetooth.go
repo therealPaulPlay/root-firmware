@@ -270,6 +270,10 @@ func initBLE() error {
 				writeError(rsp, err.Error())
 				return
 			}
+			if len(networks) == 0 {
+				writeError(rsp, "no WiFi networks found")
+				return
+			}
 			wifiNetworksCache = networks
 			log.Printf("BLE: Scanned %d WiFi networks", len(networks))
 		}

@@ -56,6 +56,15 @@ systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
 EOF
 
+# Configure NetworkManager to have WiFi radio enabled by default
+install -d "${ROOTFS_DIR}/var/lib/NetworkManager"
+cat > "${ROOTFS_DIR}/var/lib/NetworkManager/NetworkManager.state" << 'NMSTATE'
+[main]
+NetworkingEnabled=true
+WirelessEnabled=true
+WWANEnabled=true
+NMSTATE
+
 # Disable cloud-init
 install -d "${ROOTFS_DIR}/etc/cloud"
 touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"

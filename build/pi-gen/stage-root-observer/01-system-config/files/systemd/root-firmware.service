@@ -1,6 +1,6 @@
 [Unit]
 Description=ROOT Firmware
-After=network.target bluetooth.target data.mount
+After=network.target bluetooth.target data.mount NetworkManager.service
 Wants=data.mount
 
 [Service]
@@ -8,7 +8,9 @@ User=root
 SupplementaryGroups=video
 WorkingDirectory=/home/observer
 Environment="LD_LIBRARY_PATH=/usr/local/lib"
+ExecStartPre=/usr/sbin/rfkill unblock wifi
 ExecStartPre=/usr/sbin/rfkill unblock bluetooth
+ExecStartPre=/usr/bin/nmcli radio wifi on
 ExecStart=/home/observer/root-firmware
 Restart=always
 RestartSec=10
