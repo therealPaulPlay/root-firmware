@@ -16,8 +16,8 @@ const maxLogs = 1000
 const maxLogMsgSize = 500 // Max characters per log message
 
 type Entry struct {
-	Time string `json:"time"`
-	Msg  string `json:"msg"`
+	Timestamp time.Time `json:"timestamp"`
+	Msg       string    `json:"msg"`
 }
 
 type writer struct {
@@ -42,8 +42,8 @@ func (wr *writer) Write(p []byte) (int, error) {
 	}
 
 	wr.logs = append(wr.logs, Entry{
-		Time: time.Now().Format("15:04:05"),
-		Msg:  msg,
+		Timestamp: time.Now().UTC(),
+		Msg:       msg,
 	})
 
 	if len(wr.logs) > maxLogs {
