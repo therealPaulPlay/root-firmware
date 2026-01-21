@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,8 +147,13 @@ func (u *Updater) StartUpdate() error {
 	u.status = StatusDownloading
 	u.mu.Unlock()
 
-	// Remove any stale bundle from previous interrupted update
+	// Remove any stale files from previous interrupted updates
 	os.Remove(raucBundlePath)
+	if matches, err := filepath.Glob("/data/.rauc-bundle-*.raucb"); err == nil {
+		for _, f := range matches {
+			os.Remove(f)
+		}
+	}
 
 	// Download RAUC bundle
 	if err := u.downloadFile(downloadURL, raucBundlePath, expectedSHA256); err != nil {
@@ -187,10 +194,14 @@ func (u *Updater) installWithRAUC() error {
 	cmd := exec.Command("rauc", "install", raucBundlePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("rauc install failed: %w (output: %s)", err, string(output))
+		outputStr := strings.TrimSpace(string(output))
+		if strings.Contains(outputStr, "was not provided by any .service files") {
+			return fmt.Errorf("RAUC service not running (is rauc.service enabled?): %s", outputStr)
+		}
+		return fmt.Errorf("rauc install failed: %w (output: %s)", err, outputStr)
 	}
 
-	log.Printf("Updater: RAUC install completed: %s", string(output))
+	log.Printf("Updater: RAUC install completed: %s", strings.TrimSpace(string(output)))
 	return nil
 }
 

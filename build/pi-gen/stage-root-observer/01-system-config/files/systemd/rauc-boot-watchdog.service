@@ -1,0 +1,13 @@
+[Unit]
+Description=RAUC boot watchdog
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/rauc/backend/raspberrypi-firmware check-rollback
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

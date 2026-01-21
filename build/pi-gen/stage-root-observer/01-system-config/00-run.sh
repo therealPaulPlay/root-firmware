@@ -39,6 +39,7 @@ install -m 644 files/boot/cmdline.txt "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
 install -m 644 files/systemd/root-firmware.service "${ROOTFS_DIR}/etc/systemd/system/"
 install -m 644 files/systemd/data-partition-expand.service "${ROOTFS_DIR}/etc/systemd/system/"
 install -m 644 files/systemd/rauc.service "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/systemd/rauc-boot-watchdog.service "${ROOTFS_DIR}/etc/systemd/system/"
 
 # Install data partition expansion script
 install -d "${ROOTFS_DIR}/usr/lib/root-firmware"
@@ -49,6 +50,7 @@ on_chroot << EOF
 systemctl enable root-firmware.service
 systemctl enable data-partition-expand.service
 systemctl enable rauc.service
+systemctl enable rauc-boot-watchdog.service
 EOF
 
 # Disable unwanted services

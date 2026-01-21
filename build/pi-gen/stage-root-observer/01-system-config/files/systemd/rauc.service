@@ -1,5 +1,5 @@
 [Unit]
-Description=RAUC Update Service
+Description=RAUC update service
 After=local-fs.target
 
 [Service]

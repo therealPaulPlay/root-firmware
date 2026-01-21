@@ -3,35 +3,50 @@
 # Handles A/B slot switching via cmdline.txt modification
 #
 # This script is called by RAUC to manage boot slot selection
-# Commands: get-state, set-state, get-primary, set-primary
+# Commands: get-state, set-state, get-primary, set-primary, get-current
+#
+# Rollback mechanism:
+# - .rauc-good-slot file stores the last confirmed-good slot (A or B)
+# - When RAUC installs, it sets primary but doesn't update good slot
+# - Firmware calls mark-good after health checks pass
+# - Boot watchdog service checks: if current != good and good exists, rollback
 
 set -e
 
 BOOT_PARTITION="/boot/firmware"
 CMDLINE_FILE="$BOOT_PARTITION/cmdline.txt"
+GOOD_SLOT_FILE="$BOOT_PARTITION/.rauc-good-slot"
 
-# Validate cmdline.txt exists and is accessible
+# --- Slot State ---
+
+get_good_slot() {
+    if [ -f "$GOOD_SLOT_FILE" ]; then
+        cat "$GOOD_SLOT_FILE"
+    else
+        echo ""
+    fi
+}
+
+set_good_slot() {
+    local slot="$1"
+    local tmp_file=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
+    printf '%s' "$slot" > "$tmp_file"
+    sync "$tmp_file"
+    mv "$tmp_file" "$GOOD_SLOT_FILE"
+    sync "$BOOT_PARTITION"
+}
+
+# --- cmdline.txt Management ---
+
 validate_cmdline() {
     if [ ! -f "$CMDLINE_FILE" ]; then
         echo "Error: $CMDLINE_FILE does not exist" >&2
         exit 1
     fi
-    if [ ! -r "$CMDLINE_FILE" ]; then
-        echo "Error: $CMDLINE_FILE is not readable" >&2
-        exit 1
-    fi
-}
-
-validate_cmdline_writable() {
-    validate_cmdline
-    if [ ! -w "$CMDLINE_FILE" ]; then
-        echo "Error: $CMDLINE_FILE is not writable (boot partition may be read-only)" >&2
-        exit 1
-    fi
 }
 
 get_current_slot() {
-    # Read current root partition from /proc/cmdline
+    # Read current root partition from /proc/cmdline (what we actually booted)
     local root_part=$(grep -o 'root=/dev/[^ ]*' /proc/cmdline | cut -d'=' -f2)
     case "$root_part" in
         /dev/mmcblk0p2) echo "A" ;;
@@ -42,7 +57,7 @@ get_current_slot() {
 
 get_cmdline_slot() {
     validate_cmdline
-    # Read configured slot from cmdline.txt
+    # Read configured slot from cmdline.txt (what will boot next)
     local root_part=$(grep -o 'root=/dev/[^ ]*' "$CMDLINE_FILE" | cut -d'=' -f2)
     case "$root_part" in
         /dev/mmcblk0p2) echo "A" ;;
@@ -52,7 +67,6 @@ get_cmdline_slot() {
 }
 
 set_cmdline_slot() {
-    validate_cmdline_writable
     local slot="$1"
     local new_root
     case "$slot" in
@@ -64,34 +78,42 @@ set_cmdline_slot() {
             ;;
     esac
 
-    # Update cmdline.txt atomically (write to temp, sync, rename)
+    # Update cmdline.txt atomically
     local tmp_file=$(mktemp "$BOOT_PARTITION/cmdline.XXXXXX")
     sed "s|root=/dev/mmcblk0p[23]|root=$new_root|" "$CMDLINE_FILE" > "$tmp_file"
     sync "$tmp_file"
     mv "$tmp_file" "$CMDLINE_FILE"
     sync "$BOOT_PARTITION"
 
-    # Verify the change was applied
+    # Verify
     local verify_root=$(grep -o 'root=/dev/[^ ]*' "$CMDLINE_FILE" | cut -d'=' -f2)
     if [ "$verify_root" != "$new_root" ]; then
-        echo "Error: Failed to update cmdline.txt, expected $new_root but got $verify_root" >&2
+        echo "Error: Failed to update cmdline.txt" >&2
         exit 1
     fi
 }
 
+# --- Main Command Handler ---
+
 case "$1" in
     get-state)
         # Get boot state of a slot (good/bad)
-        # For now, assume all slots are good unless explicitly marked bad
         slot="$2"
-        echo "good"
+        good_slot=$(get_good_slot)
+        if [ "$slot" = "$good_slot" ]; then
+            echo "good"
+        else
+            echo "bad"
+        fi
         ;;
 
     set-state)
         # Set boot state of a slot (good/bad)
         slot="$2"
         state="$3"
-        # State is tracked by RAUC in its status file
+        if [ "$state" = "good" ]; then
+            set_good_slot "$slot"
+        fi
         ;;
 
     get-primary)
@@ -100,15 +122,74 @@ case "$1" in
         ;;
 
     set-primary)
-        # Set which slot should boot next
+        # Set which slot should boot next (called by RAUC after install)
         slot="$2"
         set_cmdline_slot "$slot"
+        # Note: We do NOT update good slot here - firmware must mark-good
         sync
         ;;
 
     get-current)
         # Get currently booted slot
         get_current_slot
+        ;;
+
+    # --- Custom commands for boot watchdog ---
+
+    check-rollback)
+        # Called early in boot by watchdog service
+        # If we booted into a non-good slot and it's not our first attempt, rollback
+        current=$(get_current_slot)
+        good=$(get_good_slot)
+
+        if [ "$current" = "unknown" ]; then
+            echo "Cannot determine current slot" >&2
+            exit 1
+        fi
+
+        # If no good slot recorded yet (first boot), mark current as good
+        if [ -z "$good" ]; then
+            echo "First boot - marking slot $current as good"
+            set_good_slot "$current"
+            exit 0
+        fi
+
+        # If current slot is the good slot, all is well
+        if [ "$current" = "$good" ]; then
+            echo "Booted into good slot $current"
+            exit 0
+        fi
+
+        # We're in a non-good slot - check if we've already tried it
+        TRYING_FILE="$BOOT_PARTITION/.rauc-trying-$current"
+
+        if [ -f "$TRYING_FILE" ]; then
+            # We already tried this slot and rebooted - rollback!
+            echo "Slot $current failed, rolling back to $good"
+            rm -f "$TRYING_FILE"
+            set_cmdline_slot "$good"
+            sync
+            reboot -f
+        else
+            # First attempt at this slot - mark that we're trying it
+            touch "$TRYING_FILE"
+            sync "$BOOT_PARTITION"
+            echo "Trying slot $current (good slot is $good)"
+        fi
+        ;;
+
+    mark-good)
+        # Called by firmware after successful health checks
+        current=$(get_current_slot)
+        if [ "$current" = "unknown" ]; then
+            echo "Cannot determine current slot" >&2
+            exit 1
+        fi
+        set_good_slot "$current"
+        # Clean up trying marker if it exists
+        rm -f "$BOOT_PARTITION/.rauc-trying-$current"
+        sync "$BOOT_PARTITION"
+        echo "Slot $current marked as good"
         ;;
 
     *)
