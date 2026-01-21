@@ -19,6 +19,9 @@ EOF
 install -d "${ROOTFS_DIR}/etc/rauc"
 install -m 644 files/rauc/system.conf "${ROOTFS_DIR}/etc/rauc/system.conf"
 
+# Install RAUC D-Bus policy (missing from Debian package)
+install -m 644 files/dbus/de.pengutronix.rauc.conf "${ROOTFS_DIR}/usr/share/dbus-1/system.d/"
+
 # Install RAUC verification certificate (copied to stage dir by CI)
 if [ -f "${STAGE_DIR}/rauc-ca.cert.pem" ]; then
     install -m 644 "${STAGE_DIR}/rauc-ca.cert.pem" "${ROOTFS_DIR}/etc/rauc/ca.cert.pem"
@@ -35,6 +38,7 @@ install -m 644 files/boot/cmdline.txt "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
 # Install systemd services
 install -m 644 files/systemd/root-firmware.service "${ROOTFS_DIR}/etc/systemd/system/"
 install -m 644 files/systemd/data-partition-expand.service "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/systemd/rauc.service "${ROOTFS_DIR}/etc/systemd/system/"
 
 # Install data partition expansion script
 install -d "${ROOTFS_DIR}/usr/lib/root-firmware"
@@ -44,6 +48,7 @@ install -m 755 files/systemd/expand-data-partition.sh "${ROOTFS_DIR}/usr/lib/roo
 on_chroot << EOF
 systemctl enable root-firmware.service
 systemctl enable data-partition-expand.service
+systemctl enable rauc.service
 EOF
 
 # Disable unwanted services
