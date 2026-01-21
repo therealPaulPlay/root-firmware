@@ -385,10 +385,8 @@ func initBLE() error {
 			return
 		}
 
-		// Restart relay with new URL
-		if err := relaycomm.Get().Start(); err != nil {
-			log.Printf("BLE: Failed to restart relay: %v", err)
-		}
+		// Start relay connection with new domain
+		relaycomm.Get().Start()
 		log.Printf("BLE: Relay configured: %s", relayReq.RelayDomain)
 		relayStatus = operationStatus{completed: true, success: true}
 	}))

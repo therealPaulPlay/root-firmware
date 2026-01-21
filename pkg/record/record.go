@@ -564,7 +564,7 @@ func (r *Recorder) CapturePreview(x int, y int) ([]byte, error) {
 }
 
 func (r *Recorder) CaptureViewfinderFrame(x, y int) ([]byte, error) {
-	// Check if stream is running
+	// Check if stream is running (performance consideration)
 	r.mu.RLock()
 	streamRunning := r.videoStreamCh != nil
 	r.mu.RUnlock()

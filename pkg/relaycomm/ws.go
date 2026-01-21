@@ -47,6 +47,7 @@ func Init() {
 			handlers:  make(map[string]func(Message)),
 			rateReset: time.Now(),
 		}
+		registerHandlers(instance)
 	})
 }
 
@@ -61,13 +62,15 @@ func (r *RelayComm) On(messageType string, handler func(Message)) {
 	r.handlers[messageType] = handler
 }
 
-// Start connects to relay server. If already running, restarts with current config.
-func (r *RelayComm) Start() error {
+// Start connects to relay server. If already running, restarts with current config
+// Does nothing if relay domain is not configured
+func (r *RelayComm) Start() {
 	r.Stop()
 
 	relayDomain, ok := config.Get().GetKey("relayDomain")
-	if !ok {
-		return fmt.Errorf("relay domain not configured")
+	if !ok || relayDomain == "" {
+		log.Println("RelayComm: Not starting, relay domain not configured")
+		return
 	}
 
 	r.rateMu.Lock()
@@ -80,7 +83,6 @@ func (r *RelayComm) Start() error {
 	r.doneChan = make(chan struct{})
 
 	go r.run(relayDomain.(string))
-	return nil
 }
 
 // Stop shuts down the relay connection and waits for cleanup
@@ -108,7 +110,7 @@ func (r *RelayComm) Send(msg Message) error {
 	}
 }
 
-// run is the main loop - single goroutine owns the connection
+// run is the main loop - single goroutine that owns the connection
 func (r *RelayComm) run(relayDomain string) {
 	defer close(r.doneChan)
 

@@ -11,7 +11,6 @@ import (
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
-	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/qr"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
@@ -128,7 +127,7 @@ func (b *Pairing) ScanQRCode() error {
 
 // ScanWiFiNetworks scans for available WiFi networks with a timeout
 func (b *Pairing) ScanWiFiNetworks() ([]wifi.Network, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	type scanResult struct {
@@ -151,7 +150,7 @@ func (b *Pairing) ScanWiFiNetworks() ([]wifi.Network, error) {
 			return nil, fmt.Errorf("failed to scan WiFi networks: %w", result.err)
 		}
 	case <-ctx.Done():
-		return nil, fmt.Errorf("WiFi scan timed out after 15 seconds")
+		return nil, fmt.Errorf("WiFi scan timed out after 10 seconds")
 	}
 
 	return result.networks, nil
@@ -167,31 +166,14 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 		return nil, fmt.Errorf("code not verified or expired")
 	}
 
-	// Get or generate camera keypair (single keypair for all devices)
-	var cameraPublicKeyBytes []byte
-
-	cameraPublicKeyEncoded, ok := config.Get().GetKey("cameraPublicKey")
+	// Get camera public key (generated during config initialization, stored as base64)
+	cameraPublicKey, ok := config.Get().GetKey("cameraPublicKey")
 	if !ok {
-		// First time pairing a device - generate camera keypair
-		keypair, err := encryption.GenerateKeypair()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate keys: %w", err)
-		}
-		// Store as base64 encoded strings for JSON compatibility
-		config.Get().SetKey("cameraPrivateKey", encryption.EncodeKey(keypair.PrivateKey))
-		config.Get().SetKey("cameraPublicKey", encryption.EncodeKey(keypair.PublicKey))
-		cameraPublicKeyBytes = keypair.PublicKey
-	} else {
-		// Decode from base64 string
-		pubKeyStr, ok := cameraPublicKeyEncoded.(string)
-		if !ok {
-			return nil, fmt.Errorf("camera public key has invalid type: %T", cameraPublicKeyEncoded)
-		}
-		decoded, err := encryption.DecodeKey(pubKeyStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode camera public key: %w", err)
-		}
-		cameraPublicKeyBytes = decoded
+		return nil, fmt.Errorf("camera public key not found in config")
+	}
+	cameraPublicKeyStr, ok := cameraPublicKey.(string)
+	if !ok {
+		return nil, fmt.Errorf("camera public key has invalid type: %T", cameraPublicKey)
 	}
 
 	// Add device with its public key
@@ -208,11 +190,8 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 	// Get product ID
 	productID, _ := config.Get().GetKey("id")
 
-	// Encode camera public key to base64 for JSON transmission
-	cameraPublicKeyForResponse := encryption.EncodeKey(cameraPublicKeyBytes)
-
 	return map[string]any{
 		"productId": productID,
-		"publicKey": cameraPublicKeyForResponse,
+		"publicKey": cameraPublicKeyStr,
 	}, nil
 }

@@ -76,8 +76,8 @@ func main() {
 	// Mark initialization complete for boot confirmation tracking
 	updater.MarkInitComplete()
 
-	// Register relay handlers and start connection (if relay domain configured)
-	relaycomm.RegisterHandlers()
+	// Start relay connection (if relay domain configured)
+	relaycomm.Get().Start()
 
 	// Check for updates immediately and then every 5 minutes
 	go func() {

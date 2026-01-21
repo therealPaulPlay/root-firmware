@@ -102,21 +102,21 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		// Get device to verify it's paired
 		device, ok := devices.Get().GetByID(msg.DeviceID)
 		if !ok {
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrDeviceNotPaired, "Device not paired!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrDeviceNotPaired, "Device not paired")
 			return
 		}
 
 		// Get camera's private key (stored as base64 string)
 		cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
 		if !ok {
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrCameraNotInit, "Camera not initialized!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrCameraNotInit, "Camera private key not initialized")
 			return
 		}
 
 		privKeyStr, ok := cameraPrivateKeyEncoded.(string)
 		if !ok {
 			log.Printf("RelayComm: Camera private key has invalid type")
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid")
 			return
 		}
 
@@ -124,21 +124,21 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 		privKey, err := encryption.DecodeKey(privKeyStr)
 		if err != nil {
 			log.Printf("RelayComm: Failed to decode camera private key: %v", err)
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid")
 			return
 		}
 
 		// Derive shared secret using camera's private key and device's public key
 		sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 		if err != nil {
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Failed to derive encryption key!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Failed to derive encryption key")
 			return
 		}
 
 		// Create session for decryption
 		session, err := encryption.FromSharedSecret(sharedSecret)
 		if err != nil {
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInternalError, "Failed to create encryption session!")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInternalError, "Failed to create encryption session")
 			return
 		}
 
@@ -149,11 +149,11 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 			if prevSession, ok := GetPreviousEncryption(msg.DeviceID); ok {
 				decrypted, err = prevSession.Decrypt(msg.Payload)
 				if err != nil {
-					sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload!")
+					sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload")
 					return
 				}
 			} else {
-				sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload!")
+				sendError(msg.DeviceID, msg.RequestID, messageType, ErrDecryptionFailed, "Failed to decrypt payload")
 				return
 			}
 		}
@@ -208,7 +208,7 @@ func sendEncrypted(ctx *HandlerContext, messageType string, payload map[string]a
 	// Get product ID
 	productID, ok := config.Get().GetKey("id")
 	if !ok {
-		return fmt.Errorf("product ID missing from config (trying to send encrypted WS message)")
+		return fmt.Errorf("product ID missing from config")
 	}
 
 	prodIDStr, ok := productID.(string)
@@ -258,17 +258,7 @@ func SendEncryptedError(ctx *HandlerContext, messageType, errorCode, errorMsg st
 	return sendEncrypted(ctx, messageType, payload)
 }
 
-// RegisterHandlers registers all relay message handlers and starts connection if relay domain is configured
-func RegisterHandlers() {
-	// Check if relay domain is configured
-	relayDomain, ok := config.Get().GetKey("relayDomain")
-	if !ok || relayDomain == "" {
-		log.Println("RelayComm: Relay handlers not registered - relay domain not configured")
-		return
-	}
-
-	relay := Get()
-
+func registerHandlers(relay *RelayComm) {
 	// Key renewal
 	relay.On(MsgRenewKey, handleRenewKey)
 	relay.On(MsgRenewKeyAck, handleRenewKeyAck)
@@ -303,32 +293,27 @@ func RegisterHandlers() {
 	relay.On(MsgRestart, useEncryption(MsgRestart, handleRestart))
 	relay.On(MsgReset, useEncryption(MsgReset, handleReset))
 	relay.On(MsgGetUpdateStatus, useEncryption(MsgGetUpdateStatus, handleGetUpdateStatus))
-
-	// Start the connection
-	if err := relay.Start(); err != nil {
-		log.Printf("Failed to start relay comm: %v", err)
-	}
 }
 
 func handleRenewKey(msg Message) {
 	// Get device to verify it's paired (allow expired keys for renewal)
 	device, ok := devices.Get().GetByID(msg.DeviceID)
 	if !ok {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrDeviceNotPaired, "Device not paired!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrDeviceNotPaired, "Device not paired")
 		return
 	}
 
 	// Get camera's private key (stored as base64 string)
 	cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
 	if !ok {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrCameraNotInit, "Camera not initialized!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrCameraNotInit, "Camera not initialized")
 		return
 	}
 
 	privKeyStr, ok := cameraPrivateKeyEncoded.(string)
 	if !ok {
 		log.Printf("RelayComm: Camera private key has invalid type")
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid")
 		return
 	}
 
@@ -336,28 +321,28 @@ func handleRenewKey(msg Message) {
 	privKey, err := encryption.DecodeKey(privKeyStr)
 	if err != nil {
 		log.Printf("RelayComm: Failed to decode camera private key: %v", err)
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid")
 		return
 	}
 
 	// Derive shared secret using current key (still stored in device)
 	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive encryption key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive encryption key")
 		return
 	}
 
 	// Create session for decryption
 	session, err := encryption.FromSharedSecret(sharedSecret)
 	if err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to create encryption session!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to create encryption session")
 		return
 	}
 
 	// Decrypt payload containing new public key
 	decrypted, err := session.Decrypt(msg.Payload)
 	if err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrDecryptionFailed, "Failed to decrypt payload!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrDecryptionFailed, "Failed to decrypt payload")
 		return
 	}
 
@@ -365,27 +350,27 @@ func handleRenewKey(msg Message) {
 		NewPublicKey string `json:"newPublicKey"`
 	}
 	if err := json.Unmarshal(decrypted, &req); err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidPayload, "Invalid payload!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidPayload, "Invalid payload")
 		return
 	}
 
 	// Decode new public key
 	newPublicKey, err := encryption.DecodeKey(req.NewPublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Invalid public key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Invalid public key")
 		return
 	}
 
 	// Derive NEW shared secret (but don't commit yet - wait for ACK)
 	newSharedSecret, err := encryption.DeriveSharedSecret(privKey, newPublicKey)
 	if err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive new encryption key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive new encryption key")
 		return
 	}
 
 	newSession, err := encryption.FromSharedSecret(newSharedSecret)
 	if err != nil {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to create new encryption session!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInternalError, "Failed to create new encryption session")
 		return
 	}
 
@@ -408,14 +393,14 @@ func handleRenewKeyAck(msg Message) {
 	newPublicKey, newSharedSecret, newSession, ok := GetAndClearPendingKeyRenewal(msg.DeviceID)
 	if !ok {
 		log.Printf("RelayComm: No pending key renewal for device %s", msg.DeviceID)
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "No pending key renewal!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "No pending key renewal")
 		return
 	}
 
 	decrypted, err := newSession.Decrypt(msg.Payload) // Decrypt ACK with NEW key
 	if err != nil {
 		log.Printf("RelayComm: Failed to decrypt renewal ACK from device %s: %v", msg.DeviceID, err)
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrDecryptionFailed, "Failed to decrypt payload!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrDecryptionFailed, "Failed to decrypt payload")
 		return
 	}
 
@@ -424,14 +409,14 @@ func handleRenewKeyAck(msg Message) {
 	}
 	if err := json.Unmarshal(decrypted, &req); err != nil || !req.Ack {
 		log.Printf("RelayComm: Invalid renewal ACK from device %s", msg.DeviceID)
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInvalidPayload, "Invalid payload!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInvalidPayload, "Invalid payload")
 		return
 	}
 
 	log.Printf("RelayComm: Committing new key for device %s", msg.DeviceID)
 	if err := devices.Get().RenewKey(msg.DeviceID, newPublicKey); err != nil { // NOW commit the new key
 		log.Printf("RelayComm: Failed to commit renewed key for device %s: %v", msg.DeviceID, err)
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "Failed to commit key!")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "Failed to commit key")
 		return
 	}
 
@@ -760,8 +745,8 @@ func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
 func handleGetUpdateStatus(ctx *HandlerContext, payload json.RawMessage) {
 	status, availableVersion, updateError := updater.Get().GetStatus()
 	result := map[string]any{
-		"status":          string(status),
-		"currentVersion":  globals.FirmwareVersion,
+		"status":         string(status),
+		"currentVersion": globals.FirmwareVersion,
 	}
 	if availableVersion != "" {
 		result["availableVersion"] = availableVersion
@@ -777,7 +762,7 @@ func handleRestart(ctx *HandlerContext, payload json.RawMessage) {
 	// Prevent restart while update is in progress
 	status, _, _ := updater.Get().GetStatus()
 	if status == updater.StatusDownloading || status == updater.StatusInstalling {
-		SendEncryptedError(ctx, MsgRestart, ErrInternalError, "cannot restart while update is in progress")
+		SendEncryptedError(ctx, MsgRestart, ErrInternalError, "Cannot restart while update is in progress")
 		return
 	}
 
@@ -792,7 +777,7 @@ func handleReset(ctx *HandlerContext, payload json.RawMessage) {
 	// Prevent reset while update is in progress
 	status, _, _ := updater.Get().GetStatus()
 	if status == updater.StatusDownloading || status == updater.StatusInstalling {
-		SendEncryptedError(ctx, MsgReset, ErrInternalError, "cannot reset while update is in progress")
+		SendEncryptedError(ctx, MsgReset, ErrInternalError, "Cannot reset while update is in progress")
 		return
 	}
 
