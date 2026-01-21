@@ -1,13 +1,13 @@
-# BLE GATT API Documentation
+# BLE GATT API documentation
 
 ## Service UUID
 `a07498ca-ad5b-474e-940d-16f1fbe7e8cd`
 
-## Device Discovery
+## Device discovery
 
 All ROOT cameras advertise with BLE names starting with `ROOT-` (e.g., `ROOT-Observer`).
 
-## Response Format
+## Response format
 
 **All successful responses include `"success": true`** automatically:
 
@@ -27,9 +27,9 @@ Error responses use `"success": false`:
 }
 ```
 
-## Message Size Limit
+## Message size limit
 
-Maximum BLE message size: **512 bytes**. Messages exceeding this limit will fail with `"message too large"` error.
+Messages need to stay below ~128 bytes to work across devices. 
 
 ## Pairing Flow
 
@@ -47,7 +47,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ## Characteristics
 
-### 1. Get Product ID
+### 1. Get product ID
 **UUID**: `8f3c4d5e-9a2b-4f1e-8d6c-7e5f4a3b2c1d`
 **Properties**: Read
 **Description**: Returns the unique product ID of the camera. This ID is generated on first boot.
@@ -62,7 +62,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 2. Get Pairing Code
+### 2. Get pairing code
 **UUID**: `51ff12bb-3ed8-46e5-b4f9-d64e2fec021b`
 **Properties**: Read
 **Description**: Generates and returns a new UUID-based pairing code. Code expires after 15 minutes.
@@ -77,7 +77,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 3. Scan QR Code
+### 3. Scan QR code
 **UUID**: `2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e`
 **Properties**: Read
 **Description**: Triggers camera to capture a frame and scan for QR code. Verifies the scanned code matches the expected pairing code and marks it as verified.
@@ -89,7 +89,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 }
 ```
 
-**Error Response**:
+**Error response**:
 ```json
 {
   "success": false,
@@ -99,7 +99,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 4. Pair Device
+### 4. Pair device
 **UUID**: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
 **Properties**: Write, Read
 **Description**: Pairs a device after QR code verification. Write to initiate pairing, then read to get result. Requires prior successful QR scan.
@@ -125,10 +125,10 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 5. Get Camera Public Key
+### 5. Get product public key
 **UUID**: `2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a`
 **Properties**: Read
-**Description**: Returns the camera's public key after successful pairing. Must be read after pairing completes.
+**Description**: Returns the product's (camera's) public key after successful pairing. Must be read after pairing completes.
 
 **Response**:
 ```json
@@ -140,7 +140,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 6. Get WiFi Networks (Paginated)
+### 6. Get WiFi networks (Paginated)
 **UUID**: `c2be2bc9-cee3-40ae-af50-f9959f25ee5b`
 **Properties**: Read
 **Description**: Returns WiFi networks one at a time. First read scans, subsequent reads return next network. Read after `hasMore: false` triggers fresh scan.
@@ -163,7 +163,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 7. Get WiFi Status
+### 7. Get WiFi status
 **UUID**: `d96453d5-1f49-47d6-8cbd-ac5547fc51a9`
 **Properties**: Read
 **Description**: Returns current WiFi connection status and SSID.
@@ -184,7 +184,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 **Properties**: Write, Read
 **Description**: Configures WiFi credentials. Write operation blocks until connection completes, then read to verify success. Requires encrypted payload from paired device.
 
-**Write Request**:
+**Write request**:
 ```json
 {
   "deviceId": "unique-device-id",
@@ -192,7 +192,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 }
 ```
 
-**Encrypted Payload**:
+**Encrypted payload**:
 ```json
 {
   "ssid": "MyWiFi",
@@ -203,14 +203,14 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 **Note**: `countryCode` is optional but recommended for regulatory compliance. It should be an ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "DE"). The client can obtain this from the browser's locale or geolocation.
 
-**Read Response (Success)**:
+**Read response (Success)**:
 ```json
 {
   "success": true
 }
 ```
 
-**Read Response (Failure)**:
+**Read response (Failure)**:
 ```json
 {
   "success": false,
@@ -220,7 +220,7 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 9. Get Relay Status
+### 9. Get relay status
 **UUID**: `a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab`
 **Properties**: Read
 **Description**: Returns currently configured relay server domain.
@@ -237,12 +237,12 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 
 ---
 
-### 10. Set Relay
+### 10. Set relay
 **UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
 **Properties**: Write, Read
 **Description**: Configures relay server domain. Write operation blocks until configuration completes, then read to verify success. Requires encrypted payload from paired device.
 
-**Write Request**:
+**Write request**:
 ```json
 {
   "deviceId": "unique-device-id",
@@ -250,21 +250,21 @@ This ensures a compromised IoT device cannot pair remotely - physical access is 
 }
 ```
 
-**Encrypted Payload**:
+**Encrypted payload**:
 ```json
 {
   "relayDomain": "relay.example.com"
 }
 ```
 
-**Read Response (Success)**:
+**Read response (Success)**:
 ```json
 {
   "success": true
 }
 ```
 
-**Read Response (Failure)**:
+**Read response (Failure)**:
 ```json
 {
   "success": false,

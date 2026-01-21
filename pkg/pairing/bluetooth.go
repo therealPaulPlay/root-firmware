@@ -46,6 +46,7 @@ type operationStatus struct {
 }
 
 var bleDevice ble.Device
+
 var pairingStatus operationStatus
 var wifiStatus operationStatus
 var relayStatus operationStatus
@@ -106,7 +107,7 @@ func initBLE() error {
 	// Create service
 	svc := ble.NewService(serviceUUID)
 
-	// Device Model characteristic (read-only)
+	// Product model characteristic (read-only)
 	productModelChar := svc.NewCharacteristic(productModelCharUUID)
 	productModelChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if err := writeJSON(rsp, map[string]any{"model": globals.ProductModel}); err != nil {
@@ -340,7 +341,7 @@ func initBLE() error {
 		writeSuccess(rsp)
 	}))
 
-	// Get Relay Status characteristic (read-only)
+	// Get Relay status characteristic (read-only)
 	relayStatusChar := svc.NewCharacteristic(relayStatusCharUUID)
 	relayStatusChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		relayDomain, _ := config.Get().GetKey("relayDomain")
