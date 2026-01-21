@@ -28,7 +28,10 @@ DATA_PART="${ROOT_DEV}p4"
 log "Expanding partition table..."
 parted -s "$ROOT_DEV" resizepart 4 100%
 
-# Resize the data filesystem
+# Check and resize the data filesystem
+log "Running filesystem check..."
+e2fsck -f -y "$DATA_PART"
+
 log "Resizing ext4 filesystem..."
 resize2fs "$DATA_PART"
 
