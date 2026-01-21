@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +32,6 @@ var once sync.Once
 func Init() {
 	once.Do(func() {
 		instance = &WiFi{}
-		// Unblock WiFi (safety measure in case it's blocked)
 		exec.Command("rfkill", "unblock", "wifi").Run()
 		instance.detectCapabilities()
 		instance.applyStoredWiFiConfig()
@@ -49,10 +49,11 @@ func Get() *WiFi {
 func (w *WiFi) Scan() ([]Network, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	exec.Command("iwlist", "wlan0", "scan").Run() // Trigger scan
 
-	// Read scan results
-	output, err := exec.Command("iwlist", "wlan0", "scan").Output()
+	exec.Command("nmcli", "device", "wifi", "rescan").Run()
+	time.Sleep(2 * time.Second)
+
+	output, err := exec.Command("nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,FREQ", "device", "wifi", "list").Output()
 	if err != nil {
 		return nil, fmt.Errorf("scan failed: %w", err)
 	}
@@ -60,264 +61,186 @@ func (w *WiFi) Scan() ([]Network, error) {
 	return w.parseNetworks(string(output)), nil
 }
 
-// applyStoredWiFiConfig applies WiFi configuration from config.json on boot
 func (w *WiFi) applyStoredWiFiConfig() {
 	ssidVal, hasSSID := config.Get().GetKey("wifiSSID")
 	passwordVal, hasPassword := config.Get().GetKey("wifiPassword")
 
 	if !hasSSID || !hasPassword {
-		return // No WiFi configured
+		return
 	}
 
 	ssid, ok1 := ssidVal.(string)
 	password, ok2 := passwordVal.(string)
 	if !ok1 || !ok2 {
-		log.Println("WiFi: Invalid WiFi config format")
+		log.Println("WiFi: Invalid config format")
 		return
 	}
 
-	// Apply country code if set (skip otherwise)
 	if countryCodeVal, ok := config.Get().GetKey("wifiCountryCode"); ok {
 		if code, ok := countryCodeVal.(string); ok && len(code) == 2 {
-			if err := w.setCountryCode(code); err != nil {
-				log.Printf("WiFi: Failed to set country code: %v", err)
-			}
+			exec.Command("iw", "reg", "set", strings.ToUpper(code)).Run()
 		}
 	}
 
-	// Configure stored WiFi (wpa_supplicant will auto-reconnect)
 	go func() {
-		if _, err := w.configureNetwork(ssid, password); err != nil {
-			log.Printf("WiFi: Failed to configure network: %v", err)
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if err := w.connectNetwork(ssid, password); err != nil {
+			log.Printf("WiFi: Failed to connect to stored network: %v", err)
 		}
 	}()
 }
 
-// setCountryCode sets the WiFi regulatory domain country code
-// countryCode should be ISO 3166-1 alpha-2 format (e.g., "US", "GB", "DE")
-func (w *WiFi) setCountryCode(countryCode string) error {
-	if len(countryCode) != 2 {
-		return fmt.Errorf("invalid country code format (must be 2 letters)")
-	}
-	countryCode = strings.ToUpper(countryCode)
-
-	if err := exec.Command("iw", "reg", "set", countryCode).Run(); err != nil {
-		return fmt.Errorf("failed to set country code: %w", err)
-	}
-
-	log.Printf("WiFi: Country code set to %s", countryCode)
-	return nil
-}
-
 // Connect connects to a WiFi network and verifies internet access
-// password should be empty string for unsecured networks
-// countryCode is optional ISO 3166-1 alpha-2 code
 func (w *WiFi) Connect(ssid, password, countryCode string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Validate SSID length (IEEE 802.11 spec: 0-32 bytes)
 	if len(ssid) == 0 || len(ssid) > 32 {
 		return fmt.Errorf("invalid SSID length (must be 1-32 bytes)")
 	}
 
-	// Set country code if provided
 	if countryCode != "" {
-		if err := w.setCountryCode(countryCode); err != nil {
-			log.Printf("WiFi: Warning - failed to set country code: %v", err)
-		}
+		exec.Command("iw", "reg", "set", strings.ToUpper(countryCode)).Run()
 	}
 
-	// Configure network and get the network ID
-	networkID, err := w.configureNetwork(ssid, password)
-	if err != nil {
+	// Remember previous connection for rollback
+	previousSSID := w.getActiveSSID()
+
+	if err := w.connectNetwork(ssid, password); err != nil {
 		return err
 	}
 
-	// Wait for connection and verify internet access
-	if err := w.waitForInternet(ssid, 15*time.Second); err != nil {
-		w.removeNetwork(networkID)
+	if err := w.waitForInternet(15 * time.Second); err != nil {
+		// Connection failed - delete this connection and try to restore previous
+		exec.Command("nmcli", "connection", "delete", ssid).Run()
 
-		// Revert to saved network if different from the one that just failed
-		if savedSSID, ok := config.Get().GetKey("wifiSSID"); ok && savedSSID.(string) != ssid {
-			if savedPassword, ok := config.Get().GetKey("wifiPassword"); ok {
-				log.Printf("WiFi: Reverting to saved network: %s", savedSSID)
-				if _, revertErr := w.configureNetwork(savedSSID.(string), savedPassword.(string)); revertErr != nil {
-					log.Printf("WiFi: Failed to revert to saved network: %v", revertErr)
-				}
-			}
+		if previousSSID != "" && previousSSID != ssid {
+			log.Printf("WiFi: Reverting to %s", previousSSID)
+			exec.Command("nmcli", "connection", "up", previousSSID).Run()
 		}
-
 		return err
 	}
 
-	// Only save credentials after successful internet verification
-	if err := config.Get().SetKey("wifiSSID", ssid); err != nil {
-		return fmt.Errorf("failed to save WiFi SSID: %w", err)
-	}
-	if err := config.Get().SetKey("wifiPassword", password); err != nil {
-		return fmt.Errorf("failed to save WiFi password: %w", err)
-	}
+	// Save credentials after successful connection
+	config.Get().SetKey("wifiSSID", ssid)
+	config.Get().SetKey("wifiPassword", password)
 	if countryCode != "" {
-		if err := config.Get().SetKey("wifiCountryCode", countryCode); err != nil {
-			log.Printf("WiFi: Warning - failed to save country code: %v", err)
-		}
+		config.Get().SetKey("wifiCountryCode", countryCode)
 	}
 
+	log.Printf("WiFi: Connected to %s", ssid)
 	return nil
 }
 
-// configureNetwork configures a WiFi network using wpa_cli and returns the network ID
-func (w *WiFi) configureNetwork(ssid, password string) (string, error) {
-	// Add network via wpa_cli
-	output, err := exec.Command("wpa_cli", "-i", "wlan0", "add_network").Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to add network: %w", err)
-	}
-	networkID := strings.TrimSpace(string(output))
-
-	// Set SSID
-	if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "ssid", fmt.Sprintf(`"%s"`, ssid)).Run(); err != nil {
-		return "", fmt.Errorf("failed to set SSID: %w", err)
-	}
-
-	// Set password or key_mgmt=NONE for open networks
+func (w *WiFi) connectNetwork(ssid, password string) error {
+	var cmd *exec.Cmd
 	if password == "" {
-		if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "key_mgmt", "NONE").Run(); err != nil {
-			return "", fmt.Errorf("failed to set key_mgmt: %w", err)
-		}
+		cmd = exec.Command("nmcli", "device", "wifi", "connect", ssid)
 	} else {
-		if err := exec.Command("wpa_cli", "-i", "wlan0", "set_network", networkID, "psk", fmt.Sprintf(`"%s"`, password)).Run(); err != nil {
-			return "", fmt.Errorf("failed to set password: %w", err)
-		}
+		cmd = exec.Command("nmcli", "device", "wifi", "connect", ssid, "password", password)
 	}
 
-	// Enable the network
-	if err := exec.Command("wpa_cli", "-i", "wlan0", "enable_network", networkID).Run(); err != nil {
-		return "", fmt.Errorf("failed to enable network: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("connection failed: %s", strings.TrimSpace(string(output)))
 	}
-
-	// Select this network
-	if err := exec.Command("wpa_cli", "-i", "wlan0", "select_network", networkID).Run(); err != nil {
-		return "", fmt.Errorf("failed to select network: %w", err)
-	}
-
-	return networkID, nil
+	return nil
 }
 
-// removeNetwork removes a specific network by ID
-// Don't call reconnect here, the caller will explicitly reconfigure the saved network if available
-func (w *WiFi) removeNetwork(networkID string) {
-	if err := exec.Command("wpa_cli", "-i", "wlan0", "remove_network", networkID).Run(); err != nil {
-		log.Printf("WiFi: Failed to remove network %s: %v", networkID, err)
-	}
-}
-
-// waitForInternet waits for internet connectivity up to the specified timeout
-func (w *WiFi) waitForInternet(ssid string, timeout time.Duration) error {
+func (w *WiFi) waitForInternet(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		time.Sleep(1 * time.Second)
-
-		// Check if connected
-		output, err := exec.Command("iwgetid", "-r").Output()
-		if err != nil || len(strings.TrimSpace(string(output))) == 0 {
-			continue // Not connected yet
-		}
-
-		// Ping Google DNS to verify internet
 		if exec.Command("ping", "-c", "1", "-W", "2", "8.8.8.8").Run() == nil {
-			log.Printf("WiFi: Connected to %s", ssid)
 			return nil
 		}
+		time.Sleep(time.Second)
 	}
-
-	return fmt.Errorf("failed to establish internet connection")
+	return fmt.Errorf("no internet connection")
 }
 
-// IsConnected checks if connected to any network
 func (w *WiFi) IsConnected() bool {
-	output, err := exec.Command("iwgetid", "-r").Output()
-	if err != nil {
-		return false
-	}
-	return len(strings.TrimSpace(string(output))) > 0
+	return w.getActiveSSID() != ""
 }
 
-// GetCurrentNetwork returns the currently connected network SSID
 func (w *WiFi) GetCurrentNetwork() string {
-	output, err := exec.Command("iwgetid", "-r").Output()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.getActiveSSID()
+}
+
+func (w *WiFi) getActiveSSID() string {
+	output, err := exec.Command("nmcli", "-t", "-f", "NAME,DEVICE", "connection", "show", "--active").Output()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(output))
+	for _, line := range strings.Split(string(output), "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 && parts[1] == "wlan0" {
+			return parts[0]
+		}
+	}
+	return ""
 }
 
-// detectCapabilities detects if the WiFi hardware supports 5GHz
 func (w *WiFi) detectCapabilities() {
-	output, err := exec.Command("iwlist", "wlan0", "freq").Output()
+	output, err := exec.Command("iw", "phy").Output()
 	if err != nil {
 		w.supports5GHz = false
-		log.Println("WiFi: 5GHz support is unknown (detection failed)")
 		return
 	}
 
-	freqRe := regexp.MustCompile(`:\s*([\d.]+)\s*GHz`)
+	freqRe := regexp.MustCompile(`(\d{4,5}) MHz`)
 	for _, match := range freqRe.FindAllStringSubmatch(string(output), -1) {
-		var freq float64
-		fmt.Sscanf(match[1], "%f", &freq)
-		if freq > 5.0 {
+		freq, _ := strconv.Atoi(match[1])
+		if freq >= 5000 {
 			w.supports5GHz = true
-			log.Println("WiFi: 5GHz is supported")
+			log.Println("WiFi: 5GHz supported")
 			return
 		}
 	}
-
 	w.supports5GHz = false
-	log.Println("WiFi: 5GHz is not supported")
 }
 
 func (w *WiFi) parseNetworks(output string) []Network {
 	var networks []Network
-	seen := make(map[string]int) // SSID -> index in networks slice
+	seen := make(map[string]int)
 
-	ssidRe := regexp.MustCompile(`ESSID:"([^"]+)"`)
-	qualityRe := regexp.MustCompile(`Quality=(\d+)/(\d+)`)
-	encryptionRe := regexp.MustCompile(`Encryption key:(on|off)`)
-	frequencyRe := regexp.MustCompile(`Frequency:([\d.]+) GHz`)
-
-	for _, cell := range strings.Split(output, "Cell ")[1:] {
-		ssidMatch := ssidRe.FindStringSubmatch(cell)
-		if len(ssidMatch) < 2 {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 
-		network := Network{SSID: ssidMatch[1]}
-
-		// Parse signal quality
-		if qualityMatch := qualityRe.FindStringSubmatch(cell); len(qualityMatch) > 2 {
-			var quality, max int
-			fmt.Sscanf(qualityMatch[1], "%d", &quality)
-			fmt.Sscanf(qualityMatch[2], "%d", &max)
-			if max > 0 {
-				network.Signal = (quality * 100) / max
-			}
+		// Format: SSID:SIGNAL:SECURITY:FREQ (SSID may contain colons)
+		parts := strings.Split(line, ":")
+		if len(parts) < 4 {
+			continue
 		}
 
-		// Parse encryption
-		if encMatch := encryptionRe.FindStringSubmatch(cell); len(encMatch) > 1 {
-			network.Secured = encMatch[1] == "on"
+		freq := parts[len(parts)-1]
+		security := parts[len(parts)-2]
+		signalStr := parts[len(parts)-3]
+		ssid := strings.Join(parts[:len(parts)-3], ":")
+
+		if ssid == "" || ssid == "--" {
+			continue
 		}
 
-		// Parse frequency and mark as unsupported if hardware doesn't support it
-		if freqMatch := frequencyRe.FindStringSubmatch(cell); len(freqMatch) > 1 {
-			var freq float64
-			fmt.Sscanf(freqMatch[1], "%f", &freq)
-			// Mark 5GHz networks as unsupported if hardware doesn't support 5GHz
-			network.Unsupported = freq > 3.0 && !w.supports5GHz
+		network := Network{SSID: ssid}
+
+		if signal, err := strconv.Atoi(signalStr); err == nil {
+			network.Signal = signal
 		}
 
-		// Deduplicate networks with identical SSID (e.g. multiple channels): keep entry with strongest signal
+		network.Secured = security != "" && security != "--"
+
+		// Mark 5GHz networks as unsupported if hardware doesn't support it
+		// nmcli terse output gives freq as plain number (e.g., "2437" or "5180")
+		if freqMHz, err := strconv.Atoi(strings.TrimSpace(freq)); err == nil {
+			network.Unsupported = freqMHz >= 5000 && !w.supports5GHz
+		}
+
 		if idx, exists := seen[network.SSID]; exists {
 			if network.Signal > networks[idx].Signal {
 				networks[idx] = network
@@ -328,7 +251,7 @@ func (w *WiFi) parseNetworks(output string) []Network {
 		}
 	}
 
-	// Sort networks by signal strength (strongest first)
+	// Sort networks by signal strength, strongest first
 	sort.Slice(networks, func(i, j int) bool {
 		return networks[i].Signal > networks[j].Signal
 	})
