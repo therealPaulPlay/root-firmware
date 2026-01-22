@@ -98,18 +98,39 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		return fmt.Errorf("cleanup failed: %w", err)
 	}
 
-	// Generate ID and move recording to final location
+	// Generate ID
 	id, err := uuid.NewV4()
 	if err != nil {
 		return fmt.Errorf("failed to generate ID: %w", err)
 	}
 
+	// Add to event log first
+	// If we crash immediately after this, the event log will reference non-existent files,
+	// which is better than orphaned files that can never be cleaned up
+	event := Event{
+		ID:        id.String(),
+		Timestamp: time.Now().UTC(),
+		Duration:  duration,
+		EventType: eventType,
+	}
+
+	eventLog, err := s.readEventLog()
+	if err != nil {
+		return err
+	}
+
+	eventLog.Events = append(eventLog.Events, event)
+	if err := s.writeEventLog(eventLog); err != nil {
+		return err
+	}
+
+	// Now move / rename files to final location
 	finalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", id.String()))
 	if err := os.Rename(filePath, finalPath); err != nil {
 		return fmt.Errorf("failed to move recording: %w", err)
 	}
 
-	// Rename audio file if it exists
+	// Move audio file if it exists
 	audioTempPath := filePath[:len(filePath)-4] + "_audio.m4a"
 	if _, err := os.Stat(audioTempPath); err == nil {
 		audioFinalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", id.String()))
@@ -126,21 +147,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		}
 	}
 
-	// Add to event log
-	event := Event{
-		ID:        id.String(),
-		Timestamp: time.Now().UTC(),
-		Duration:  duration,
-		EventType: eventType,
-	}
-
-	eventLog, err := s.readEventLog()
-	if err != nil {
-		return err
-	}
-
-	eventLog.Events = append(eventLog.Events, event)
-	return s.writeEventLog(eventLog)
+	return nil
 }
 
 // GetEventLog returns all events sorted by timestamp (newest first)
