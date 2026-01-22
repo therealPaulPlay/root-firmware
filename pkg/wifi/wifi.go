@@ -80,13 +80,26 @@ func (w *WiFi) applyStoredWiFiConfig() {
 	go func() {
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		if err := w.connectNetwork(ssid, password); err != nil {
-			log.Printf("WiFi: Failed to connect to stored network: %v", err)
+
+		// Activate existing connection, or create new one if none exists (e.g. after update)
+		if exec.Command("nmcli", "connection", "show", ssid).Run() == nil {
+			if exec.Command("nmcli", "connection", "up", ssid).Run() == nil {
+				log.Printf("WiFi: Connected to %s", ssid)
+			} else {
+				log.Printf("WiFi: Failed to connect to %s (network unavailable)", ssid)
+			}
+		} else {
+			log.Printf("WiFi: Creating connection from configuration")
+			if err := w.connectNetwork(ssid, password); err != nil {
+				log.Printf("WiFi: Failed to connect to stored network: %v", err)
+			} else {
+				log.Printf("WiFi: Connected to %s", ssid)
+			}
 		}
 	}()
 }
 
-// Connect connects to a WiFi network and verifies internet access
+// Connect connects to a network and verifies internet access (User-initiated)
 func (w *WiFi) Connect(ssid, password, countryCode string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -95,17 +108,21 @@ func (w *WiFi) Connect(ssid, password, countryCode string) error {
 		return fmt.Errorf("invalid SSID length (must be 1-32 bytes)")
 	}
 
+	// Remember previous state for rollback
+	previousSSID := w.getActiveSSID()
+	previousRegDomain := w.getActiveRegDomain()
+
 	if countryCode != "" {
 		exec.Command("iw", "reg", "set", strings.ToUpper(countryCode)).Run()
 	}
-
-	// Remember previous connection for rollback
-	previousSSID := w.getActiveSSID()
 
 	// Delete any existing connection profile to avoid stale security settings
 	exec.Command("nmcli", "connection", "delete", ssid).Run()
 
 	if err := w.connectNetwork(ssid, password); err != nil {
+		if countryCode != "" {
+			exec.Command("iw", "reg", "set", previousRegDomain).Run()
+		}
 		return err
 	}
 
@@ -113,6 +130,9 @@ func (w *WiFi) Connect(ssid, password, countryCode string) error {
 		// Connection failed - delete this connection and try to restore previous
 		exec.Command("nmcli", "connection", "delete", ssid).Run()
 
+		if countryCode != "" {
+			exec.Command("iw", "reg", "set", previousRegDomain).Run()
+		}
 		if previousSSID != "" && previousSSID != ssid {
 			log.Printf("WiFi: Reverting to %s", previousSSID)
 			exec.Command("nmcli", "connection", "up", previousSSID).Run()
@@ -134,9 +154,9 @@ func (w *WiFi) Connect(ssid, password, countryCode string) error {
 func (w *WiFi) connectNetwork(ssid, password string) error {
 	var cmd *exec.Cmd
 	if password == "" {
-		cmd = exec.Command("nmcli", "device", "wifi", "connect", ssid)
+		cmd = exec.Command("nmcli", "--wait", "15", "device", "wifi", "connect", ssid)
 	} else {
-		cmd = exec.Command("nmcli", "device", "wifi", "connect", ssid, "password", password)
+		cmd = exec.Command("nmcli", "--wait", "15", "device", "wifi", "connect", ssid, "password", password)
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -172,13 +192,24 @@ func (w *WiFi) getActiveSSID() string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+	for line := range strings.SplitSeq(string(output), "\n") {
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) == 2 && parts[1] == "wlan0" {
 			return parts[0]
 		}
 	}
 	return ""
+}
+
+func (w *WiFi) getActiveRegDomain() string {
+	output, _ := exec.Command("iw", "reg", "get").Output()
+	for line := range strings.SplitSeq(string(output), "\n") {
+		if code, found := strings.CutPrefix(line, "country "); found && len(code) >= 2 {
+			// "country DE: DFS-ETSI" -> "DE"
+			return code[0:2]
+		}
+	}
+	return "00" // World regulatory domain as fallback
 }
 
 func (w *WiFi) parseNetworks(output string) []Network {
