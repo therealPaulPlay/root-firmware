@@ -33,7 +33,11 @@ log "Running filesystem check..."
 e2fsck -f -y "$DATA_PART"
 
 log "Resizing ext4 filesystem..."
-resize2fs "$DATA_PART"
+if resize2fs "$DATA_PART" 2>&1 | grep -q "Nothing to do"; then
+    log "Filesystem already at maximum size"
+else
+    log "Filesystem resized successfully"
+fi
 
 # Mount temporarily to create marker file
 mount "$DATA_PART" /data

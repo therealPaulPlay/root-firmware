@@ -82,8 +82,8 @@ func SendFileInChunks(ctx *HandlerContext, msgType string, filePath string, file
 		buffer := make([]byte, chunkSize)
 
 		for chunkIndex := range totalChunks {
-			n, err := file.Read(buffer)
-			if err != nil && err != io.EOF {
+			n, err := io.ReadFull(file, buffer)
+			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 				SendEncryptedError(ctx, msgType, ErrInternalError, fmt.Sprintf("Failed to read chunk: %v", err))
 				return
 			}

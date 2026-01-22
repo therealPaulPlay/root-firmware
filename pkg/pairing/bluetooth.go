@@ -57,6 +57,10 @@ var viewfinderChunksCacheMu sync.Mutex
 
 // writeError writes a JSON error response to the BLE response writer
 func writeError(rsp ble.ResponseWriter, message string) {
+	const maxMsgLen = 70 // JSON success and error fields add around 32 bytes
+	if len(message) > maxMsgLen {
+		message = message[:maxMsgLen-3] + "..." // Truncate so that json stays below 128 bytes
+	}
 	fmt.Fprintf(rsp, `{"success":false,"error":"%s"}`, message)
 }
 

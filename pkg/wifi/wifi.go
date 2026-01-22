@@ -102,6 +102,9 @@ func (w *WiFi) Connect(ssid, password, countryCode string) error {
 	// Remember previous connection for rollback
 	previousSSID := w.getActiveSSID()
 
+	// Delete any existing connection profile to avoid stale security settings
+	exec.Command("nmcli", "connection", "delete", ssid).Run()
+
 	if err := w.connectNetwork(ssid, password); err != nil {
 		return err
 	}
