@@ -39,6 +39,7 @@ type Recorder struct {
 
 type viewfinderProcess struct {
 	cmd         *exec.Cmd
+	stdin       io.WriteCloser
 	latestFrame []byte
 	frameMu     sync.RWMutex
 	lastAccess  time.Time
@@ -612,22 +613,24 @@ func (r *Recorder) startViewfinder(x, y int) {
 		stdout, _ := cmd.StdoutPipe()
 		cmd.Start()
 		vf.cmd = cmd
+		vf.stdin = stdin
 
 		// Feed keyframes periodically
 		go func() {
 			lastKeyframe := []byte(nil)
 			for {
 				select {
-				case <-time.After(100 * time.Millisecond):
+				case <-time.After(250 * time.Millisecond):
 					r.videoBroadcast.frameMu.RLock()
 					keyframe := r.videoBroadcast.latestFrame
 					r.videoBroadcast.frameMu.RUnlock()
 					if len(keyframe) > 0 && !bytes.Equal(keyframe, lastKeyframe) {
-						stdin.Write(keyframe)
+						if _, err := stdin.Write(keyframe); err != nil {
+							return // Pipe closed, exit feeder
+						}
 						lastKeyframe = append([]byte(nil), keyframe...)
 					}
 				case <-vf.stopCh:
-					stdin.Close()
 					return
 				}
 			}
@@ -678,10 +681,16 @@ func (r *Recorder) stopViewfinder() {
 	}
 	vf := r.viewfinder
 	close(vf.stopCh)
+
+	// Close stdin first to unblock any pending writes and signal EOF to ffmpeg
+	if vf.stdin != nil {
+		vf.stdin.Close()
+	}
+
 	if vf.cmd != nil && vf.cmd.Process != nil {
 		vf.cmd.Process.Signal(syscall.SIGTERM)
 		go func() {
-			done := make(chan error)
+			done := make(chan error, 1)
 			go func() { done <- vf.cmd.Wait() }()
 			select {
 			case err := <-done:

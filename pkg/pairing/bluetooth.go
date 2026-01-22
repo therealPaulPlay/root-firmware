@@ -234,7 +234,7 @@ func initBLE() error {
 			writeError(rsp, pairingStatus.error)
 			return
 		}
-		log.Printf("BLE: Sending pairing result: %+v", pairingStatus.data)
+		log.Printf("BLE: Sending pairing result (productId: %s, publicKey: %s)", pairingStatus.data["productId"], pairingStatus.data["publicKey"])
 		// Return only productId (camera public key is in separate characteristic)
 		if err := writeJSON(rsp, map[string]any{"productId": pairingStatus.data["productId"]}); err != nil {
 			log.Printf("BLE: Failed to send pairing result: %v", err)
