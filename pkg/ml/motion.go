@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	motionThreshold  = 12   // Pixel difference threshold (scaled for smaller resolution)
-	minChangedPixels = 150  // Minimum pixels changed (160x90 = 14400 pixels, ~1% threshold)
-	backgroundAlpha  = 0.05 // Background update rate (slower = more stable)
-	scaledWidth      = 160  // Downscale for performance
-	scaledHeight     = 90   // 16:9 aspect ratio
+	pixelChangeThreshold = 12   // Min brightness difference for a pixel to count as "changed"
+	minChangedPixels     = 150  // Min changed pixels to trigger motion (160x90 = 14400 total, ~1%)
+	backgroundAlpha      = 0.15 // Background update rate per frame (higher = faster adaptation)
+	scaledWidth          = 160  // Downscale for performance
+	scaledHeight         = 90   // 16:9 aspect ratio
 )
 
 type motionDetector struct {
@@ -38,7 +38,7 @@ func (m *motionDetector) detectMotion(jpegData []byte) (bool, error) {
 	changedPixels := 0
 	for i := range gray {
 		diff := math.Abs(float64(gray[i] - m.background[i]))
-		if diff > motionThreshold {
+		if diff > pixelChangeThreshold {
 			changedPixels++
 		}
 		m.background[i] = m.background[i]*(1-backgroundAlpha) + gray[i]*backgroundAlpha
