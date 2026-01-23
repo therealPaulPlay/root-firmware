@@ -183,6 +183,7 @@ func (r *Recorder) startCamera() error {
 	r.videoBroadcast = &broadcast{consumers: make([]chan []byte, 0)}
 
 	go r.videoBroadcastLoop(stdout)
+	log.Println("Recorder: Camera (video broadcast) started")
 	return nil
 }
 
@@ -272,7 +273,7 @@ func (r *Recorder) startMicrophone() error {
 	r.audioBroadcast = &broadcast{consumers: make([]chan []byte, 0)}
 
 	go r.audioBroadcastLoop(stdout)
-	log.Println("Recorder: Audio broadcast started")
+	log.Println("Recorder: Microphone (audio broadcast) started")
 	return nil
 }
 
