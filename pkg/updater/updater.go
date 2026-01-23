@@ -73,8 +73,15 @@ func (u *Updater) GetStatus() (UpdateStatus, string, string) {
 	return u.status, u.availableVersion, u.errorMsg
 }
 
-// CheckForUpdates queries the relay server for available firmware updates.
+// CheckForUpdates queries the relay server for available firmware updates
 func (u *Updater) CheckForUpdates() {
+	u.mu.RLock()
+	status := u.status
+	u.mu.RUnlock()
+	if status == StatusDownloading || status == StatusInstalling {
+		return
+	}
+
 	relayDomain, ok := config.Get().GetKey("relayDomain")
 	if !ok {
 		log.Println("Updater: Skipping update check: relay domain not configured")
@@ -134,7 +141,7 @@ func (u *Updater) CheckForUpdates() {
 	markUpdateCheckSuccessful()
 }
 
-// StartUpdate downloads and installs the available update via RAUC.
+// StartUpdate begins downloading and installing the available update via RAUC asynchronously
 func (u *Updater) StartUpdate() error {
 	u.mu.Lock()
 	if u.status != StatusUpdateAvailable {
@@ -147,6 +154,11 @@ func (u *Updater) StartUpdate() error {
 	u.status = StatusDownloading
 	u.mu.Unlock()
 
+	go u.performUpdate(downloadURL, expectedSHA256)
+	return nil
+}
+
+func (u *Updater) performUpdate(downloadURL, expectedSHA256 string) {
 	// Remove any stale files from previous interrupted updates
 	os.Remove(raucBundlePath)
 	if matches, err := filepath.Glob("/data/.rauc-bundle-*.raucb"); err == nil {
@@ -159,7 +171,7 @@ func (u *Updater) StartUpdate() error {
 	if err := u.downloadFile(downloadURL, raucBundlePath, expectedSHA256); err != nil {
 		u.setError(fmt.Sprintf("download failed: %v", err))
 		os.Remove(raucBundlePath)
-		return err
+		return
 	}
 
 	// Install using RAUC
@@ -170,24 +182,20 @@ func (u *Updater) StartUpdate() error {
 	if err := u.installWithRAUC(); err != nil {
 		u.setError(fmt.Sprintf("RAUC installation failed: %v", err))
 		os.Remove(raucBundlePath)
-		return err
+		return
 	}
 
 	// Clean up and schedule reboot
 	os.Remove(raucBundlePath)
 	log.Println("Updater: RAUC update successful, rebooting in 2 seconds...")
 
-	go func() {
-		time.Sleep(2 * time.Second)
-		if err := exec.Command("reboot").Run(); err != nil {
-			log.Printf("Updater: Failed to reboot: %v", err)
-		}
-	}()
-
-	return nil
+	time.Sleep(2 * time.Second)
+	if err := exec.Command("reboot").Run(); err != nil {
+		log.Printf("Updater: Failed to reboot: %v", err)
+	}
 }
 
-// installWithRAUC installs the downloaded bundle using the RAUC update framework.
+// installWithRAUC installs the downloaded bundle using the RAUC update framework
 func (u *Updater) installWithRAUC() error {
 	log.Println("Updater: Installing update via RAUC...")
 

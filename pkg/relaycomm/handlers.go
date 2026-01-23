@@ -738,7 +738,6 @@ func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
 		SendEncryptedError(ctx, MsgStartUpdate, ErrInternalError, err.Error())
 		return
 	}
-
 	SendEncryptedSuccess(ctx, MsgStartUpdate, nil)
 }
 
