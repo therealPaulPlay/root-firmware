@@ -2,7 +2,7 @@
 
 # ROOT (Firmware)
 
-Firmware for ROOT camera devices. Written in Go with a focus on privacy, security, and observability.
+Firmware for ROOT camera products. Written in Go with a focus on privacy, security, and observability.
 
 ## Features and benefits
 

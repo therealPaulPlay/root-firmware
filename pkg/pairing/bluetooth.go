@@ -235,16 +235,16 @@ func initBLE() error {
 			return
 		}
 		log.Printf("BLE: Sending pairing result (productId: %s, publicKey: %s)", pairingStatus.data["productId"], pairingStatus.data["publicKey"])
-		// Return only productId (camera public key is in separate characteristic)
+		// Return only productId (product public key is in separate characteristic)
 		if err := writeJSON(rsp, map[string]any{"productId": pairingStatus.data["productId"]}); err != nil {
 			log.Printf("BLE: Failed to send pairing result: %v", err)
 			writeError(rsp, err.Error())
 		}
 	}))
 
-	// Get Camera Public Key characteristic (read after pairing)
-	cameraPublicKeyChar := svc.NewCharacteristic(productPublicKeyCharUUID)
-	cameraPublicKeyChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
+	// Get Product Public Key characteristic (read after pairing)
+	productPublicKeyChar := svc.NewCharacteristic(productPublicKeyCharUUID)
+	productPublicKeyChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if !pairingStatus.completed {
 			writeError(rsp, "No pairing result available")
 			return
@@ -254,7 +254,7 @@ func initBLE() error {
 			return
 		}
 		if err := writeJSON(rsp, map[string]any{"publicKey": pairingStatus.data["publicKey"]}); err != nil {
-			log.Printf("BLE: Failed to send camera public key: %v", err)
+			log.Printf("BLE: Failed to send product public key: %v", err)
 			writeError(rsp, err.Error())
 		}
 	}))
@@ -445,21 +445,21 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("device not paired: %s", msg.DeviceID)
 	}
 
-	// Get camera private key (stored as base64 string)
-	cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
+	// Get product private key (stored as base64 string)
+	productPrivateKeyEncoded, ok := config.Get().GetKey("productPrivateKey")
 	if !ok {
-		return nil, fmt.Errorf("camera private key not found")
+		return nil, fmt.Errorf("product private key not found")
 	}
 
-	privKeyStr, ok := cameraPrivateKeyEncoded.(string)
+	privKeyStr, ok := productPrivateKeyEncoded.(string)
 	if !ok {
-		return nil, fmt.Errorf("camera private key has invalid type")
+		return nil, fmt.Errorf("product private key has invalid type")
 	}
 
 	// Decode from base64
 	privKey, err := encryption.DecodeKey(privKeyStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode camera private key: %w", err)
+		return nil, fmt.Errorf("failed to decode product private key: %w", err)
 	}
 
 	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)

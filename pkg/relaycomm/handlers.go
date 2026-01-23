@@ -60,7 +60,7 @@ const (
 // Error code constants
 const (
 	ErrDeviceNotPaired  = "DEVICE_NOT_PAIRED"
-	ErrCameraNotInit    = "CAMERA_NOT_INITIALIZED"
+	ErrProductNotInit   = "PRODUCT_NOT_INITIALIZED"
 	ErrInvalidKey       = "INVALID_KEY"
 	ErrDecryptionFailed = "DECRYPTION_FAILED"
 	ErrInvalidPayload   = "INVALID_PAYLOAD"
@@ -77,22 +77,22 @@ type HandlerContext struct {
 }
 
 /* Flow example:
-Device → Relay Server → Camera:
+Device → Relay Server → Product:
 	{
 		"type": "wifiScan",
 		"target": "product",
-		"productId": "camera-uuid-123",    // ← Which camera should handle this
+		"productId": "product-uuid-123",    // ← Which product should handle this
 		"deviceId": "device-uuid-456",     // ← Which device sent this
 		"payload": "encrypted base64..." // { ssid: "...", password: "..." } (No deviceId needed - if wrong device sent it, decryption would fail)
 	}
 
-Camera → Relay Server → Device:
+Product → Relay Server → Device:
 	{
 		"type": "wifiScanResult",
 		"target": "device",
-		"productId": "camera-uuid-123",    // ← Which camera sent this
+		"productId": "product-uuid-123",    // ← Which product sent this
 		"deviceId": "device-uuid-456",     // ← Which device should receive this
-		"payload": "encrypted base64..." // { success: true, networks: [...] } (No productId needed - if wrong camera sent it, decryption would fail)
+		"payload": "encrypted base64..." // { success: true, networks: [...] } (No productId needed - if wrong product sent it, decryption would fail)
 	}
 */
 
@@ -106,25 +106,25 @@ func useEncryption(messageType string, handler func(*HandlerContext, json.RawMes
 			return
 		}
 
-		// Get camera's private key (stored as base64 string)
-		cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
+		// Get product's private key (stored as base64 string)
+		productPrivateKeyEncoded, ok := config.Get().GetKey("productPrivateKey")
 		if !ok {
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrCameraNotInit, "Camera private key not initialized")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrProductNotInit, "Product private key not initialized")
 			return
 		}
 
-		privKeyStr, ok := cameraPrivateKeyEncoded.(string)
+		privKeyStr, ok := productPrivateKeyEncoded.(string)
 		if !ok {
-			log.Printf("RelayComm: Camera private key has invalid type")
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid")
+			log.Printf("RelayComm: Product private key has invalid type")
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Product encryption key invalid")
 			return
 		}
 
 		// Decode from base64
 		privKey, err := encryption.DecodeKey(privKeyStr)
 		if err != nil {
-			log.Printf("RelayComm: Failed to decode camera private key: %v", err)
-			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Camera encryption key invalid")
+			log.Printf("RelayComm: Failed to decode product private key: %v", err)
+			sendError(msg.DeviceID, msg.RequestID, messageType, ErrInvalidKey, "Product encryption key invalid")
 			return
 		}
 
@@ -303,14 +303,14 @@ func handleRenewKey(msg Message) {
 		return
 	}
 
-	// Get camera's private key (stored as base64 string)
-	cameraPrivateKeyEncoded, ok := config.Get().GetKey("cameraPrivateKey")
+	// Get product's private key (stored as base64 string)
+	productPrivateKeyEncoded, ok := config.Get().GetKey("productPrivateKey")
 	if !ok {
-		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrCameraNotInit, "Camera not initialized")
+		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrProductNotInit, "Camera not initialized")
 		return
 	}
 
-	privKeyStr, ok := cameraPrivateKeyEncoded.(string)
+	privKeyStr, ok := productPrivateKeyEncoded.(string)
 	if !ok {
 		log.Printf("RelayComm: Camera private key has invalid type")
 		sendError(msg.DeviceID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Camera encryption key invalid")

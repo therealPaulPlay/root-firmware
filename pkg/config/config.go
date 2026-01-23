@@ -76,18 +76,18 @@ func (c *Config) createInitialConfig() error {
 		return fmt.Errorf("failed to generate device ID: %w", err)
 	}
 
-	// Generate camera keypair for end-to-end encryption with paired devices
+	// Generate product keypair for end-to-end encryption with paired devices
 	// Store as base64 encoded strings
 	keypair, err := encryption.GenerateKeypair()
 	if err != nil {
-		return fmt.Errorf("failed to generate camera keypair: %w", err)
+		return fmt.Errorf("failed to generate product keypair: %w", err)
 	}
 
 	c.data = map[string]any{
-		"id":               id.String(),
-		"bluetoothName":    "ROOT-Observer-" + generateRandomSuffix(4),
-		"cameraPrivateKey": encryption.EncodeKey(keypair.PrivateKey),
-		"cameraPublicKey":  encryption.EncodeKey(keypair.PublicKey),
+		"id":                id.String(),
+		"bluetoothName":     "ROOT-Observer-" + generateRandomSuffix(4),
+		"productPrivateKey": encryption.EncodeKey(keypair.PrivateKey),
+		"productPublicKey":  encryption.EncodeKey(keypair.PublicKey),
 	}
 
 	return c.save()

@@ -166,14 +166,14 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 		return nil, fmt.Errorf("code not verified or expired")
 	}
 
-	// Get camera public key (generated during config initialization, stored as base64)
-	cameraPublicKey, ok := config.Get().GetKey("cameraPublicKey")
+	// Get product public key (generated during config initialization, stored as base64)
+	productPublicKey, ok := config.Get().GetKey("productPublicKey")
 	if !ok {
-		return nil, fmt.Errorf("camera public key not found in config")
+		return nil, fmt.Errorf("product public key not found in config")
 	}
-	cameraPublicKeyStr, ok := cameraPublicKey.(string)
+	productPublicKeyStr, ok := productPublicKey.(string)
 	if !ok {
-		return nil, fmt.Errorf("camera public key has invalid type: %T", cameraPublicKey)
+		return nil, fmt.Errorf("product public key has invalid type: %T", productPublicKey)
 	}
 
 	// Add device with its public key
@@ -192,6 +192,6 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 
 	return map[string]any{
 		"productId": productID,
-		"publicKey": cameraPublicKeyStr,
+		"publicKey": productPublicKeyStr,
 	}, nil
 }
