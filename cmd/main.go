@@ -79,9 +79,9 @@ func main() {
 	// Start relay connection (if relay domain configured)
 	relaycomm.Get().Start()
 
-	// Check for updates immediately and then every 5 minutes
+	// Check for updates immediately and then every 15 minutes
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 
 		updater.Get().CheckForUpdates()

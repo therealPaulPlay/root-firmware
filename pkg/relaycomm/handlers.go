@@ -55,6 +55,7 @@ const (
 	MsgSetEventDetectionTypes   = "setEventDetectionTypes"
 	MsgSetProductAlias          = "setProductAlias"
 	MsgGetUpdateStatus          = "getUpdateStatus"
+	MsgSetVersionDev            = "setVersionDev"
 )
 
 // Error code constants
@@ -293,6 +294,7 @@ func registerHandlers(relay *RelayComm) {
 	relay.On(MsgRestart, useEncryption(MsgRestart, handleRestart))
 	relay.On(MsgReset, useEncryption(MsgReset, handleReset))
 	relay.On(MsgGetUpdateStatus, useEncryption(MsgGetUpdateStatus, handleGetUpdateStatus))
+	relay.On(MsgSetVersionDev, useEncryption(MsgSetVersionDev, handleSetVersionDev))
 }
 
 func handleRenewKey(msg Message) {
@@ -838,4 +840,10 @@ func handleSetEventDetectionTypes(ctx *HandlerContext, payload json.RawMessage) 
 	SendEncryptedSuccess(ctx, MsgSetEventDetectionTypes, map[string]any{
 		"enabledTypes": req.EnabledTypes,
 	})
+}
+
+func handleSetVersionDev(ctx *HandlerContext, payload json.RawMessage) {
+	globals.FirmwareVersion = "dev"
+	updater.Get().CheckForUpdates()
+	SendEncryptedSuccess(ctx, MsgSetVersionDev, nil)
 }
