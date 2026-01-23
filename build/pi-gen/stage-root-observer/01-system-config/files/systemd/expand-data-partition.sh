@@ -39,9 +39,11 @@ else
     log "Filesystem resized successfully"
 fi
 
-# Mount temporarily to create marker file
-mount "$DATA_PART" /data
-touch "$MARKER_FILE"
-umount /data
+# Mount to temp location to create marker file (avoid /data to not conflict with systemd data.mount)
+TEMP_MNT=$(mktemp -d)
+mount "$DATA_PART" "$TEMP_MNT"
+touch "$TEMP_MNT/.partition-expanded"
+umount "$TEMP_MNT"
+rmdir "$TEMP_MNT"
 
 log "Data partition expansion complete"
