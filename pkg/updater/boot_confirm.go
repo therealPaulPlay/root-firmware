@@ -56,14 +56,17 @@ func tryMarkSlotGood() {
 	}
 }
 
-// confirmSuccessfulBoot marks the current RAUC slot as good.
+// confirmSuccessfulBoot marks the current RAUC slot as good
 // This calls our custom bootloader backend which updates the good-slot marker
 // and clears the trying marker, preventing rollback on next boot
 func confirmSuccessfulBoot() error {
 	cmd := exec.Command("/usr/lib/rauc/backend/raspberrypi-firmware", "mark-good")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to mark slot as good: %w (output: %s)", err, strings.TrimSpace(string(output)))
+		if len(output) > 0 {
+			return fmt.Errorf("failed to mark slot as good: %w (output: %s)", err, strings.TrimSpace(string(output)))
+		}
+		return fmt.Errorf("failed to mark slot as good: %w", err)
 	}
 	log.Printf("Updater: %s", strings.TrimSpace(string(output)))
 	return nil

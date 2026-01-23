@@ -226,11 +226,12 @@ func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	// Download and hash simultaneously
+	// Download and hash simultaneously with progress logging
 	hash := sha256.New()
 	writer := io.MultiWriter(tmp, hash)
+	progressReader := &progressReader{r: resp.Body, total: resp.ContentLength}
 
-	bytesWritten, err := io.Copy(writer, resp.Body)
+	bytesWritten, err := io.Copy(writer, progressReader)
 	if err != nil {
 		tmp.Close()
 		return fmt.Errorf("failed to write bundle: %w", err)
@@ -258,4 +259,24 @@ func (u *Updater) setError(msg string) {
 	u.status = StatusError
 	u.errorMsg = msg
 	log.Printf("Updater: Error %s", msg)
+}
+
+type progressReader struct {
+	r          io.Reader
+	total      int64
+	read       int64
+	lastLogged int
+}
+
+// Read reads the response and logs the download progress on updates
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	p.read += int64(n)
+	if p.total > 0 {
+		if percent := int(p.read * 10 / p.total); percent > p.lastLogged {
+			p.lastLogged = percent
+			log.Printf("Updater: Download progress: %d%%", percent*10)
+		}
+	}
+	return n, err
 }

@@ -144,7 +144,7 @@ func MicEnabled() bool {
 func getMicDevice() string {
 	output, err := exec.Command("arecord", "-l").CombinedOutput()
 	if err != nil {
-		log.Printf("Recorder: No microphone available (arecord failed): %v", err)
+		log.Printf("Recorder: Error getting microphone (arecord failed): %v", err)
 		return ""
 	}
 
@@ -153,7 +153,6 @@ func getMicDevice() string {
 		return fmt.Sprintf("plughw:%s,%s", matches[1], matches[2])
 	}
 
-	log.Println("Recorder: No microphone available")
 	return ""
 }
 
