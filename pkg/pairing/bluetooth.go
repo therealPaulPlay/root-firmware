@@ -307,7 +307,7 @@ func initBLE() error {
 		}
 	}))
 
-	// Set WiFi characteristic (write to configure, read to get result)
+	// Set WiFi characteristic (write to start connection, read to poll status)
 	wifiConnectChar := svc.NewCharacteristic(wifiConnectCharUUID)
 	wifiConnectChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		decrypted, err := decryptAndVerify(req.Data())
@@ -328,18 +328,21 @@ func initBLE() error {
 			return
 		}
 
-		if err := wifi.Get().Connect(wifiReq.SSID, wifiReq.Password, wifiReq.CountryCode); err != nil {
-			log.Printf("BLE: WiFi connection to %s failed: %v", wifiReq.SSID, err)
-			wifiStatus = operationStatus{completed: true, success: false, error: err.Error()}
-			return
-		}
-
-		log.Printf("BLE: WiFi configured: %s", wifiReq.SSID)
-		wifiStatus = operationStatus{completed: true, success: true}
+		// Start connection in background, return immediately
+		wifiStatus = operationStatus{completed: false}
+		go func() {
+			if err := wifi.Get().Connect(wifiReq.SSID, wifiReq.Password, wifiReq.CountryCode); err != nil {
+				log.Printf("BLE: WiFi connection to %s failed: %v", wifiReq.SSID, err)
+				wifiStatus = operationStatus{completed: true, success: false, error: err.Error()}
+				return
+			}
+			log.Printf("BLE: WiFi configured: %s", wifiReq.SSID)
+			wifiStatus = operationStatus{completed: true, success: true}
+		}()
 	}))
 	wifiConnectChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if !wifiStatus.completed {
-			writeError(rsp, "No WiFi configuration result available")
+			writeJSON(rsp, map[string]any{"status": "pending"})
 			return
 		}
 		if !wifiStatus.success {

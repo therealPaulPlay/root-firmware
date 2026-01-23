@@ -154,9 +154,9 @@ func (w *WiFi) Connect(ssid, password, countryCode string) error {
 func (w *WiFi) connectNetwork(ssid, password string) error {
 	var cmd *exec.Cmd
 	if password == "" {
-		cmd = exec.Command("nmcli", "--wait", "15", "device", "wifi", "connect", ssid)
+		cmd = exec.Command("nmcli", "--wait", "25", "device", "wifi", "connect", ssid)
 	} else {
-		cmd = exec.Command("nmcli", "--wait", "15", "device", "wifi", "connect", ssid, "password", password)
+		cmd = exec.Command("nmcli", "--wait", "25", "device", "wifi", "connect", ssid, "password", password)
 	}
 
 	output, err := cmd.CombinedOutput()
