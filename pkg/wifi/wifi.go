@@ -46,7 +46,7 @@ func (w *WiFi) Scan() ([]Network, error) {
 	defer w.mu.Unlock()
 
 	exec.Command("nmcli", "device", "wifi", "rescan").Run()
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	output, err := exec.Command("nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,FREQ", "device", "wifi", "list").Output()
 	if err != nil {

@@ -250,10 +250,10 @@ func (r *Recorder) startMicrophone() error {
 	}
 
 	// Apply 2x volume gain to boost microphone input
-	exec.Command("amixer", "-D", "hw:0", "sset", "Mic", "100%").Run()
+	exec.Command("amixer", "-D", micDevice, "sset", "Mic", "100%").Run()
 
 	cmd := exec.Command("arecord",
-		"-D", "hw:0,0",
+		"-D", micDevice,
 		"-f", "S16_LE",
 		"-r", "48000",
 		"-c", "1",
