@@ -13,7 +13,7 @@ import (
 )
 
 const maxLogs = 1000
-const maxLogMsgSize = 500 // Max characters per log message
+const maxLogMsgSize = 2500 // Max characters per log message
 
 type Entry struct {
 	Timestamp time.Time `json:"timestamp"`

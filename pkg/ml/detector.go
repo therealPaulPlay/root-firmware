@@ -13,8 +13,8 @@ import (
 const (
 	modelWidth  = 416
 	modelHeight = 416
-	confThresh  = 0.4
-	nmsThresh   = 0.5
+	confThresh  = 0.35 // 0.35-0.45 suggested for people, lower is more sensitve
+	nmsThresh   = 0.6
 	regMax      = 7    // Distribution head bins [0-7]
 	numClasses  = 80   // COCO classes (classifiers)
 	numAnchors  = 3598 // Anchor count from model

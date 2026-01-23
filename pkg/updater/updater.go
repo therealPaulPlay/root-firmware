@@ -144,6 +144,10 @@ func (u *Updater) CheckForUpdates() {
 // StartUpdate begins downloading and installing the available update via RAUC asynchronously
 func (u *Updater) StartUpdate() error {
 	u.mu.Lock()
+	if u.status == StatusDownloading || u.status == StatusInstalling {
+		u.mu.Unlock()
+		return fmt.Errorf("update already in progress")
+	}
 	if u.status != StatusUpdateAvailable {
 		u.mu.Unlock()
 		return fmt.Errorf("no update available")
@@ -209,7 +213,7 @@ func (u *Updater) installWithRAUC() error {
 		return fmt.Errorf("rauc install failed: %w (output: %s)", err, outputStr)
 	}
 
-	log.Printf("Updater: RAUC install completed: %s", strings.TrimSpace(string(output)))
+	log.Println("Updater: RAUC install completed successfully")
 	return nil
 }
 
