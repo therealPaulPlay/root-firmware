@@ -392,7 +392,7 @@ func handleRenewKey(msg Message) {
 }
 
 func handleRenewKeyAck(msg Message) {
-	newPublicKey, newSharedSecret, newSession, ok := GetAndClearPendingKeyRenewal(msg.DeviceID)
+	newPublicKey, newSharedSecret, newSession, ok := GetPendingKeyRenewal(msg.DeviceID)
 	if !ok {
 		log.Printf("RelayComm: No pending key renewal for device %s", msg.DeviceID)
 		sendError(msg.DeviceID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "No pending key renewal")

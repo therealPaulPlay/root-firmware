@@ -38,7 +38,7 @@ func initKeyRenewalManager() *keyRenewalManager {
 		renewalManager = &keyRenewalManager{
 			pending:       make(map[string]*pendingKeyRenewal),
 			previous:      make(map[string]*previousEncryption),
-			cleanupTicker: time.NewTicker(1 * time.Minute),
+			cleanupTicker: time.NewTicker(15 * time.Second),
 			stopCleanup:   make(chan struct{}),
 		}
 		go renewalManager.cleanupExpired()
@@ -59,7 +59,7 @@ func (m *keyRenewalManager) cleanupExpired() {
 					delete(m.pending, deviceID)
 				}
 			}
-			// Clean up expired previous encryptions
+			// Clean up stale previous encryptions
 			for deviceID, prev := range m.previous {
 				if now.Sub(prev.CreatedAt) > 30*time.Second {
 					delete(m.previous, deviceID)
@@ -72,7 +72,7 @@ func (m *keyRenewalManager) cleanupExpired() {
 	}
 }
 
-// BufferPendingKeyRenewal stores key renewal data before committing
+// BufferPendingKeyRenewal stores key renewal data before committing (auto-expires after 30s)
 func BufferPendingKeyRenewal(deviceID string, newPublicKey, newSharedSecret []byte, newSession *encryption.Session) {
 	m := initKeyRenewalManager()
 	m.mu.Lock()
@@ -85,19 +85,18 @@ func BufferPendingKeyRenewal(deviceID string, newPublicKey, newSharedSecret []by
 	}
 }
 
-// GetAndClearPendingKeyRenewal retrieves and removes buffered key renewal data
-func GetAndClearPendingKeyRenewal(deviceID string) ([]byte, []byte, *encryption.Session, bool) {
+// GetPendingKeyRenewal retrieves buffered key renewal data
+func GetPendingKeyRenewal(deviceID string) ([]byte, []byte, *encryption.Session, bool) {
 	m := initKeyRenewalManager()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if renewal, ok := m.pending[deviceID]; ok {
-		delete(m.pending, deviceID)
 		return renewal.NewPublicKey, renewal.NewSharedSecret, renewal.NewEncryptSession, true
 	}
 	return nil, nil, nil, false
 }
 
-// StorePreviousEncryption stores old encryption session for device
+// StorePreviousEncryption stores old encryption session for device (auto-expires after 30s)
 func StorePreviousEncryption(deviceID string, session *encryption.Session) {
 	m := initKeyRenewalManager()
 	m.mu.Lock()
