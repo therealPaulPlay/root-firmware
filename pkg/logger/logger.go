@@ -30,6 +30,7 @@ var w *writer
 func Init() {
 	w = &writer{logs: load()}
 	log.SetOutput(io.MultiWriter(os.Stdout, w))
+	log.SetFlags(0) // Disable default timestamp prefix
 }
 
 func (wr *writer) Write(p []byte) (int, error) {
