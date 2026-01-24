@@ -76,7 +76,7 @@ func (sm *streamManager) endLocked(isVideo bool) {
 		if s.reader != nil {
 			s.reader.Close()
 		}
-		s.wg.Wait()
+		s.wg.Wait() // Wait for stream loops to exit
 		if s.onEnd != nil {
 			s.onEnd()
 		}
@@ -182,6 +182,8 @@ func streamVideo(s *stream) {
 
 		boxData, err := readMP4Box(s.reader)
 		if err != nil {
+			log.Printf("RelayComm: Video stream read failed, ending stream: %v", err)
+			go streams.end(true)
 			return
 		}
 
@@ -199,6 +201,7 @@ func streamVideo(s *stream) {
 			"chunkIndex": chunkIndex,
 		}); err != nil {
 			log.Printf("RelayComm: Video stream send failed, ending stream: %v", err)
+			go streams.end(true)
 			return
 		}
 		chunkIndex++
@@ -215,6 +218,8 @@ func streamAudio(s *stream) {
 			return
 		case data, ok := <-s.ch:
 			if !ok {
+				log.Println("RelayComm: Audio channel closed, ending stream")
+				go streams.end(false)
 				return
 			}
 
@@ -223,6 +228,7 @@ func streamAudio(s *stream) {
 				"chunkIndex": chunkIndex,
 			}); err != nil {
 				log.Printf("RelayComm: Audio stream send failed, ending stream: %v", err)
+				go streams.end(false)
 				return
 			}
 			chunkIndex++
