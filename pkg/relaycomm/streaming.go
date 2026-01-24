@@ -59,13 +59,13 @@ func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch cha
 	log.Printf("RelayComm: Started %s stream for device %s", msgType, ctx.DeviceID)
 }
 
-func (sm *streamManager) end(isVideo bool) {
+func (sm *streamManager) end(isVideo bool, errorMsg string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	sm.endLocked(isVideo)
+	sm.endLocked(isVideo, errorMsg)
 }
 
-func (sm *streamManager) endLocked(isVideo bool) {
+func (sm *streamManager) endLocked(isVideo bool, errorMsg string) {
 	s := sm.video
 	if !isVideo {
 		s = sm.audio
@@ -85,6 +85,11 @@ func (sm *streamManager) endLocked(isVideo bool) {
 			sm.video = nil
 		} else {
 			sm.audio = nil
+		}
+
+		// Notify viewer of error after cleanup
+		if errorMsg != "" {
+			SendEncryptedError(s.ctx, s.msgType, ErrStreamEnded, errorMsg)
 		}
 	}
 
@@ -125,11 +130,11 @@ func (sm *streamManager) startMonitor() {
 			sm.mu.Lock()
 			if sm.video != nil && time.Since(sm.video.lastActive) > 10*time.Second {
 				log.Println("RelayComm: Ending video stream due to inactivity")
-				sm.endLocked(true)
+				sm.endLocked(true, "")
 			}
 			if sm.audio != nil && time.Since(sm.audio.lastActive) > 10*time.Second {
 				log.Println("RelayComm: Ending audio stream due to inactivity")
-				sm.endLocked(false)
+				sm.endLocked(false, "")
 			}
 			sm.mu.Unlock()
 		}
@@ -183,7 +188,7 @@ func streamVideo(s *stream) {
 		boxData, err := readMP4Box(s.reader)
 		if err != nil {
 			log.Printf("RelayComm: Video stream read failed, ending stream: %v", err)
-			go streams.end(true)
+			go streams.end(true, "Video stream read failed")
 			return
 		}
 
@@ -201,7 +206,7 @@ func streamVideo(s *stream) {
 			"chunkIndex": chunkIndex,
 		}); err != nil {
 			log.Printf("RelayComm: Video stream send failed, ending stream: %v", err)
-			go streams.end(true)
+			go streams.end(true, "Video stream send failed")
 			return
 		}
 		chunkIndex++
@@ -219,7 +224,7 @@ func streamAudio(s *stream) {
 		case data, ok := <-s.ch:
 			if !ok {
 				log.Println("RelayComm: Audio channel closed, ending stream")
-				go streams.end(false)
+				go streams.end(false, "Audio channel closed")
 				return
 			}
 
@@ -228,7 +233,7 @@ func streamAudio(s *stream) {
 				"chunkIndex": chunkIndex,
 			}); err != nil {
 				log.Printf("RelayComm: Audio stream send failed, ending stream: %v", err)
-				go streams.end(false)
+				go streams.end(false, "Audio stream send failed")
 				return
 			}
 			chunkIndex++
@@ -250,12 +255,22 @@ func StartAudioStreamForClient(ctx *HandlerContext, ch chan []byte) {
 }
 
 // Exported end functions
-func EndVideoStream() {
-	streams.end(true)
+func EndVideoStream(errorMsg string) {
+	streams.end(true, errorMsg)
 }
 
-func EndAudioStream() {
-	streams.end(false)
+func EndAudioStream(errorMsg string) {
+	streams.end(false, errorMsg)
+}
+
+// GetVideoStreamDeviceID returns the device ID of the current video stream viewer, or empty if none
+func GetVideoStreamDeviceID() string {
+	streams.mu.Lock()
+	defer streams.mu.Unlock()
+	if streams.video != nil {
+		return streams.video.ctx.DeviceID
+	}
+	return ""
 }
 
 // Update activity (heartbeat)

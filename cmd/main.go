@@ -81,7 +81,7 @@ func main() {
 
 	// Check for updates after 5s, then every 15 minutes
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(5 * time.Second)
 		updater.Get().CheckForUpdates()
 		for range time.Tick(15 * time.Minute) {
 			updater.Get().CheckForUpdates()

@@ -66,7 +66,7 @@ const (
 	ErrDecryptionFailed = "DECRYPTION_FAILED"
 	ErrInvalidPayload   = "INVALID_PAYLOAD"
 	ErrInternalError    = "INTERNAL_ERROR"
-	ErrStreamSwitched   = "STREAM_SWITCHED"
+	ErrStreamEnded      = "STREAM_ENDED"
 )
 
 // HandlerContext provides encryption context to handlers
@@ -563,8 +563,13 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
-	EndVideoStream() // End existing video stream first (if any)
-	EndAudioStream() // End existing audio stream first (if any)
+	// End existing streams (if any are active) and notify if a different device was streaming
+	errorMsg := ""
+	if currentViewer := GetVideoStreamDeviceID(); currentViewer != "" && currentViewer != ctx.DeviceID {
+		errorMsg = "Another viewer started streaming"
+	}
+	EndVideoStream(errorMsg)
+	EndAudioStream(errorMsg)
 
 	// Start fresh video stream
 	stream, err := record.Get().StartVideoStream()
