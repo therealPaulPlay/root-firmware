@@ -25,7 +25,7 @@ Contributions are welcome. For inquiries, please reach out via [email](mailto:pa
 **Build dependency:** [Go](https://go.dev/doc/install)
 
 **Runtime dependencies:**
-- ONNX Runtime (precompiled binary found in `build/onnx-precompiled/`, see [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi))
+- ONNX Runtime (binary found in `build/onnx-precompiled/`, see [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi))
 - FFmpeg
 - rpicam-apps
 - BlueZ
