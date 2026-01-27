@@ -22,17 +22,28 @@ Contributions are welcome. For inquiries, please reach out via [email](mailto:pa
 
 ## Building
 
-To build the firmware with a specific version:
+**Build dependency:** [Go](https://go.dev/doc/install)
+
+**Runtime dependencies:**
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) — a precompiled build for Raspberry Pi (64-bit) is included in `build/onnx-precompiled/`. See [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi).
+- [FFmpeg](https://ffmpeg.org/)
+- [rpicam-apps](https://github.com/raspberrypi/rpicam-apps)
+- [BlueZ](http://www.bluez.org/)
+- [RAUC](https://rauc.io/) (only needed for OTA updates)
+- [alsa-utils](https://alsa-project.org/)
+- [i2c-tools](https://i2c.wiki.kernel.org/) (and ensure i2c is enabled)
+
+Build the firmware:
 
 ```bash
 go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root-firmware cmd/main.go
 ```
 
-The version is injected at build time via the `-ldflags` flag. If you build without specifying a version, it defaults to `dev`. If you want to cross-compile for the Pi (64-bit), you need to prepend `GOOS=linux GOARCH=arm64` to the command.
+The version is injected at build time via `-ldflags`. Without it, the version defaults to `dev`. To cross-compile for the Pi (64-bit), prepend `GOOS=linux GOARCH=arm64`.
 
 ## Deploying to the Pi
 
-Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer.local`, install the Go language and the ONNX Runtime on the Pi. Raspian OS Bookworm or higher is required.
+Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer`, install the Go language and the ONNX Runtime on the Pi.
 
 ```bash
 ./deploy.sh
@@ -94,7 +105,7 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib
   sudo ldconfig'
 ```
 
-This installs both files to `/usr/local/lib`, creates the required `onnxruntime.so` symlink (needed by the Go bindings), and updates the dynamic linker cache.
+This installs both files to `/usr/local/lib`, creates the `onnxruntime.so` symlink (needed by the Go bindings), and updates the dynamic linker cache.
 
 ## Package overview
 
@@ -128,7 +139,7 @@ The firmware uses Bluetooth Low Energy for providing endpoints needed during the
 
 ### Record
 
-Handles recording video and audio via the camera and microphone components. Camera and microphone (if enabled) input is constantly being read and fanned out to multiple consumers (e.g. stream and recording).
+Handles recording video and audio via the camera and microphone components. Camera and microphone (if enabled) input is constantly being read and fanned out to multiple consumers (e.g. stream and/or recording).
 
 ### Relaycomm
 
