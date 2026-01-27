@@ -25,13 +25,13 @@ Contributions are welcome. For inquiries, please reach out via [email](mailto:pa
 **Build dependency:** [Go](https://go.dev/doc/install)
 
 **Runtime dependencies:**
-- [ONNX Runtime](https://github.com/microsoft/onnxruntime) — a precompiled build for Raspberry Pi (64-bit) is included in `build/onnx-precompiled/`. See [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi).
-- [FFmpeg](https://ffmpeg.org/)
-- [rpicam-apps](https://github.com/raspberrypi/rpicam-apps)
-- [BlueZ](http://www.bluez.org/)
-- [RAUC](https://rauc.io/) (only needed for OTA updates)
-- [alsa-utils](https://alsa-project.org/)
-- [i2c-tools](https://i2c.wiki.kernel.org/) (and ensure i2c is enabled)
+- ONNX Runtime — a precompiled build for Raspberry Pi (64-bit) is included in `build/onnx-precompiled/`. See [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi).
+- FFmpeg
+- rpicam-apps
+- BlueZ
+- RAUC (only needed for OTA updates)
+- alsa-utils
+- i2c-tools (and ensure i2c is enabled)
 
 Build the firmware:
 
