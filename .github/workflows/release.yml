@@ -3,6 +3,18 @@ name: Build release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 1.2.3-beta.1)"
+        required: true
+
+env:
+  IS_RELEASE: ${{ github.event_name == 'release' }}
+
+defaults:
+  run:
+    shell: bash
 
 permissions:
   contents: write
@@ -22,9 +34,21 @@ jobs:
         with:
           go-version: "stable"
 
-      - name: Extract version from tag
+      - name: Extract version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: |
+          if [ "$IS_RELEASE" = "true" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is empty"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Install ARM64 cross-compiler
         run: |
@@ -104,14 +128,12 @@ jobs:
           sudo ./build/scripts/repartition-image.sh "$INPUT_IMG" "root-observer-${VERSION}.img"
 
       - name: Extract rootfs and create RAUC bundle
+        if: env.IS_RELEASE == 'true'
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
           # Extract rootfs partition (partition 2) before compressing the full image
           sudo ./build/scripts/extract-rootfs.sh "root-observer-${VERSION}.img" rootfs.img 2
-
-          # Compress the full image
-          gzip -9 "root-observer-${VERSION}.img"
 
           # Write signing credentials
           echo "${{ secrets.RAUC_SIGNING_KEY }}" > signing.key.pem
@@ -129,7 +151,13 @@ jobs:
           # Clean up
           rm -f signing.key.pem signing.cert.pem rootfs.img
 
+      - name: Compress image
+        run: |
+          VERSION="${{ needs.build-firmware.outputs.version }}"
+          gzip -9 "root-observer-${VERSION}.img"
+
       - name: Calculate bundle hash and create metadata
+        if: env.IS_RELEASE == 'true'
         id: bundle-hash
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
@@ -154,6 +182,7 @@ jobs:
             root-observer-*.img.gz
             root-observer-update-*.raucb
             latest.json
+          if-no-files-found: ignore
           retention-days: 1
 
   upload-to-s3:
@@ -189,34 +218,48 @@ jobs:
             "use_https = True" \
             > ~/.s3cfg
 
-      - name: Clean old files and upload new ones to S3
+      - name: Upload dev image to S3
+        if: env.IS_RELEASE == 'false'
+        env:
+          S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
+        run: |
+          VERSION="${{ needs.build-firmware.outputs.version }}"
+
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/dev/" --recursive --force || true
+          s3cmd put "artifacts/root-observer-${VERSION}.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/dev/root-observer-${VERSION}.img.gz" \
+            --acl-public
+
+      - name: Upload release image and rauc bundle to S3
+        if: env.IS_RELEASE == 'true'
         env:
           S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
           echo "Cleaning old files..."
-          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/" --recursive --force || true
-          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/updates/" --recursive --force || true
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/release/" --recursive --force || true
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/updates/release/" --recursive --force || true
 
           echo "Uploading full image..."
           s3cmd put "artifacts/root-observer-${VERSION}.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/root-observer-${VERSION}.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/release/root-observer-${VERSION}.img.gz" \
             --acl-public
 
           echo "Uploading RAUC bundle..."
           s3cmd put "artifacts/root-observer-update-${VERSION}.raucb" \
-            "s3://${S3_BUCKET}/rootprivacy/updates/root-observer-update-${VERSION}.raucb" \
+            "s3://${S3_BUCKET}/rootprivacy/updates/release/root-observer-update-${VERSION}.raucb" \
             --acl-public
 
           echo "Uploading latest.json..."
           s3cmd put "artifacts/latest.json" \
-            "s3://${S3_BUCKET}/rootprivacy/updates/latest.json" \
+            "s3://${S3_BUCKET}/rootprivacy/updates/release/latest.json" \
             --acl-public --mime-type="application/json"
 
           echo "Upload complete!"
 
       - name: Update GitHub release with metadata
+        if: env.IS_RELEASE == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/latest.json
