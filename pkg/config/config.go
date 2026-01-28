@@ -104,6 +104,8 @@ func (c *Config) save() error {
 
 // SetKey sets a config value and persists to disk
 // Pass nil to delete the key
+// Values are JSON-normalized so that GetKey always returns the same types
+// as json.Unmarshal into map[string]any (e.g. []any instead of []string)
 func (c *Config) SetKey(key string, value any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -111,10 +113,28 @@ func (c *Config) SetKey(key string, value any) error {
 	if value == nil {
 		delete(c.data, key)
 	} else {
-		c.data[key] = value
+		normalized, err := jsonNormalize(value)
+		if err != nil {
+			return fmt.Errorf("failed to normalize config value: %w", err)
+		}
+		c.data[key] = normalized
 	}
 
 	return c.save()
+}
+
+// jsonNormalize round-trips a value through JSON so the in-memory type
+// matches what json.Unmarshal would produce
+func jsonNormalize(value any) (any, error) {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var normalized any
+	if err := json.Unmarshal(b, &normalized); err != nil {
+		return nil, err
+	}
+	return normalized, nil
 }
 
 // GetKey retrieves a config value

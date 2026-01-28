@@ -9,7 +9,7 @@ import (
 const (
 	pixelChangeThreshold = 12   // Min brightness difference for a pixel to count as "changed"
 	minChangedPixels     = 150  // Min changed pixels to trigger motion (160x90 = 14400 total, ~1%)
-	backgroundAlpha      = 0.15 // Background update rate per frame (higher = faster adaptation)
+	backgroundAlpha      = 0.20 // Background update rate per frame (higher = faster adaptation)
 	scaledWidth          = 160  // Downscale for performance
 	scaledHeight         = 90   // 16:9 aspect ratio
 )

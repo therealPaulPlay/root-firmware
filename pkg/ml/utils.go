@@ -68,7 +68,7 @@ func IsEventDetectionEnabled() bool {
 	return true
 }
 
-// GetEnabledEventTypes returns enabled event types (empty = all enabled)
+// GetEnabledEventTypes returns the configured event types (empty = no filter set)
 func GetEnabledEventTypes() []string {
 	val, ok := config.Get().GetKey("eventDetectionEnabledTypes")
 	if !ok {
@@ -87,10 +87,11 @@ func GetEnabledEventTypes() []string {
 }
 
 // isEventTypeEnabled checks if event type should trigger recording
-func isEventTypeEnabled(eventType string) bool {
+// defaultIfUnset controls behavior when no types are configured: true means enabled, false means disabled
+func isEventTypeEnabled(eventType string, defaultIfUnset bool) bool {
 	types := GetEnabledEventTypes()
 	if len(types) == 0 {
-		return true // Empty means all enabled
+		return defaultIfUnset
 	}
 	return slices.Contains(types, eventType)
 }
