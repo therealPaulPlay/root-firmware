@@ -20,6 +20,9 @@ var (
 func MarkInitComplete() {
 	healthMu.Lock()
 	defer healthMu.Unlock()
+	if initComplete {
+		return
+	}
 	initComplete = true
 	log.Println("Updater: Packages initialized successfully")
 	tryMarkSlotGood()
@@ -29,6 +32,9 @@ func MarkInitComplete() {
 func MarkRelayConnected() {
 	healthMu.Lock()
 	defer healthMu.Unlock()
+	if relayConnected {
+		return
+	}
 	relayConnected = true
 	log.Println("Updater: Relay connected successfully")
 	tryMarkSlotGood()
@@ -38,6 +44,9 @@ func MarkRelayConnected() {
 func markUpdateCheckSuccessful() {
 	healthMu.Lock()
 	defer healthMu.Unlock()
+	if updateCheckSuccess {
+		return
+	}
 	updateCheckSuccess = true
 	log.Println("Updater: Update check completed successfully")
 	tryMarkSlotGood()
