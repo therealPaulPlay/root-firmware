@@ -92,7 +92,7 @@ echo "Build complete! Files in ./onnx-output/"
 
 ### 2. Install the runtime on the Pi
 
-Copy all output files to the Pi and set up the linker:
+Use this script to copy all output files over to the Pi, set up the symlink for `onnxruntime.so`, and update the dynamic linker cache.
 
 ```bash
 # Copy both library files to Pi
@@ -104,8 +104,6 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib
   echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/local.conf && \
   sudo ldconfig'
 ```
-
-This installs both files to `/usr/local/lib`, creates the `onnxruntime.so` symlink (needed by the Go bindings), and updates the dynamic linker cache.
 
 ## Package overview
 
