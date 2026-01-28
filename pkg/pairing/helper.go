@@ -2,12 +2,12 @@ package pairing
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
+	"math/big"
 	"sync"
 	"time"
-
-	"github.com/gofrs/uuid"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
@@ -53,19 +53,18 @@ func GetHelper() *Pairing {
 	return helperInstance
 }
 
-// GenerateCode creates a new pairing code
+// GenerateCode creates a new 8-digit pairing code
 func (b *Pairing) GenerateCode() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Generate UUID for pairing code
-	id, err := uuid.NewV4()
+	n, err := rand.Int(rand.Reader, big.NewInt(100_000_000))
 	if err != nil {
-		log.Printf("Pairing: Failed to generate UUID: %v", err)
+		log.Printf("Pairing: Failed to generate code: %v", err)
 		return ""
 	}
 	b.code = &PairingCode{
-		Code:         id.String(),
+		Code:         fmt.Sprintf("%08d", n.Int64()),
 		ExpiresAt:    time.Now().Add(codeExpiry),
 		CodeVerified: false,
 	}
