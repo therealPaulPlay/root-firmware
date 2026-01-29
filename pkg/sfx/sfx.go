@@ -49,7 +49,8 @@ func Get() *SFX {
 	return instance
 }
 
-// playTone generates a square wave at the specified frequency for the given duration
+// playTone generates a square wave at the specified frequency for the given duration.
+// Uses busy-wait for precise timing instead of time.Sleep which has too much jitter.
 func (s *SFX) playTone(frequency int, duration time.Duration) {
 	if s.pin == nil {
 		return
@@ -58,30 +59,33 @@ func (s *SFX) playTone(frequency int, duration time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	period := time.Second / time.Duration(frequency)
-	halfPeriod := period / 2
-	cycles := int(duration / period)
+	halfPeriod := time.Second / time.Duration(frequency) / 2
+	end := time.Now().Add(duration)
 
-	for range cycles {
+	for time.Now().Before(end) {
 		s.pin.Out(gpio.High)
-		time.Sleep(halfPeriod)
+		spinWait(halfPeriod)
 		s.pin.Out(gpio.Low)
-		time.Sleep(halfPeriod)
+		spinWait(halfPeriod)
 	}
 }
 
-// PlayStartup plays a startup sound (three ascending tones like a boot-up sequence)
+func spinWait(d time.Duration) {
+	target := time.Now().Add(d)
+	for time.Now().Before(target) {
+	}
+}
+
+// PlayStartup plays a startup sound (two ascending tones)
 func (s *SFX) PlayStartup() {
 	if s.pin == nil {
 		return
 	}
 
 	go func() {
-		s.playTone(400, 120*time.Millisecond)
-		time.Sleep(40 * time.Millisecond)
-		s.playTone(500, 120*time.Millisecond)
-		time.Sleep(40 * time.Millisecond)
-		s.playTone(600, 120*time.Millisecond)
+		s.playTone(300, 100*time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		s.playTone(400, 100*time.Millisecond)
 	}()
 }
 
@@ -92,9 +96,9 @@ func (s *SFX) PlayRecording() {
 	}
 
 	go func() {
-		s.playTone(600, 100*time.Millisecond)
-		time.Sleep(30 * time.Millisecond)
-		s.playTone(800, 100*time.Millisecond)
+		s.playTone(500, 60*time.Millisecond)
+		time.Sleep(40 * time.Millisecond)
+		s.playTone(500, 60*time.Millisecond)
 	}()
 }
 
@@ -105,8 +109,6 @@ func (s *SFX) PlayPairingSuccess() {
 	}
 
 	go func() {
-		s.playTone(800, 100*time.Millisecond)
-		time.Sleep(40 * time.Millisecond)
-		s.playTone(1000, 100*time.Millisecond)
+		s.playTone(600, 50*time.Millisecond)
 	}()
 }

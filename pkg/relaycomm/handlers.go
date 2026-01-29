@@ -629,7 +629,7 @@ func handleSetMicrophone(ctx *HandlerContext, payload json.RawMessage) {
 
 func handleGetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 	enabled := false
-	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok {
+	if val, ok := config.Get().GetKey("playRecordingSound"); ok {
 		if b, ok := val.(bool); ok {
 			enabled = b
 		}
@@ -649,7 +649,7 @@ func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 		return
 	}
 
-	if err := config.Get().SetKey("playActiveCameraSound", req.Enabled); err != nil {
+	if err := config.Get().SetKey("playRecordingSound", req.Enabled); err != nil {
 		SendEncryptedError(ctx, MsgSetRecordingSound, ErrInternalError, err.Error())
 		return
 	}

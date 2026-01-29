@@ -378,7 +378,7 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 		r.videoBroadcast.removeConsumer(videoCh)
 	}()
 
-	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok && val.(bool) {
+	if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
 		sfx.Get().PlayRecording()
 	}
 
@@ -470,7 +470,7 @@ func (r *Recorder) StartRecording(outputPath string) error {
 
 	r.recording = true
 
-	if val, ok := config.Get().GetKey("playActiveCameraSound"); ok && val.(bool) {
+	if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
 		sfx.Get().PlayRecording()
 	}
 
