@@ -61,7 +61,7 @@ jobs:
           CGO_ENABLED: 1
           GOOS: linux
           GOARCH: arm64
-          CGO_LDFLAGS: "-L${{ github.workspace }}/build/onnx-precompiled"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/build/libs-precompiled"
         run: |
           go build \
             -ldflags "-X 'root-firmware/pkg/globals.FirmwareVersion=${{ steps.version.outputs.version }}'" \
@@ -95,7 +95,8 @@ jobs:
           # and they'll be accessible via the stage directory path in scripts
           cp ./firmware-artifact/root-firmware build/pi-gen/stage-root-observer/
           echo "${{ secrets.RAUC_CA_CERT }}" > build/pi-gen/stage-root-observer/rauc-ca.cert.pem
-          cp build/onnx-precompiled/libonnxruntime.so.1.23.2 build/pi-gen/stage-root-observer/
+          cp build/libs-precompiled/libonnxruntime.so.1.23.2 build/pi-gen/stage-root-observer/
+          cp build/libs-precompiled/libopenh264-2.5.1-linux-arm64.7.so build/pi-gen/stage-root-observer/
           cp build/rauc/raspberrypi-firmware-backend build/pi-gen/stage-root-observer/
 
       - name: Build image with pi-gen

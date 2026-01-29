@@ -143,7 +143,7 @@ func (m *ML) check() {
 		eventType = "motion"
 	}
 
-	log.Printf("ML: Detected %s event", eventType)
+	log.Printf("ML: New %s event", eventType)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

@@ -2,12 +2,14 @@
 # ROOT Observer system configuration
 # Note: I2C is enabled via dtparam=i2c_arm=on in config.txt
 
-# Install ONNX runtime libraries (copied to stage dir by CI)
+# Install precompiled libraries (copied to stage dir by CI)
 install -d "${ROOTFS_DIR}/usr/local/lib"
 install -m 755 "${STAGE_DIR}/libonnxruntime.so.1.23.2" "${ROOTFS_DIR}/usr/local/lib/"
 ln -sf libonnxruntime.so.1.23.2 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so.1"
 ln -sf libonnxruntime.so.1 "${ROOTFS_DIR}/usr/local/lib/libonnxruntime.so"
 ln -sf libonnxruntime.so "${ROOTFS_DIR}/usr/local/lib/onnxruntime.so"
+install -m 755 "${STAGE_DIR}/libopenh264-2.5.1-linux-arm64.7.so" "${ROOTFS_DIR}/usr/local/lib/"
+ln -sf libopenh264-2.5.1-linux-arm64.7.so "${ROOTFS_DIR}/usr/local/lib/libopenh264.so"
 
 # Configure dynamic linker to find libraries in /usr/local/lib
 echo "/usr/local/lib" > "${ROOTFS_DIR}/etc/ld.so.conf.d/local.conf"

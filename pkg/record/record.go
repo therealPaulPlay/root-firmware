@@ -3,6 +3,8 @@ package record
 import (
 	"bytes"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"log"
 	"os/exec"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	"root-firmware/pkg/config"
+
+	"golang.org/x/image/draw"
 )
 
 const (
@@ -32,20 +36,7 @@ type Recorder struct {
 	recordAudioCmd *exec.Cmd
 	recordVideoCh  chan []byte
 	recordAudioCh  chan []byte
-	viewfinder     *viewfinderProcess
-	viewfinderMu   sync.Mutex
-}
-
-type viewfinderProcess struct {
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	latestFrame []byte
-	frameMu     sync.RWMutex
-	lastAccess  time.Time
-	stopCh      chan struct{}
-	readyCh     chan struct{}
-	width       int
-	height      int
+	decoder        *h264Decoder
 }
 
 type broadcast struct {
@@ -109,7 +100,21 @@ func Init() error {
 				return
 			}
 		}
-		instance = &Recorder{}
+		if err := initOpenH264(); err != nil {
+			initErr = fmt.Errorf("failed to load OpenH264: %w", err)
+			return
+		}
+
+		dec, err := newDecoder()
+		if err != nil {
+			initErr = fmt.Errorf("failed to create H.264 decoder: %w", err)
+			return
+		}
+
+		// Pre-warm ffmpeg page cache so the first stream doesn't stall on cold start
+		exec.Command("ffmpeg", "-version").Run()
+
+		instance = &Recorder{decoder: dec}
 
 		if err := instance.startCamera(); err != nil {
 			initErr = fmt.Errorf("failed to start camera: %w", err)
@@ -321,14 +326,6 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Stop viewfinder if running (hardware doesn't handle both simultaneously)
-	r.viewfinderMu.Lock()
-	if r.viewfinder != nil {
-		r.stopViewfinder()
-		r.viewfinder = nil
-	}
-	r.viewfinderMu.Unlock()
-
 	// Create channel consumer for raw H.264
 	videoCh := make(chan []byte, 50)
 	r.videoBroadcast.addConsumer(videoCh)
@@ -457,6 +454,7 @@ func (r *Recorder) StartRecording(outputPath string) error {
 		if err := audioCmd.Start(); err != nil {
 			log.Printf("Recorder: Failed to start audio recording: %v", err)
 			r.audioBroadcast.removeConsumer(audioCh)
+			audioWriter.Close() // unblocks goroutine if stuck in Write
 			r.recordAudioCh = nil
 		} else {
 			r.recordAudioCmd = audioCmd
@@ -523,6 +521,19 @@ func (r *Recorder) StopRecording() error {
 	return nil
 }
 
+// decodeAndScale decodes an H.264 keyframe and scales to the target resolution, returning an image.NRGBA
+func (r *Recorder) decodeAndScale(frame []byte, x, y int) (*image.NRGBA, error) {
+	decoded, err := r.decoder.decode(frame)
+	if err != nil {
+		return nil, err
+	}
+
+	expandLimitedRange(decoded)
+	dst := image.NewNRGBA(image.Rect(0, 0, x, y))
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
+	return dst, nil
+}
+
 func (r *Recorder) CapturePreview(x int, y int) ([]byte, error) {
 	r.videoBroadcast.frameMu.RLock()
 	frame := r.videoBroadcast.latestFrame
@@ -532,172 +543,37 @@ func (r *Recorder) CapturePreview(x int, y int) ([]byte, error) {
 		return nil, fmt.Errorf("no frame available yet")
 	}
 
-	cmd := exec.Command("ffmpeg",
-		"-err_detect", "ignore_err",
-		"-f", "h264", "-i", "pipe:0",
-		"-frames:v", "1",
-		"-vf", fmt.Sprintf("scale=%d:%d", x, y),
-		"-f", "image2",
-		"-c:v", "mjpeg",
-		"-q:v", "10",
-		"pipe:1",
-	)
-	cmd.Stdin = bytes.NewReader(frame)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	output, err := cmd.Output()
+	img, err := r.decodeAndScale(frame, x, y)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract preview frame: %w (stderr: %s)", err, stderr.String())
+		return nil, fmt.Errorf("failed to decode preview frame: %w", err)
 	}
 
-	return output, nil
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 50}); err != nil {
+		return nil, fmt.Errorf("failed to encode preview: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 func (r *Recorder) CaptureViewfinderFrame(x, y int) ([]byte, error) {
-	// Check if stream is running (performance consideration)
-	r.mu.RLock()
-	streamRunning := r.videoStreamCh != nil
-	r.mu.RUnlock()
+	r.videoBroadcast.frameMu.RLock()
+	frame := r.videoBroadcast.latestFrame
+	r.videoBroadcast.frameMu.RUnlock()
 
-	if streamRunning {
-		return nil, fmt.Errorf("cannot use viewfinder while stream is active")
+	if len(frame) == 0 {
+		return nil, fmt.Errorf("no frame available yet")
 	}
 
-	r.viewfinderMu.Lock()
-
-	// If no active process, or active viewfinder process has incorrect resolution, (re)start
-	if r.viewfinder == nil || r.viewfinder.width != x || r.viewfinder.height != y {
-		if r.viewfinder != nil {
-			r.stopViewfinder()
-		}
-		r.startViewfinder(x, y)
-	}
-	vf := r.viewfinder
-	r.viewfinderMu.Unlock()
-
-	<-vf.readyCh
-	vf.frameMu.Lock()
-	vf.lastAccess = time.Now()
-	frame := vf.latestFrame
-	vf.frameMu.Unlock()
-	return frame, nil
-}
-
-func (r *Recorder) startViewfinder(x, y int) {
-	log.Printf("Recorder: Starting viewfinder (%dx%d)", x, y)
-	vf := &viewfinderProcess{
-		width: x, height: y, stopCh: make(chan struct{}), readyCh: make(chan struct{}),
-		lastAccess: time.Now(),
-	}
-	r.viewfinder = vf
-
-	go func() {
-		cmd := exec.Command("ffmpeg",
-			"-probesize", "32",
-			"-f", "h264", "-i", "pipe:0",
-			"-vf", fmt.Sprintf("scale=%d:%d", x, y),
-			"-f", "rawvideo", "-pix_fmt", "gray",
-			"pipe:1")
-		stdin, _ := cmd.StdinPipe()
-		stdout, _ := cmd.StdoutPipe()
-		cmd.Start()
-		vf.cmd = cmd
-		vf.stdin = stdin
-
-		// Feed keyframes periodically
-		go func() {
-			lastKeyframe := []byte(nil)
-			for {
-				select {
-				case <-time.After(250 * time.Millisecond):
-					r.videoBroadcast.frameMu.RLock()
-					keyframe := r.videoBroadcast.latestFrame
-					r.videoBroadcast.frameMu.RUnlock()
-					if len(keyframe) > 0 && !bytes.Equal(keyframe, lastKeyframe) {
-						if _, err := stdin.Write(keyframe); err != nil {
-							return // Pipe closed, exit feeder
-						}
-						lastKeyframe = append([]byte(nil), keyframe...)
-					}
-				case <-vf.stopCh:
-					return
-				}
-			}
-		}()
-
-		// Read decoded frames
-		go func() {
-			frameSize, firstFrame := x*y, true
-			for {
-				buf := make([]byte, frameSize)
-				if _, err := io.ReadFull(stdout, buf); err != nil {
-					return
-				}
-				vf.frameMu.Lock()
-				vf.latestFrame = buf
-				vf.frameMu.Unlock()
-				if firstFrame {
-					close(vf.readyCh)
-					firstFrame = false
-				}
-			}
-		}()
-
-		// Auto-stop after idle
-		for {
-			select {
-			case <-time.After(time.Second):
-				vf.frameMu.Lock()
-				idle := time.Since(vf.lastAccess)
-				vf.frameMu.Unlock()
-				if idle > 5*time.Second {
-					r.viewfinderMu.Lock()
-					r.stopViewfinder()
-					r.viewfinder = nil
-					r.viewfinderMu.Unlock()
-					return
-				}
-			case <-vf.stopCh:
-				return
-			}
-		}
-	}()
-}
-
-func (r *Recorder) stopViewfinder() {
-	if r.viewfinder == nil {
-		return
-	}
-	vf := r.viewfinder
-	close(vf.stopCh)
-
-	// Close stdin first to unblock any pending writes and signal EOF to ffmpeg
-	if vf.stdin != nil {
-		vf.stdin.Close()
+	decoded, err := r.decoder.decode(frame)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode viewfinder frame: %w", err)
 	}
 
-	if vf.cmd != nil && vf.cmd.Process != nil {
-		vf.cmd.Process.Signal(syscall.SIGTERM)
-		go func() {
-			done := make(chan error, 1)
-			go func() { done <- vf.cmd.Wait() }()
-			select {
-			case err := <-done:
-				if err != nil {
-					log.Printf("Recorder: Viewfinder ffmpeg exited: %v", err)
-				} else {
-					log.Println("Recorder: Viewfinder stopped")
-				}
-			case <-time.After(3 * time.Second):
-				if err := vf.cmd.Process.Kill(); err != nil {
-					log.Printf("Recorder: Failed to kill viewfinder ffmpeg: %v", err)
-				}
-				<-done
-			}
-		}()
-	}
+	// Scale Y plane directly (luma = grayscale), avoiding full color conversion
+	src := &image.Gray{Pix: decoded.Y, Stride: decoded.YStride, Rect: decoded.Rect}
+	dst := image.NewGray(image.Rect(0, 0, x, y))
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
+	return dst.Pix, nil
 }
 
 func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {

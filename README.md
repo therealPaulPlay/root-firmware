@@ -25,7 +25,8 @@ Contributions are welcome. For inquiries, please reach out via [email](mailto:pa
 **Build dependency:** [Go](https://go.dev/doc/install)
 
 **Runtime dependencies:**
-- ONNX Runtime (binary found in `build/onnx-precompiled/`, see [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi))
+- ONNX Runtime (binary found in `build/libs-precompiled/`, see [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi))
+- OpenH264 (binary found in `build/libs-precompiled/`, see [Installing OpenH264 on the Pi](#installing-openh264-on-the-pi))
 - FFmpeg
 - rpicam-apps
 - BlueZ
@@ -102,6 +103,18 @@ scp onnx-output/libonnxruntime.so* observer@ROOT-Observer.local:/tmp/
 ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib/ && \
   sudo ln -sf /usr/local/lib/libonnxruntime.so /usr/local/lib/onnxruntime.so && \
   echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/local.conf && \
+  sudo ldconfig'
+```
+
+## Installing OpenH264 on the Pi
+
+A precompiled binary is included in `build/libs-precompiled/`. Use the script below to set up the symlink for `libopenh264.so`, and update the dynamic linker cache.
+
+```bash
+scp build/libs-precompiled/libopenh264-2.5.1-linux-arm64.7.so observer@ROOT-Observer.local:/tmp/
+
+ssh observer@ROOT-Observer.local 'sudo mv /tmp/libopenh264-2.5.1-linux-arm64.7.so /usr/local/lib/ && \
+  sudo ln -sf /usr/local/lib/libopenh264-2.5.1-linux-arm64.7.so /usr/local/lib/libopenh264.so && \
   sudo ldconfig'
 ```
 
