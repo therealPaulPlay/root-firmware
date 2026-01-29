@@ -7,8 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
+	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
 )
 
@@ -148,6 +150,9 @@ func (m *ML) check() {
 	if m.recordingPath == "" {
 		log.Printf("ML: Starting recording for %s event", eventType)
 		m.startRecording(eventType, frame)
+		if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
+			sfx.Get().PlayRecording()
+		}
 	} else if time.Since(m.recordingStart) >= recordDuration {
 		// Split recording if duration limit reached
 		log.Printf("ML: Splitting recording (%.1fs)", time.Since(m.recordingStart).Seconds())

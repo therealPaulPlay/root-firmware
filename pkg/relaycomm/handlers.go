@@ -23,6 +23,7 @@ import (
 	"root-firmware/pkg/logger"
 	"root-firmware/pkg/ml"
 	"root-firmware/pkg/record"
+	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
 	"root-firmware/pkg/updater"
 	"root-firmware/pkg/wifi"
@@ -576,6 +577,10 @@ func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
 	if err != nil {
 		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
 		return
+	}
+
+	if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
+		sfx.Get().PlayStream()
 	}
 
 	// Start streaming video to this client

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"root-firmware/pkg/config"
-	"root-firmware/pkg/sfx"
 )
 
 const (
@@ -378,10 +377,6 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 		r.videoBroadcast.removeConsumer(videoCh)
 	}()
 
-	if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
-		sfx.Get().PlayRecording()
-	}
-
 	log.Println("Recorder: Started video streaming")
 	return outputReader, nil
 }
@@ -469,10 +464,6 @@ func (r *Recorder) StartRecording(outputPath string) error {
 	}
 
 	r.recording = true
-
-	if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
-		sfx.Get().PlayRecording()
-	}
 
 	log.Printf("Recorder: Started recording to %s", outputPath)
 	return nil

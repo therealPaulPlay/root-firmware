@@ -102,6 +102,21 @@ func (s *SFX) PlayRecording() {
 	}()
 }
 
+// PlayStream plays a sound to indicate that streaming is starting
+func (s *SFX) PlayStream() {
+	if s.pin == nil {
+		return
+	}
+
+	go func() {
+		s.playTone(400, 50*time.Millisecond)
+		time.Sleep(30 * time.Millisecond)
+		s.playTone(400, 50*time.Millisecond)
+		time.Sleep(40 * time.Millisecond)
+		s.playTone(400, 50*time.Millisecond)
+	}()
+}
+
 // PlayPairingSuccess plays a sound to indicate successful device pairing
 func (s *SFX) PlayPairingSuccess() {
 	if s.pin == nil {
