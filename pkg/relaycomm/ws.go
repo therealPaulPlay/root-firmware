@@ -16,7 +16,7 @@ import (
 const (
 	reconnectDelay       = 5 * time.Second
 	dialTimeout          = 10 * time.Second
-	maxMessagesPerSecond = 15
+	maxMessagesPerSecond = 25
 )
 
 type Message struct {
