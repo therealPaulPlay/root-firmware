@@ -61,6 +61,8 @@ systemctl disable avahi-daemon.service || true
 systemctl disable avahi-daemon.socket || true
 systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
+systemctl disable apt-daily.timer || true
+systemctl disable apt-daily-upgrade.timer || true
 EOF
 
 # Configure NetworkManager to have WiFi radio enabled by default
