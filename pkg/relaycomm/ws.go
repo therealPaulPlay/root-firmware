@@ -15,7 +15,7 @@ import (
 
 const (
 	reconnectDelay       = 5 * time.Second
-	dialTimeout          = 10 * time.Second
+	dialTimeout          = 8 * time.Second
 	maxMessagesPerSecond = 25
 )
 

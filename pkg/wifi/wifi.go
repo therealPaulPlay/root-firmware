@@ -3,6 +3,7 @@ package wifi
 import (
 	"fmt"
 	"log"
+	"net"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -169,7 +170,8 @@ func (w *WiFi) connectNetwork(ssid, password string) error {
 func (w *WiFi) waitForInternet(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if exec.Command("ping", "-c", "1", "-W", "2", "1.1.1.1").Run() == nil {
+		if c, err := net.DialTimeout("tcp", "1.1.1.1:443", time.Second); err == nil {
+			c.Close()
 			return nil
 		}
 		time.Sleep(time.Second)
