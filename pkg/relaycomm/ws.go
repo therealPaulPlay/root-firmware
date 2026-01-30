@@ -26,6 +26,7 @@ type Message struct {
 	DeviceID  string `json:"deviceId,omitempty"`  // Target/source device ID
 	RequestID string `json:"requestId,omitempty"` // Request tracking ID
 	Payload   string `json:"payload,omitempty"`   // Encrypted (base64) or unencrypted JSON
+	BinData   string `json:"binData,omitempty"`   // Separately encrypted binary data (base64)
 }
 
 type RelayComm struct {

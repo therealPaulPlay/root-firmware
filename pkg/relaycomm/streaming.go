@@ -1,7 +1,6 @@
 package relaycomm
 
 import (
-	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -201,10 +200,9 @@ func streamVideo(s *stream) {
 			pendingBox = nil
 		}
 
-		if err := SendEncryptedSuccess(s.ctx, s.msgType, map[string]any{
-			"chunk":      base64.StdEncoding.EncodeToString(boxData),
+		if err := SendEncryptedSuccessWithBinaryData(s.ctx, s.msgType, map[string]any{
 			"chunkIndex": chunkIndex,
-		}); err != nil {
+		}, boxData); err != nil {
 			log.Printf("RelayComm: Video stream send failed, ending stream: %v", err)
 			go streams.end(true, "Video stream send failed")
 			return
@@ -228,10 +226,9 @@ func streamAudio(s *stream) {
 				return
 			}
 
-			if err := SendEncryptedSuccess(s.ctx, s.msgType, map[string]any{
-				"chunk":      base64.StdEncoding.EncodeToString(data),
+			if err := SendEncryptedSuccessWithBinaryData(s.ctx, s.msgType, map[string]any{
 				"chunkIndex": chunkIndex,
-			}); err != nil {
+			}, data); err != nil {
 				log.Printf("RelayComm: Audio stream send failed, ending stream: %v", err)
 				go streams.end(false, "Audio stream send failed")
 				return

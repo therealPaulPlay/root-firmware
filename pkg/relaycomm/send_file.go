@@ -1,7 +1,6 @@
 package relaycomm
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -98,14 +97,13 @@ func SendFileInChunks(ctx *HandlerContext, msgType string, filePath string, file
 
 			payload := map[string]any{
 				"fileType":    fileType,
-				"chunk":       base64.StdEncoding.EncodeToString(buffer[:n]),
 				"chunkIndex":  chunkIndex,
 				"totalChunks": totalChunks,
 			}
 			if metadata != nil {
 				payload["metadata"] = metadata
 			}
-			SendEncryptedSuccess(currentCtx, msgType, payload)
+			SendEncryptedSuccessWithBinaryData(currentCtx, msgType, payload, buffer[:n])
 
 			if chunkIndex < totalChunks-1 {
 				time.Sleep(delayBetweenChunks)
