@@ -108,7 +108,7 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib
 
 ## Installing OpenH264 on the Pi
 
-A precompiled binary is included in `build/libs-precompiled/`. Use the script below to set up the symlink for `libopenh264.so`, and update the dynamic linker cache.
+A precompiled binary from [OpenH264 GitHub releases](https://github.com/cisco/openh264/releases) is included in `build/libs-precompiled/`. Use the script below to set up the symlink for `libopenh264.so`, and update the dynamic linker cache.
 
 ```bash
 scp build/libs-precompiled/libopenh264-2.5.1-linux-arm64.7.so observer@ROOT-Observer.local:/tmp/
@@ -142,7 +142,7 @@ Collect logs and store them in a JSON for easy access.
 
 ### ML (Machine learning)
 
-Uses ONNX for basic event detection. Inspired by [Secluso's](https://github.com/secluso/secluso) implementation. 
+Uses ONNX for event detection. Inspired by [Secluso's](https://github.com/secluso/secluso) implementation. 
 
 ### Pairing
 

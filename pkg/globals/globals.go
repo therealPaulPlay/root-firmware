@@ -1,7 +1,21 @@
 package globals
 
+import "time"
+
 // FirmwareVersion is set at build time via -ldflags
 var FirmwareVersion = "dev"
+
+// Camera
+const CameraFramerate = 15 // Frames per second
+const CameraGOPSize = 5    // Frames per GOP (keyframe interval)
+
+// Audio
+const AudioSampleRate = 48000 // Hz
+const AudioChunkSize = 48 * 1024 // Bytes per audio chunk (~500ms at 48kHz mono S16_LE)
+
+// Recording
+const MaxRecordDuration = 15 * time.Second // Max recording chunk duration
+const LookbackDuration = 8 * time.Second   // Pre-event buffer included in recordings
 
 // ProductModel is the model name of the product (lowercase)
 const ProductModel = "observer"
