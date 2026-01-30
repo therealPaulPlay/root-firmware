@@ -48,6 +48,9 @@ func Init() error {
 		return fmt.Errorf("failed to create recordings directory: %w", err)
 	}
 
+	// Clean up orphaned temp files from interrupted mux jobs
+	cleanupOrphanedFiles()
+
 	// Create or recover event log
 	if err := recoverEventLog(); err != nil {
 		return fmt.Errorf("failed to initialize event log: %w", err)
@@ -72,6 +75,22 @@ func recoverEventLog() error {
 	}
 
 	return nil
+}
+
+// cleanupOrphanedFiles removes temp-* files left behind by interrupted mux jobs
+func cleanupOrphanedFiles() {
+	matches, err := filepath.Glob(filepath.Join(globals.RecordingsPath, "temp-*"))
+	if err != nil {
+		log.Printf("Storage: Failed to scan for orphaned files: %v", err)
+		return
+	}
+	for _, f := range matches {
+		if err := os.Remove(f); err != nil {
+			log.Printf("Storage: Failed to remove orphaned file %s: %v", f, err)
+		} else {
+			log.Printf("Storage: Removed orphaned file %s", f)
+		}
+	}
 }
 
 func Get() *Storage {
