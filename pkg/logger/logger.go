@@ -12,7 +12,7 @@ import (
 	"root-firmware/pkg/globals"
 )
 
-const maxLogs = 1000
+const maxLogs = 500
 const maxLogMsgSize = 2500 // Max characters per log message
 
 type Entry struct {

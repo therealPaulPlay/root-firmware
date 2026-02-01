@@ -35,6 +35,9 @@ var ConfigPath = FirmwareDataDir + "/config.json"
 // Logs
 var LogsPath = FirmwareDataDir + "/logs.json"
 
+// Metrics
+var MetricsPath = FirmwareDataDir + "/metrics.json"
+
 // Recordings
 var RecordingsPath = DataDir + "/recordings"
 

@@ -10,16 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/mem"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/logger"
+	"root-firmware/pkg/metrics"
 	"root-firmware/pkg/ml"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
@@ -46,6 +44,7 @@ const (
 	MsgGetRecordingSound        = "getRecordingSound"
 	MsgSetRecordingSound        = "setRecordingSound"
 	MsgGetHealth                = "getHealth"
+	MsgGetMetrics               = "getMetrics"
 	MsgGetPreview               = "getPreview"
 	MsgStartUpdate              = "startUpdate"
 	MsgRestart                  = "restart"
@@ -306,6 +305,7 @@ func registerHandlers(relay *RelayComm) {
 
 	// System
 	relay.On(MsgGetHealth, useEncryption(MsgGetHealth, handleGetHealth))
+	relay.On(MsgGetMetrics, useEncryption(MsgGetMetrics, handleGetMetrics))
 	relay.On(MsgGetPreview, useEncryption(MsgGetPreview, handleGetPreview))
 	relay.On(MsgStartUpdate, useEncryption(MsgStartUpdate, handleStartUpdate))
 	relay.On(MsgRestart, useEncryption(MsgRestart, handleRestart))
@@ -680,69 +680,39 @@ func handleSetRecordingSound(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
-	// Collect health metrics in a goroutine to avoid blocking the handler
-	go func() {
-		performance := map[string]any{}
-
-		// CPU usage - use 100ms sampling to avoid long blocks
-		if percentages, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(percentages) > 0 {
-			performance["cpuUsagePercent"] = percentages[0]
+	relayDomain := ""
+	if domain, ok := config.Get().GetKey("relayDomain"); ok {
+		if domainStr, ok := domain.(string); ok {
+			relayDomain = domainStr
 		}
+	}
 
-		// CPU temperature
-		if temps, err := host.SensorsTemperatures(); err == nil {
-			for _, temp := range temps {
-				// Look for CPU temp (common sensor names on Raspberry Pi)
-				if temp.SensorKey == "cpu_thermal" || temp.SensorKey == "coretemp" {
-					performance["cpuTempCelsius"] = temp.Temperature
-					break
-				}
-			}
-		}
+	uptimeSeconds := uint64(0)
+	if uptime, err := host.Uptime(); err == nil {
+		uptimeSeconds = uptime
+	}
 
-		// Memory stats
-		if vmStat, err := mem.VirtualMemory(); err == nil {
-			performance["memoryUsedMB"] = vmStat.Used / (1024 * 1024)
-			performance["memoryTotalMB"] = vmStat.Total / (1024 * 1024)
-			performance["memoryUsagePercent"] = vmStat.UsedPercent
-		}
+	health := map[string]any{
+		"battery": map[string]any{
+			"percent":   0,
+			"onACPower": true,
+		},
+		"wifi": map[string]any{
+			"connected": wifi.Get().IsConnected(),
+			"ssid":      wifi.Get().GetCurrentNetwork(),
+		},
+		"relayDomain":   relayDomain,
+		"logs":          logger.GetLogs(),
+		"uptimeSeconds": uptimeSeconds,
+	}
 
-		// Disk stats for data partition
-		if diskStat, err := disk.Usage(globals.DataDir); err == nil {
-			performance["diskUsedGB"] = diskStat.Used / (1024 * 1024 * 1024)
-			performance["diskTotalGB"] = diskStat.Total / (1024 * 1024 * 1024)
-			performance["diskUsagePercent"] = diskStat.UsedPercent
-		}
+	SendEncryptedSuccess(ctx, MsgGetHealth, health)
+}
 
-		// Uptime
-		if uptime, err := host.Uptime(); err == nil {
-			performance["uptimeSeconds"] = uptime
-		}
-
-		// Get relay domain from config
-		relayDomain := ""
-		if domain, ok := config.Get().GetKey("relayDomain"); ok {
-			if domainStr, ok := domain.(string); ok {
-				relayDomain = domainStr
-			}
-		}
-
-		health := map[string]any{
-			"battery": map[string]any{
-				"percent":   0,
-				"onACPower": true,
-			},
-			"wifi": map[string]any{
-				"connected": wifi.Get().IsConnected(),
-				"ssid":      wifi.Get().GetCurrentNetwork(),
-			},
-			"relayDomain": relayDomain,
-			"logs":        logger.GetLogs(),
-			"performance": performance,
-		}
-
-		SendEncryptedSuccess(ctx, MsgGetHealth, health)
-	}()
+func handleGetMetrics(ctx *HandlerContext, payload json.RawMessage) {
+	SendEncryptedSuccess(ctx, MsgGetMetrics, map[string]any{
+		"metrics": metrics.GetPoints(),
+	})
 }
 
 func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {

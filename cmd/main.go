@@ -14,6 +14,7 @@ import (
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/logger"
+	"root-firmware/pkg/metrics"
 	"root-firmware/pkg/ml"
 	"root-firmware/pkg/pairing"
 	"root-firmware/pkg/record"
@@ -49,6 +50,7 @@ func main() {
 
 	// Initialize packages where init() cannot return errors
 	devices.Init()
+	metrics.Init()
 	wifi.Init()
 	relaycomm.Init()
 	updater.Init()
