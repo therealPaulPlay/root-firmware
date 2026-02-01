@@ -15,7 +15,7 @@ import (
 
 const (
 	checkInterval    = 2 * time.Second // Check for motion/events
-	cooldownDuration = 5 * time.Second // Wait after recording stops
+	cooldownDuration = 6 * time.Second // Wait after recording stops
 )
 
 var modelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
@@ -75,9 +75,9 @@ func (m *ML) loop() {
 	}
 }
 
-func (m *ML) stopRecordingIfActive() {
+func (m *ML) stopRecordingIfActive(reason string) {
 	if m.recordingPath != "" {
-		log.Printf("ML: No event detected, stopping recording")
+		log.Printf("ML: Stopping recording - %s", reason)
 		m.stopRecording(true)
 	}
 }
@@ -94,7 +94,7 @@ func (m *ML) check() {
 	// If event detection is disabled, stop any active recording and return
 	if !IsEventDetectionEnabled() {
 		m.mu.Lock()
-		m.stopRecordingIfActive()
+		m.stopRecordingIfActive("event detection disabled")
 		m.mu.Unlock()
 		return
 	}
@@ -115,7 +115,7 @@ func (m *ML) check() {
 
 	if !hasMotion {
 		m.mu.Lock()
-		m.stopRecordingIfActive()
+		m.stopRecordingIfActive("no motion")
 		m.mu.Unlock()
 		return
 	}
@@ -125,21 +125,28 @@ func (m *ML) check() {
 	if err != nil {
 		log.Printf("ML: Object detection failed: %v", err)
 		m.mu.Lock()
-		m.stopRecordingIfActive()
+		m.stopRecordingIfActive("detection error")
 		m.mu.Unlock()
 		return
 	}
 
-	// Use classified event type if detected and enabled, otherwise fall back to "motion" if enabled
+	// Discard detected type if the user has disabled it (e.g. "pet" disabled should not record)
 	eventType := detection.EventType
-	if eventType == "" || !isEventTypeEnabled(eventType, true) {
-		if !isEventTypeEnabled("motion", false) {
-			m.mu.Lock()
-			m.stopRecordingIfActive()
-			m.mu.Unlock()
-			return
-		}
+	if eventType != "" && !isEventTypeEnabled(eventType, true) {
+		eventType = ""
+	}
+
+	// Fall back to generic motion when nothing was classified & motion event is enabled
+	if eventType == "" && isEventTypeEnabled("motion", false) {
 		eventType = "motion"
+	}
+
+	// No recordable event — stop any active recording
+	if eventType == "" {
+		m.mu.Lock()
+		m.stopRecordingIfActive("no event detected")
+		m.mu.Unlock()
+		return
 	}
 
 	log.Printf("ML: New %s event", eventType)
