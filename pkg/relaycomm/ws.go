@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	reconnectDelay       = 5 * time.Second
-	dialTimeout          = 8 * time.Second
-	maxMessagesPerSecond = 25
+	initialReconnectDelay = time.Second
+	maxReconnectDelay     = 10 * time.Second
+	dialTimeout           = 8 * time.Second
+	maxMessagesPerSecond  = 25
 )
 
 type Message struct {
@@ -115,6 +116,7 @@ func (r *RelayComm) Send(msg Message) error {
 func (r *RelayComm) run(relayDomain string) {
 	defer close(r.doneChan)
 
+	delay := initialReconnectDelay
 	for {
 		select {
 		case <-r.stopChan:
@@ -127,11 +129,13 @@ func (r *RelayComm) run(relayDomain string) {
 			select {
 			case <-r.stopChan:
 				return
-			case <-time.After(reconnectDelay):
+			case <-time.After(delay):
+				delay = min(delay*3/2, maxReconnectDelay)
 				continue
 			}
 		}
 
+		delay = initialReconnectDelay
 		updater.MarkRelayConnected()
 		r.handleConnection(conn)
 		conn.Close()
@@ -139,7 +143,7 @@ func (r *RelayComm) run(relayDomain string) {
 		select {
 		case <-r.stopChan:
 			return
-		case <-time.After(reconnectDelay):
+		case <-time.After(initialReconnectDelay):
 		}
 	}
 }
