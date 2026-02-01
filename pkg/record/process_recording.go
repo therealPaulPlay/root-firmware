@@ -84,7 +84,7 @@ type muxJob struct {
 // muxWorker processes mux jobs serially — one ffmpeg at a time to avoid CPU contention on the Pi
 func (r *Recorder) muxWorker() {
 	for job := range r.muxQueue {
-		if err := r.muxVideo(job.videoEntries, job.outputPath); err != nil {
+		if err := r.muxVideo(job.videoEntries, job.outputPath, job.duration); err != nil {
 			log.Printf("Recorder: Skipping save for %s due to mux failure", job.outputPath)
 			continue
 		}
@@ -94,7 +94,7 @@ func (r *Recorder) muxWorker() {
 }
 
 // muxVideo writes H.264 GOPs to an MP4 file using ffmpeg copy mode
-func (r *Recorder) muxVideo(entries []lookbackEntry, outputPath string) error {
+func (r *Recorder) muxVideo(entries []lookbackEntry, outputPath string, duration float64) error {
 	if len(entries) == 0 {
 		return fmt.Errorf("no video entries")
 	}
@@ -104,8 +104,7 @@ func (r *Recorder) muxVideo(entries []lookbackEntry, outputPath string) error {
 		buf.Write(e.data)
 	}
 
-	span := entries[len(entries)-1].timestamp.Sub(entries[0].timestamp)
-	log.Printf("Recorder: Muxing %d GOPs (%.2fs, %dKB) to %s", len(entries), span.Seconds(), buf.Len()/1024, outputPath)
+	log.Printf("Recorder: Muxing %d GOPs (%.2fs, %dKB) to %s", len(entries), duration, buf.Len()/1024, outputPath)
 
 	cmd := exec.Command("ffmpeg", "-f", "h264", "-i", "pipe:0", "-c:v", "copy", "-f", "mp4", outputPath)
 	cmd.Stdin = &buf
@@ -135,6 +134,7 @@ func (r *Recorder) muxAudio(entries []lookbackEntry, videoStart time.Time, outpu
 	}
 
 	audioPath := outputPath[:len(outputPath)-4] + "_audio.m4a"
+	log.Printf("Recorder: Muxing audio (%dKB) to %s", buf.Len()/1024, audioPath)
 	cmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", fmt.Sprintf("%d", globals.AudioSampleRate), "-ac", "1", "-i", "pipe:0", "-c:a", "aac", "-f", "mp4", audioPath)
 	cmd.Stdin = &buf
 	if err := cmd.Run(); err != nil {

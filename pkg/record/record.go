@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"io"
 	"log"
+	"math"
 	"os/exec"
 	"regexp"
 	"sync"
@@ -436,9 +437,10 @@ func (r *Recorder) StopRecording(eventType string, preview []byte) (time.Duratio
 		return 0, fmt.Errorf("no video data")
 	}
 
-	duration := videoEntries[len(videoEntries)-1].timestamp.Sub(videoEntries[0].timestamp)
-	durationSec := float64(int(duration.Seconds()*100)) / 100
-	log.Printf("Recorder: Enqueuing mux job (%.2fs) to %s", duration.Seconds(), outputPath)
+	gopInterval := time.Second * time.Duration(globals.CameraGOPSize) / time.Duration(globals.CameraFramerate)
+	duration := videoEntries[len(videoEntries)-1].timestamp.Sub(videoEntries[0].timestamp) + gopInterval
+	durationSec := math.Round(duration.Seconds()*100) / 100
+	log.Printf("Recorder: Enqueuing mux job (%.2fs) to %s", durationSec, outputPath)
 
 	job := muxJob{
 		videoEntries: videoEntries,
