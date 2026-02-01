@@ -172,6 +172,10 @@ Check for and download firmware updates via RAUC.
 
 Scan for WiFi networks and establish a wifi connection.
 
+### Metrics
+
+Collects performance, memory utilization, and disk usage statistics.
+
 ## CI/CD
 
 Publishing a GitHub Release triggers a workflow that builds the firmware, creates a full firmware image and a RAUC update bundle, and uploads both to S3 (the workflow is built with Digital Ocean Spaces in mind).
