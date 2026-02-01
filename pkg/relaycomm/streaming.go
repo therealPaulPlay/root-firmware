@@ -55,7 +55,7 @@ func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch cha
 	}
 
 	sm.startMonitor()
-	log.Printf("RelayComm: Started %s stream for device %s", msgType, ctx.DeviceID)
+	log.Printf("RelayComm: Started stream for device %s (video: %v)", ctx.DeviceID, isVideo)
 }
 
 func (sm *streamManager) end(isVideo bool, errorMsg string) {
@@ -186,6 +186,11 @@ func streamVideo(s *stream) {
 
 		boxData, err := readMP4Box(s.reader)
 		if err != nil {
+			select {
+			case <-s.endCh:
+				return // Stream already ended, error expected -> exit
+			default:
+			}
 			log.Printf("RelayComm: Video stream read failed, ending stream: %v", err)
 			go streams.end(true, "Video stream read failed")
 			return
@@ -221,6 +226,11 @@ func streamAudio(s *stream) {
 			return
 		case data, ok := <-s.ch:
 			if !ok {
+				select {
+				case <-s.endCh:
+					return // Stream already ended, error expected -> exit
+				default:
+				}
 				log.Println("RelayComm: Audio channel closed, ending stream")
 				go streams.end(false, "Audio channel closed")
 				return
