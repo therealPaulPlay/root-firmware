@@ -808,7 +808,7 @@ func handleReset(ctx *HandlerContext, payload json.RawMessage) {
 	SendEncryptedSuccess(ctx, MsgReset, nil)
 
 	// Run as independent systemd unit so cleanup happens after firmware has stopped
-	// Remove everything in /data and remove all WiFi connections
+	// Remove everything in /data (and explicitly the firmware dir since it starts with a '.') and remove WiFi connections
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		exec.Command("systemd-run", "--unit=factory-reset", "--no-block", "bash", "-c",
@@ -816,7 +816,7 @@ func handleReset(ctx *HandlerContext, payload json.RawMessage) {
 			nmcli -t -f UUID,TYPE connection show 2>/dev/null | while IFS=: read -r uuid type; do
 				[ "$type" = "802-11-wireless" ] && nmcli connection delete uuid "$uuid" 2>/dev/null
 			done
-			rm -rf `+globals.DataDir+`/*
+			rm -rf `+globals.DataDir+`/* `+globals.FirmwareDataDir+`
 			reboot`,
 		).Run()
 	}()
