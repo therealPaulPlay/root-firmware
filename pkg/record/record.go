@@ -439,7 +439,7 @@ func (r *Recorder) StopRecording(eventType string, preview []byte, detection *st
 	}
 
 	gopInterval := time.Second * time.Duration(globals.CameraGOPSize) / time.Duration(globals.CameraFramerate)
-	duration := videoEntries[len(videoEntries)-1].timestamp.Sub(videoEntries[0].timestamp) + gopInterval
+	duration := gopInterval * time.Duration(len(videoEntries))
 	durationSec := math.Round(duration.Seconds()*100) / 100
 	log.Printf("Recorder: Enqueuing mux job (%.2fs) to %s", durationSec, outputPath)
 

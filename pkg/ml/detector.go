@@ -281,7 +281,7 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 
 	eventType := decodeLabel(labels[targetKept[0]]) // Set event type to highest confidence one
 
-	log.Printf("ML: Detected %s (score=%.4f, count=%d after NMS, %d target)", eventType, scores[targetKept[0]], len(kept), len(targetKept))
+	log.Printf("ML: Detected %s (score=%.4f, count=%d after NMS)", eventType, scores[targetKept[0]], len(kept))
 
 	return &Detection{
 		EventType: eventType,
