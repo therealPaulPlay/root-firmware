@@ -16,7 +16,7 @@ type Device struct {
 	Name         string    `json:"name"`         // Device name
 	PublicKey    []byte    `json:"publicKey"`    // Device's public key
 	ProductAlias string    `json:"productAlias"` // User-defined name for the ROOT product (e.g. "Living Room Camera")
-	ConnectedAt  time.Time `json:"connectedAt"`
+	PairedAt     time.Time `json:"pairedAt"`
 }
 
 type Devices struct {
@@ -80,7 +80,7 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 		Name:         name,
 		PublicKey:    publicKey,
 		ProductAlias: "My ROOT " + strings.ToUpper(globals.ProductModel[:1]) + globals.ProductModel[1:], // Prefix needs to match client-side default prefix
-		ConnectedAt:  time.Now(),
+		PairedAt:     time.Now(),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
