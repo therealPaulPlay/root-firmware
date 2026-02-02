@@ -2,10 +2,12 @@ package ml
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	_ "image/jpeg"
 	"log"
 	"sort"
+	"strings"
 
 	"root-firmware/pkg/storage"
 
@@ -16,8 +18,7 @@ const (
 	modelWidth  = 416
 	modelHeight = 416
 	confThresh  = 0.35 // 0.35-0.45 suggested for people, lower is more sensitve
-	nmsThresh   = 0.6
-	regMax      = 7    // Distribution head bins [0-7]
+	nmsThresh   = 0.5
 	numClasses  = 80   // COCO classes (classifiers)
 	numAnchors  = 3598 // Anchor count from model
 	outputSize  = 112  // 80 classes + 32 bbox distribution values (4 * 8)
@@ -43,6 +44,24 @@ func decodeLabel(classID int) string {
 	}
 }
 
+func formatScores(scores map[string]float32) string {
+	labels := make([]string, 0, len(scores))
+	for l := range scores {
+		labels = append(labels, l)
+	}
+	sort.Slice(labels, func(i, j int) bool {
+		return scores[labels[i]] > scores[labels[j]]
+	})
+	var s strings.Builder
+	for i, l := range labels {
+		if i > 0 {
+			s.WriteString(" ")
+		}
+		fmt.Fprintf(&s, "%s=%.4f", l, scores[l])
+	}
+	return s.String()
+}
+
 type objectDetector struct {
 	session *ort.DynamicAdvancedSession
 }
@@ -60,7 +79,7 @@ func newObjectDetector(modelPath string) (*objectDetector, error) {
 	}
 	defer opts.Destroy()
 
-	// Single thread for Pi Zero 2
+	// Single thread for a low-power SBC
 	opts.SetIntraOpNumThreads(1)
 	opts.SetInterOpNumThreads(1)
 
@@ -156,23 +175,19 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	outputData := outputTensor.GetData()
 
 	// Output shape: [1, 3598, 112] = 80 class scores + 32 bbox distribution bins (4 edges × 8 bins)
-	classesToCheck := []int{0, 2, 15, 16} // person, car, cat, dog
+	targetClasses := map[int]bool{0: true, 2: true, 15: true, 16: true} // person, car, cat, dog
 
 	var boxes [][4]float32
 	var scores []float32
 	var labels []int
-
-	// Track top scores per class for logging
-	topScores := make(map[int]float32)
-	for _, classID := range classesToCheck {
-		topScores[classID] = 0
-	}
+	topScores := map[string]float32{} // best score per label for logging
 
 	// Multi-scale feature map strides
 	strides := []int{8, 16, 32}
 	anchorIdx := 0
 
-	// Process each stride level
+	// Process each stride level — collect ALL classes above threshold so NMS
+	// can suppress weak target-class detections that overlap stronger non-target ones
 	for _, stride := range strides {
 		featureH := modelHeight / stride
 		featureW := modelWidth / stride
@@ -185,20 +200,19 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 
 				offset := anchorIdx * outputSize
 
-				// Find best class score from first 80 values
+				// Find best class score across all 80 classes
 				var bestClass int
 				var bestScore float32
 
-				for _, classID := range classesToCheck {
+				for classID := range numClasses {
 					score := outputData[offset+classID]
 					if score > bestScore {
 						bestScore = score
 						bestClass = classID
 					}
-					// Track top score per class
-					if score > topScores[classID] {
-						topScores[classID] = score
-					}
+				}
+				if label := decodeLabel(bestClass); bestScore > topScores[label] {
+					topScores[label] = bestScore
 				}
 
 				if bestScore >= confThresh {
@@ -229,24 +243,32 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 		}
 	}
 
-	// Log top scores per class
-	log.Printf("ML: Top scores - person=%.4f car=%.4f cat=%.4f dog=%.4f | candidates=%d thresh=%.2f",
-		topScores[0], topScores[2], topScores[15], topScores[16], len(boxes), confThresh)
+	log.Printf("ML: Top scores - %s | candidates=%d thresh=%.2f", formatScores(topScores), len(boxes), confThresh)
 
 	if len(boxes) == 0 {
 		return &Detection{EventType: "", Count: 0}
 	}
 
-	// Apply NMS
+	// Apply NMS across all classes — non-target detections suppress overlapping
+	// weaker target detections, reducing false positives
 	kept := nms(boxes, scores, nmsThresh)
 
-	if len(kept) == 0 {
+	// Filter to target classes only
+	var targetKept []int
+	for _, idx := range kept {
+		// Only keep if target classes contain this label (e.g. person -> kept, bench -> dropped)
+		if targetClasses[labels[idx]] {
+			targetKept = append(targetKept, idx)
+		}
+	}
+
+	if len(targetKept) == 0 {
 		return &Detection{EventType: "", Count: 0}
 	}
 
-	// Build per-box results
-	detectionBoxes := make([]storage.DetectionBox, len(kept))
-	for i, idx := range kept {
+	// Build box results for visualization
+	detectionBoxes := make([]storage.DetectionBox, len(targetKept))
+	for i, idx := range targetKept {
 		detectionBoxes[i] = storage.DetectionBox{
 			Label:      decodeLabel(labels[idx]),
 			Confidence: scores[idx],
@@ -257,15 +279,13 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 		}
 	}
 
-	// Return event type of first kept detection
-	eventType := decodeLabel(labels[kept[0]])
+	eventType := decodeLabel(labels[targetKept[0]]) // Set event type to highest confidence one
 
-	// Log detection result
-	log.Printf("ML: Detected %s (score=%.4f, count=%d after NMS)", eventType, scores[kept[0]], len(kept))
+	log.Printf("ML: Detected %s (score=%.4f, count=%d after NMS, %d target)", eventType, scores[targetKept[0]], len(kept), len(targetKept))
 
 	return &Detection{
 		EventType: eventType,
-		Count:     len(kept),
+		Count:     len(targetKept),
 		Result: &storage.DetectionResult{
 			Boxes:     detectionBoxes,
 			ModelSize: [2]int{modelWidth, modelHeight},
