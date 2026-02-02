@@ -693,10 +693,6 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 	}
 
 	health := map[string]any{
-		"battery": map[string]any{
-			"percent":   0,
-			"onACPower": true,
-		},
 		"wifi": map[string]any{
 			"connected": wifi.Get().IsConnected(),
 			"ssid":      wifi.Get().GetCurrentNetwork(),
