@@ -80,6 +80,14 @@ func (c *collector) run() {
 			if len(c.points) > maxDataPoints {
 				c.points = c.points[len(c.points)-maxDataPoints:]
 			}
+			cutoff := time.Now().UTC().Add(-1 * time.Hour)
+			start := 0
+			for start < len(c.points) && c.points[start].Timestamp.Before(cutoff) {
+				start++
+			}
+			if start > 0 {
+				c.points = c.points[start:]
+			}
 			c.mu.Unlock()
 		case <-saveTicker.C:
 			c.mu.RLock()
@@ -141,14 +149,7 @@ func load() []DataPoint {
 		log.Printf("Metrics: Failed to parse metrics file: %v", err)
 		return []DataPoint{}
 	}
-
-	// Prune points older than 1 hour
-	cutoff := time.Now().UTC().Add(-1 * time.Hour)
-	start := 0
-	for start < len(points) && points[start].Timestamp.Before(cutoff) {
-		start++
-	}
-	return points[start:]
+	return points
 }
 
 func save(points []DataPoint) {
