@@ -79,6 +79,7 @@ type muxJob struct {
 	duration     float64
 	eventType    string
 	preview      []byte
+	detection    *storage.DetectionResult
 }
 
 // muxWorker processes mux jobs serially — one ffmpeg at a time to avoid CPU contention on the Pi
@@ -89,7 +90,7 @@ func (r *Recorder) muxWorker() {
 			continue
 		}
 		r.muxAudio(job.audioEntries, job.videoEntries[0].timestamp, job.outputPath)
-		storage.Get().SaveRecording(job.outputPath, job.duration, job.eventType, job.preview)
+		storage.Get().SaveRecording(job.outputPath, job.duration, job.eventType, job.preview, job.detection)
 	}
 }
 

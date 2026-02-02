@@ -15,6 +15,7 @@ import (
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
+	"root-firmware/pkg/storage"
 
 	"golang.org/x/image/draw"
 )
@@ -413,7 +414,7 @@ func (r *Recorder) StartRecording(outputPath string, withLookback bool) {
 }
 
 // StopRecording flushes the ring buffer and enqueues an MP4 mux job
-func (r *Recorder) StopRecording(eventType string, preview []byte) (time.Duration, error) {
+func (r *Recorder) StopRecording(eventType string, preview []byte, detection *storage.DetectionResult) (time.Duration, error) {
 	r.mu.Lock()
 	if !r.recording {
 		r.mu.Unlock()
@@ -449,6 +450,7 @@ func (r *Recorder) StopRecording(eventType string, preview []byte) (time.Duratio
 		duration:     durationSec,
 		eventType:    eventType,
 		preview:      preview,
+		detection:    detection,
 	}
 
 	select {

@@ -7,6 +7,8 @@ import (
 	"log"
 	"sort"
 
+	"root-firmware/pkg/storage"
+
 	ort "github.com/yalue/onnxruntime_go"
 )
 
@@ -24,6 +26,7 @@ const (
 type Detection struct {
 	EventType string // "person", "pet", "car", "other"
 	Count     int
+	Result    *storage.DetectionResult // per-box detections with model size context
 }
 
 // decodeLabel maps COCO class IDs to event types
@@ -241,6 +244,19 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 		return &Detection{EventType: "", Count: 0}
 	}
 
+	// Build per-box results
+	detectionBoxes := make([]storage.DetectionBox, len(kept))
+	for i, idx := range kept {
+		detectionBoxes[i] = storage.DetectionBox{
+			Label:      decodeLabel(labels[idx]),
+			Confidence: scores[idx],
+			X1:         boxes[idx][0],
+			Y1:         boxes[idx][1],
+			X2:         boxes[idx][2],
+			Y2:         boxes[idx][3],
+		}
+	}
+
 	// Return event type of first kept detection
 	eventType := decodeLabel(labels[kept[0]])
 
@@ -250,6 +266,10 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	return &Detection{
 		EventType: eventType,
 		Count:     len(kept),
+		Result: &storage.DetectionResult{
+			Boxes:     detectionBoxes,
+			ModelSize: [2]int{modelWidth, modelHeight},
+		},
 	}
 }
 

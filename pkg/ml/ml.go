@@ -11,6 +11,7 @@ import (
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
+	"root-firmware/pkg/storage"
 )
 
 const (
@@ -21,16 +22,17 @@ const (
 var modelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
 
 type ML struct {
-	stopChan              chan struct{}
-	objectDetector        *objectDetector
-	motionDetector        *motionDetector
-	recordingPath         string
-	recordingEvent        string
-	recordingStart        time.Time
-	recordingStartPreview []byte
-	recordingSplitAfter   time.Duration // wall-clock time until split
-	lastRecordedAt        time.Time
-	mu                    sync.Mutex
+	stopChan            chan struct{}
+	objectDetector      *objectDetector
+	motionDetector      *motionDetector
+	recordingPath       string
+	recordingEvent      string
+	recordingStart      time.Time
+	recordingPreview    []byte
+	recordingDetection  *storage.DetectionResult
+	recordingSplitAfter time.Duration // wall-clock time until split
+	lastRecordedAt      time.Time
+	mu                  sync.Mutex
 }
 
 var instance *ML
@@ -155,7 +157,7 @@ func (m *ML) check() {
 
 	if m.recordingPath == "" {
 		log.Printf("ML: Starting recording for %s event", eventType)
-		m.startRecording(eventType, frame, true)
+		m.startRecording(eventType, frame, detection.Result, true)
 		if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
 			sfx.Get().PlayRecording()
 		}
@@ -163,12 +165,12 @@ func (m *ML) check() {
 		// Split recording if duration limit reached
 		log.Printf("ML: Splitting recording (%.2fs elapsed)", time.Since(m.recordingStart).Seconds())
 		m.stopRecording(false)
-		m.startRecording(eventType, frame, false)
+		m.startRecording(eventType, frame, detection.Result, false)
 		m.motionDetector.reset(frame)
 	}
 }
 
-func (m *ML) startRecording(eventType string, preview []byte, withLookback bool) {
+func (m *ML) startRecording(eventType string, preview []byte, detection *storage.DetectionResult, withLookback bool) {
 	tempPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
 	record.Get().StartRecording(tempPath, withLookback)
@@ -176,7 +178,8 @@ func (m *ML) startRecording(eventType string, preview []byte, withLookback bool)
 	m.recordingPath = tempPath
 	m.recordingEvent = eventType
 	m.recordingStart = time.Now()
-	m.recordingStartPreview = preview
+	m.recordingPreview = preview
+	m.recordingDetection = detection
 
 	// When lookback is included, the flush adds LookbackDuration of pre-event
 	// footage, so we split earlier to compensate & ensure the recording length doesn't exceed MaxRecordDuration
@@ -187,13 +190,14 @@ func (m *ML) startRecording(eventType string, preview []byte, withLookback bool)
 }
 
 func (m *ML) stopRecording(applyCooldown bool) {
-	_, err := record.Get().StopRecording(m.recordingEvent, m.recordingStartPreview)
+	_, err := record.Get().StopRecording(m.recordingEvent, m.recordingPreview, m.recordingDetection)
 	if err != nil {
 		log.Printf("ML: Failed to stop recording: %v", err)
 	}
 
 	m.recordingPath = ""
-	m.recordingStartPreview = nil
+	m.recordingPreview = nil
+	m.recordingDetection = nil
 	if applyCooldown {
 		m.lastRecordedAt = time.Now()
 	}

@@ -20,11 +20,26 @@ const (
 	minFreeSpace = 3 * 1024 * 1024 * 1024 // 3GB in bytes
 )
 
+type DetectionBox struct {
+	Label      string  `json:"label"`
+	Confidence float32 `json:"confidence"`
+	X1         float32 `json:"x1"`
+	Y1         float32 `json:"y1"`
+	X2         float32 `json:"x2"`
+	Y2         float32 `json:"y2"`
+}
+
+type DetectionResult struct {
+	Boxes     []DetectionBox `json:"boxes"`
+	ModelSize [2]int         `json:"modelSize"` // [width, height] of the model input that bbox coordinates reference
+}
+
 type Event struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Duration  float64   `json:"duration"` // seconds
-	EventType string    `json:"event_type"`
+	ID        string           `json:"id"`
+	Timestamp time.Time        `json:"timestamp"`
+	Duration  float64          `json:"duration"` // seconds
+	EventType string           `json:"eventType"`
+	Detection *DetectionResult `json:"detection,omitempty"`
 }
 
 type EventLog struct {
@@ -102,7 +117,7 @@ func Get() *Storage {
 
 // SaveRecording saves a recording with event metadata and preview thumbnail
 // Handles cleanup automatically to ensure minFreeSpace
-func (s *Storage) SaveRecording(filePath string, duration float64, eventType string, preview []byte) error {
+func (s *Storage) SaveRecording(filePath string, duration float64, eventType string, preview []byte, detection *DetectionResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -131,6 +146,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		Timestamp: time.Now().UTC(),
 		Duration:  duration,
 		EventType: eventType,
+		Detection: detection,
 	}
 
 	eventLog, err := s.readEventLog()
