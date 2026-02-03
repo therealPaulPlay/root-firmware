@@ -448,21 +448,10 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("device not paired: %s", msg.DeviceID)
 	}
 
-	// Get product private key (stored as base64 string)
-	productPrivateKeyEncoded, ok := config.Get().GetKey("productPrivateKey")
-	if !ok {
-		return nil, fmt.Errorf("product private key not found")
-	}
-
-	privKeyStr, ok := productPrivateKeyEncoded.(string)
-	if !ok {
-		return nil, fmt.Errorf("product private key has invalid type")
-	}
-
-	// Decode from base64
-	privKey, err := encryption.DecodeKey(privKeyStr)
+	// Get product private key
+	privKey, err := config.Get().GetProductPrivateKey()
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode product private key: %w", err)
+		return nil, fmt.Errorf("failed to get product private key: %w", err)
 	}
 
 	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
@@ -470,12 +459,12 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to derive shared secret: %w", err)
 	}
 
-	session, err := encryption.FromSharedSecret(sharedSecret)
+	session, err := encryption.SessionFromKey(sharedSecret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	decrypted, err := session.Decrypt(msg.Payload)
+	decrypted, err := session.DecryptFromBase64(msg.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("decryption failed: %w", err)
 	}

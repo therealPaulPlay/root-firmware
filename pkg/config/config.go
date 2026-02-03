@@ -146,3 +146,20 @@ func (c *Config) GetKey(key string) (any, bool) {
 	value, exists := c.data[key]
 	return value, exists
 }
+
+// GetProductPrivateKey retrieves the camera's private key as raw bytes
+func (c *Config) GetProductPrivateKey() ([]byte, error) {
+	keyEncoded, ok := c.GetKey("productPrivateKey")
+	if !ok {
+		return nil, fmt.Errorf("product private key not set")
+	}
+	keyStr, ok := keyEncoded.(string)
+	if !ok {
+		return nil, fmt.Errorf("product private key has invalid type")
+	}
+	key, err := encryption.DecodeKey(keyStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode product private key: %w", err)
+	}
+	return key, nil
+}

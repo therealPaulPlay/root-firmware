@@ -1,12 +1,36 @@
 package relaycomm
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"sync"
 	"time"
+
+	"root-firmware/pkg/config"
+	"root-firmware/pkg/encryption"
 )
+
+// decryptFileToReader decrypts a file and returns a reader for the plaintext content
+func decryptFileToReader(filePath string, key []byte) (io.Reader, int64, error) {
+	session, err := encryption.SessionFromKey(key)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	ciphertext, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	plaintext, err := session.Decrypt(ciphertext)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	return bytes.NewReader(plaintext), int64(len(plaintext)), nil
+}
 
 type fileTransfer struct {
 	mu       sync.RWMutex
@@ -64,24 +88,25 @@ func SendFileInChunks(ctx *HandlerContext, msgType string, filePath string, file
 			activeTransfers.mu.Unlock()
 		}()
 
-		file, err := os.Open(filePath)
+		// Get decryption key
+		productPrivateKey, err := config.Get().GetProductPrivateKey()
 		if err != nil {
-			SendEncryptedError(ctx, msgType, ErrInternalError, fmt.Sprintf("Failed to open file: %v", err))
-			return
-		}
-		defer file.Close()
-
-		fileInfo, err := file.Stat()
-		if err != nil {
-			SendEncryptedError(ctx, msgType, ErrInternalError, fmt.Sprintf("Failed to stat file: %v", err))
+			SendEncryptedError(ctx, msgType, ErrInternalError, fmt.Sprintf("Failed to get decryption key: %v", err))
 			return
 		}
 
-		totalChunks := int((fileInfo.Size() + chunkSize - 1) / chunkSize)
+		// Decrypt file to reader
+		reader, fileSize, err := decryptFileToReader(filePath, productPrivateKey)
+		if err != nil {
+			SendEncryptedError(ctx, msgType, ErrInternalError, fmt.Sprintf("Failed to decrypt file: %v", err))
+			return
+		}
+
+		totalChunks := int((fileSize + chunkSize - 1) / chunkSize)
 		buffer := make([]byte, chunkSize)
 
 		for chunkIndex := range totalChunks {
-			n, err := io.ReadFull(file, buffer)
+			n, err := io.ReadFull(reader, buffer)
 			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 				SendEncryptedError(ctx, msgType, ErrInternalError, fmt.Sprintf("Failed to read chunk: %v", err))
 				return

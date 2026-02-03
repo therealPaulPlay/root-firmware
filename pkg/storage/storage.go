@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"root-firmware/pkg/config"
+	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
 
@@ -19,6 +21,26 @@ import (
 const (
 	minFreeSpace = 3 * 1024 * 1024 * 1024 // 3GB in bytes
 )
+
+// encryptFileToPath reads a file, encrypts it, and writes to a destination path
+func encryptFileToPath(srcPath, dstPath string, key []byte) error {
+	session, err := encryption.SessionFromKey(key)
+	if err != nil {
+		return err
+	}
+
+	plaintext, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	ciphertext, err := session.Encrypt(plaintext)
+	if err != nil {
+		return err
+	}
+
+	return fsutil.AtomicWrite(dstPath, ciphertext, 0644)
+}
 
 type DetectionBox struct {
 	Label      string  `json:"label"`
@@ -159,25 +181,38 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		return err
 	}
 
-	// Now move / rename files to final location
-	finalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", id.String()))
-	if err := os.Rename(filePath, finalPath); err != nil {
-		return fmt.Errorf("failed to move recording: %w", err)
+	// Get encryption key and create session
+	productPrivateKey, err := config.Get().GetProductPrivateKey()
+	if err != nil {
+		return fmt.Errorf("failed to get encryption key: %w", err)
 	}
 
-	// Move audio file if it exists
+	// Encrypt and save video from temp to final location
+	finalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", id.String()))
+	if err := encryptFileToPath(filePath, finalPath, productPrivateKey); err != nil {
+		return fmt.Errorf("failed to encrypt recording: %w", err)
+	}
+	os.Remove(filePath) // Clean up temp file
+
+	// Encrypt and save audio file if it exists
 	audioTempPath := filePath[:len(filePath)-4] + "_audio.m4a"
 	if _, err := os.Stat(audioTempPath); err == nil {
 		audioFinalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", id.String()))
-		if err := os.Rename(audioTempPath, audioFinalPath); err != nil {
-			log.Printf("Storage: Failed to rename audio file for %s: %v", id.String(), err)
+		if err := encryptFileToPath(audioTempPath, audioFinalPath, productPrivateKey); err != nil {
+			log.Printf("Storage: Failed to encrypt audio for %s: %v", id.String(), err)
 		}
+		os.Remove(audioTempPath) // Clean up temp file
 	}
 
-	// Save preview as thumbnail
+	// Encrypt and save preview as thumbnail
 	if preview != nil {
 		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", id.String()))
-		if err := fsutil.AtomicWrite(thumbnailPath, preview, 0644); err != nil {
+		session, err := encryption.SessionFromKey(productPrivateKey)
+		if err != nil {
+			log.Printf("Storage: Failed to create encryption session for %s: %v", id.String(), err)
+		} else if encryptedPreview, err := session.Encrypt(preview); err != nil {
+			log.Printf("Storage: Failed to encrypt thumbnail for %s: %v", id.String(), err)
+		} else if err := fsutil.AtomicWrite(thumbnailPath, encryptedPreview, 0644); err != nil {
 			log.Printf("Storage: Failed to save thumbnail for %s: %v", id.String(), err)
 		}
 	}

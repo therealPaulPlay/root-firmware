@@ -72,13 +72,13 @@ func DeriveSharedSecret(yourPrivateKey, theirPublicKey []byte) ([]byte, error) {
 	return key, nil
 }
 
-// FromSharedSecret creates session from shared secret
-func FromSharedSecret(sharedSecret []byte) (*Session, error) {
-	if len(sharedSecret) != 32 {
+// SessionFromKey creates session from a key (e.g. shared secret)
+func SessionFromKey(key []byte) (*Session, error) {
+	if len(key) != 32 {
 		return nil, fmt.Errorf("shared secret must be 32 bytes")
 	}
 
-	block, err := aes.NewCipher(sharedSecret)
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
@@ -93,29 +93,31 @@ func FromSharedSecret(sharedSecret []byte) (*Session, error) {
 
 // Encrypt encrypts plaintext using AES-256-GCM
 // Format: [nonce][ciphertext] (nonce prepended)
-// Returns base64-encoded result
-func (s *Session) Encrypt(plaintext []byte) (string, error) {
+func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	nonce := make([]byte, s.gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	ciphertext := s.gcm.Seal(nonce, nonce, plaintext, nil)
+	return s.gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+// EncryptToBase64 encrypts plaintext and returns base64-encoded result
+func (s *Session) EncryptToBase64(plaintext []byte) (string, error) {
+	ciphertext, err := s.Encrypt(plaintext)
+	if err != nil {
+		return "", err
+	}
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// Decrypt decrypts base64-encoded ciphertext
-func (s *Session) Decrypt(ciphertextB64 string) ([]byte, error) {
+// Decrypt decrypts raw ciphertext bytes
+func (s *Session) Decrypt(ciphertext []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextB64)
-	if err != nil {
-		return nil, err
-	}
 
 	nonceSize := s.gcm.NonceSize()
 	if len(ciphertext) < nonceSize {
@@ -124,6 +126,15 @@ func (s *Session) Decrypt(ciphertextB64 string) ([]byte, error) {
 
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 	return s.gcm.Open(nil, nonce, ciphertext, nil)
+}
+
+// DecryptFromBase64 decrypts base64-encoded ciphertext
+func (s *Session) DecryptFromBase64(ciphertextB64 string) ([]byte, error) {
+	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextB64)
+	if err != nil {
+		return nil, err
+	}
+	return s.Decrypt(ciphertext)
 }
 
 // EncodeKey converts public key to base64
