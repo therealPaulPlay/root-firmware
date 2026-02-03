@@ -6,16 +6,19 @@ import "time"
 var FirmwareVersion = "dev"
 
 // Camera
-const CameraFramerate = 15 // Frames per second
-const CameraGOPSize = 5    // Frames per GOP (keyframe interval)
+const CameraFramerate = 15      // Frames per second
+const CameraGOPSize = 5         // Frames per GOP (keyframe interval)
+const CameraWidth = 1920        // Horizontal pixels
+const CameraHeight = 1080       // Vertical pixels
+const CameraBitrate = 3_000_000 // Bits ber second
 
 // Audio
 const AudioSampleRate = 48000    // Hz
 const AudioChunkSize = 48 * 1024 // Bytes per audio chunk (~500ms at 48kHz mono S16_LE)
 
 // Recording
-const MaxRecordDuration = 20 * time.Second // Max recording duration
-const LookbackDuration = 8 * time.Second   // Pre-event buffer included in recordings (must be higher than max rec. duration)
+const MaxRecordDuration = 30 * time.Second // Max recording duration (higher require take more memory)
+const LookbackDuration = 8 * time.Second   // Pre-event buffer included in recordings (must be higher than max recording duration)
 
 // Model name lowercase
 const ProductModel = "observer"

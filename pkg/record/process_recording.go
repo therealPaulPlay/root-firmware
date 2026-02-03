@@ -107,7 +107,7 @@ func (r *Recorder) muxVideo(entries []lookbackEntry, outputPath string, duration
 
 	log.Printf("Recorder: Muxing %d GOPs (%.2fs, %dKB) to %s", len(entries), duration, buf.Len()/1024, outputPath)
 
-	cmd := exec.Command("ffmpeg", "-f", "h264", "-i", "pipe:0", "-c:v", "copy", "-f", "mp4", outputPath)
+	cmd := exec.Command("ffmpeg", "-f", "h264", "-i", "pipe:0", "-c:v", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", outputPath)
 	cmd.Stdin = &buf
 	if err := cmd.Run(); err != nil {
 		log.Printf("Recorder: Failed to mux video: %v", err)

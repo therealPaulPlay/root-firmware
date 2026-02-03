@@ -177,8 +177,9 @@ func (r *Recorder) startCamera() error {
 		"-t", "0", "-o", "-",
 		"--codec", "h264", "-n", "--inline", "--listen",
 		"--framerate", fmt.Sprintf("%d", globals.CameraFramerate),
-		"--width", "1920", "--height", "1080",
-		"-b", "3000000",
+		"--width", fmt.Sprintf("%d", globals.CameraWidth),
+		"--height", fmt.Sprintf("%d", globals.CameraHeight),
+		"-b", fmt.Sprintf("%d", globals.CameraBitrate),
 		"-g", fmt.Sprintf("%d", globals.CameraGOPSize),
 		"--ev", "5.0",
 	)

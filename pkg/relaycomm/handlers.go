@@ -508,13 +508,15 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 		"eventId":  req.ID,
 	})
 
-	// Send video, then audio sequentially
+	// Send audio first (smaller), then video
 	metadata := map[string]any{"eventId": req.ID}
-	SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", metadata, func() {
-		if hasAudio {
-			SendFileInChunks(ctx, MsgGetRecording, audioPath, "audio", metadata, nil)
-		}
-	})
+	if hasAudio {
+		SendFileInChunks(ctx, MsgGetRecording, audioPath, "audio", metadata, func() {
+			SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", metadata, nil)
+		})
+	} else {
+		SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", metadata, nil)
+	}
 }
 
 func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
