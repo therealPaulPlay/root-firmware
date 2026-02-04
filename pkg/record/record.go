@@ -112,8 +112,9 @@ func Init() error {
 			return
 		}
 
-		// Pre-warm ffmpeg page cache so the first stream doesn't stall on cold start
-		exec.Command("ffmpeg", "-version").Run()
+		// Warm up ffmpeg with h264 demuxer + fmp4 muxer (same pipeline as streaming)
+		exec.Command("ffmpeg", "-f", "lavfi", "-i", "testsrc=d=0.1:r=1", "-c:v", "libx264",
+			"-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-y", "/dev/null").Run()
 
 		instance = &Recorder{
 			decoder:        dec,
