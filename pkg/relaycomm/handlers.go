@@ -511,11 +511,11 @@ func handleGetRecording(ctx *HandlerContext, payload json.RawMessage) {
 	// Send audio first (smaller), then video
 	metadata := map[string]any{"eventId": req.ID}
 	if hasAudio {
-		SendFileInChunks(ctx, MsgGetRecording, audioPath, "audio", metadata, func() {
-			SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", metadata, nil)
+		SendFileInChunksAsync(ctx, MsgGetRecording, audioPath, "audio", metadata, func() {
+			SendFileInChunksAsync(ctx, MsgGetRecording, videoPath, "video", metadata, nil)
 		})
 	} else {
-		SendFileInChunks(ctx, MsgGetRecording, videoPath, "video", metadata, nil)
+		SendFileInChunksAsync(ctx, MsgGetRecording, videoPath, "video", metadata, nil)
 	}
 }
 
@@ -529,36 +529,33 @@ func handleGetThumbnail(ctx *HandlerContext, payload json.RawMessage) {
 		return
 	}
 
-	// Decrypt and send thumbnail in goroutine to avoid blocking
-	go func() {
-		filePath, err := storage.Get().GetThumbnailPath(req.ID)
-		if err != nil {
-			SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, err.Error())
-			return
-		}
+	filePath, err := storage.Get().GetThumbnailPath(req.ID)
+	if err != nil {
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, err.Error())
+		return
+	}
 
-		productPrivateKey, err := config.Get().GetProductPrivateKey()
-		if err != nil {
-			SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to get decryption key: %v", err))
-			return
-		}
+	productPrivateKey, err := config.Get().GetProductPrivateKey()
+	if err != nil {
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to get decryption key: %v", err))
+		return
+	}
 
-		reader, _, err := decryptFileToReader(filePath, productPrivateKey)
-		if err != nil {
-			SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to decrypt thumbnail: %v", err))
-			return
-		}
+	reader, _, err := decryptFileToReader(filePath, productPrivateKey)
+	if err != nil {
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to decrypt thumbnail: %v", err))
+		return
+	}
 
-		fileData, err := io.ReadAll(reader)
-		if err != nil {
-			SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to read thumbnail: %v", err))
-			return
-		}
+	fileData, err := io.ReadAll(reader)
+	if err != nil {
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to read thumbnail: %v", err))
+		return
+	}
 
-		SendEncryptedSuccessWithBinaryData(ctx, MsgGetThumbnail, map[string]any{
-			"eventId": req.ID,
-		}, fileData)
-	}()
+	SendEncryptedSuccessWithBinaryData(ctx, MsgGetThumbnail, map[string]any{
+		"eventId": req.ID,
+	}, fileData)
 }
 
 func handleStartStream(ctx *HandlerContext, payload json.RawMessage) {
@@ -690,16 +687,13 @@ func handleGetHealth(ctx *HandlerContext, payload json.RawMessage) {
 }
 
 func handleGetPreview(ctx *HandlerContext, payload json.RawMessage) {
-	// Capture and encode preview in goroutine to avoid blocking
-	go func() {
-		frameData, err := record.Get().CapturePreview(640, 360)
-		if err != nil {
-			SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
-			return
-		}
+	frameData, err := record.Get().CapturePreview(640, 360)
+	if err != nil {
+		SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
+		return
+	}
 
-		SendEncryptedSuccessWithBinaryData(ctx, MsgGetPreview, map[string]any{}, frameData)
-	}()
+	SendEncryptedSuccessWithBinaryData(ctx, MsgGetPreview, map[string]any{}, frameData)
 }
 
 func handleStartUpdate(ctx *HandlerContext, payload json.RawMessage) {
