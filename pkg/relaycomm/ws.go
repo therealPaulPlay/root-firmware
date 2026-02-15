@@ -10,6 +10,7 @@ import (
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/updater"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/gorilla/websocket"
 )
 
@@ -21,13 +22,11 @@ const (
 )
 
 type Message struct {
-	Type      string `json:"type"`
-	Target    string `json:"target,omitempty"`    // "product" or "device"
-	ProductID string `json:"productId,omitempty"` // Target/source product ID
-	DeviceID  string `json:"deviceId,omitempty"`  // Target/source device ID
-	RequestID string `json:"requestId,omitempty"` // Request tracking ID
-	Payload   string `json:"payload,omitempty"`   // Encrypted (base64) or unencrypted JSON
-	BinData   string `json:"binData,omitempty"`   // Separately encrypted binary data (base64)
+	Type      string `cbor:"type"`
+	OriginID  string `cbor:"originId"`
+	TargetID  string `cbor:"targetId"`
+	RequestID string `cbor:"requestId"`
+	Payload   []byte `cbor:"payload,omitempty"`
 }
 
 type RelayComm struct {
@@ -154,7 +153,7 @@ func (r *RelayComm) dial(relayDomain string) *websocket.Conn {
 		return nil
 	}
 
-	url := fmt.Sprintf("wss://%s/ws?product-id=%s", relayDomain, id)
+	url := fmt.Sprintf("wss://%s/ws?client-id=%s", relayDomain, id)
 	dialer := websocket.Dialer{
 		NetDial: func(network, addr string) (net.Conn, error) {
 			return net.DialTimeout(network, addr, dialTimeout)
@@ -178,9 +177,14 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 	go func() {
 		defer close(readDone)
 		for {
-			var msg Message
-			if err := conn.ReadJSON(&msg); err != nil {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
 				return
+			}
+			var msg Message
+			if err := cbor.Unmarshal(data, &msg); err != nil {
+				log.Printf("RelayComm: Failed to decode message: %v", err)
+				continue
 			}
 			if r.checkRateLimit() {
 				if handler, ok := r.handlers[msg.Type]; ok {
@@ -200,8 +204,13 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 		case <-readDone:
 			return
 		case msg := <-r.sendChan:
+			data, err := cbor.Marshal(msg)
+			if err != nil {
+				log.Printf("RelayComm: Failed to encode message: %v", err)
+				continue
+			}
 			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := conn.WriteJSON(msg); err != nil {
+			if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
 				log.Printf("RelayComm: Send failed: %v", err)
 			}
 			conn.SetWriteDeadline(time.Time{})

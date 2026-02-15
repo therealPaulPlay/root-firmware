@@ -96,9 +96,9 @@ func (s *SFX) PlayRecording() {
 	}
 
 	go func() {
-		s.playTone(500, 60*time.Millisecond)
+		s.playTone(500, 50*time.Millisecond)
 		time.Sleep(40 * time.Millisecond)
-		s.playTone(500, 60*time.Millisecond)
+		s.playTone(500, 50*time.Millisecond)
 	}()
 }
 
@@ -110,7 +110,7 @@ func (s *SFX) PlayStream() {
 
 	go func() {
 		s.playTone(400, 50*time.Millisecond)
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(40 * time.Millisecond)
 		s.playTone(400, 50*time.Millisecond)
 		time.Sleep(40 * time.Millisecond)
 		s.playTone(400, 50*time.Millisecond)
@@ -126,4 +126,18 @@ func (s *SFX) PlayPairingSuccess() {
 	go func() {
 		s.playTone(600, 50*time.Millisecond)
 	}()
+}
+
+// PlayCameraFailure plays a descending tone to indicate that the camera module failed
+// Not in a goroutine, since we want to await this before exiting
+func (s *SFX) PlayCameraFailure() {
+	if s.pin == nil {
+		return
+	}
+
+	s.playTone(500, 50*time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
+	s.playTone(400, 50*time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
+	s.playTone(300, 100*time.Millisecond)
 }

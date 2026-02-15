@@ -10,7 +10,6 @@ import (
 // pendingKeyRenewal stores temporary key renewal data before commit
 type pendingKeyRenewal struct {
 	NewPublicKey      []byte
-	NewSharedSecret   []byte
 	NewEncryptSession *encryption.Session
 	CreatedAt         time.Time
 }
@@ -73,27 +72,26 @@ func (m *keyRenewalManager) cleanupExpired() {
 }
 
 // BufferPendingKeyRenewal stores key renewal data before committing (auto-expires after 30s)
-func BufferPendingKeyRenewal(deviceID string, newPublicKey, newSharedSecret []byte, newSession *encryption.Session) {
+func BufferPendingKeyRenewal(deviceID string, newPublicKey []byte, newSession *encryption.Session) {
 	m := initKeyRenewalManager()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pending[deviceID] = &pendingKeyRenewal{
 		NewPublicKey:      newPublicKey,
-		NewSharedSecret:   newSharedSecret,
 		NewEncryptSession: newSession,
 		CreatedAt:         time.Now(),
 	}
 }
 
 // GetPendingKeyRenewal retrieves buffered key renewal data
-func GetPendingKeyRenewal(deviceID string) ([]byte, []byte, *encryption.Session, bool) {
+func GetPendingKeyRenewal(deviceID string) ([]byte, *encryption.Session, bool) {
 	m := initKeyRenewalManager()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if renewal, ok := m.pending[deviceID]; ok {
-		return renewal.NewPublicKey, renewal.NewSharedSecret, renewal.NewEncryptSession, true
+		return renewal.NewPublicKey, renewal.NewEncryptSession, true
 	}
-	return nil, nil, nil, false
+	return nil, nil, false
 }
 
 // StorePreviousEncryption stores old encryption session for device (auto-expires after 30s)

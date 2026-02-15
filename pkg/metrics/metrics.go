@@ -23,11 +23,11 @@ const (
 )
 
 type DataPoint struct {
-	Timestamp   time.Time `json:"t"`
-	CPU         float64   `json:"cpu"`
-	Memory      float64   `json:"mem"`
-	Temperature float64   `json:"temp"`
-	Disk        float64   `json:"disk"`
+	Timestamp   float64 `json:"t"` // Unix milliseconds (float64 for compatibility)
+	CPU         float64 `json:"cpu"`
+	Memory      float64 `json:"mem"`
+	Temperature float64 `json:"temp"`
+	Disk        float64 `json:"disk"`
 }
 
 type collector struct {
@@ -51,17 +51,13 @@ func Init() {
 	go instance.run()
 }
 
-func GetPoints() json.RawMessage {
+func GetPoints() []DataPoint {
 	if instance == nil {
-		return []byte("[]")
+		return nil
 	}
 	instance.mu.RLock()
 	defer instance.mu.RUnlock()
-	data, err := json.Marshal(instance.points)
-	if err != nil {
-		return []byte("[]")
-	}
-	return data
+	return append([]DataPoint{}, instance.points...)
 }
 
 func (c *collector) run() {
@@ -80,9 +76,9 @@ func (c *collector) run() {
 			if len(c.points) > maxDataPoints {
 				c.points = c.points[len(c.points)-maxDataPoints:]
 			}
-			cutoff := time.Now().UTC().Add(-1 * time.Hour)
+			cutoffMs := float64(time.Now().UTC().Add(-1 * time.Hour).UnixMilli())
 			start := 0
-			for start < len(c.points) && c.points[start].Timestamp.Before(cutoff) {
+			for start < len(c.points) && c.points[start].Timestamp < cutoffMs {
 				start++
 			}
 			if start > 0 {
@@ -98,7 +94,7 @@ func (c *collector) run() {
 }
 
 func (c *collector) collect() DataPoint {
-	dp := DataPoint{Timestamp: time.Now().UTC()}
+	dp := DataPoint{Timestamp: float64(time.Now().UnixMilli())}
 
 	// CPU: non-blocking delta calculation from /proc/stat
 	if times, err := cpu.Times(false); err == nil && len(times) > 0 {

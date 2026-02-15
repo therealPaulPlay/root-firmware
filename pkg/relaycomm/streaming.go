@@ -205,9 +205,10 @@ func streamVideo(s *stream) {
 			pendingBox = nil
 		}
 
-		if err := SendEncryptedSuccessWithBinaryData(s.ctx, s.msgType, map[string]any{
+		if err := SendEncryptedSuccess(s.ctx, s.msgType, map[string]any{
 			"chunkIndex": chunkIndex,
-		}, boxData); err != nil {
+			"chunk":      boxData,
+		}); err != nil {
 			log.Printf("RelayComm: Video stream send failed, ending stream: %v", err)
 			go streams.end(true, "Video stream send failed")
 			return
@@ -236,9 +237,10 @@ func streamAudio(s *stream) {
 				return
 			}
 
-			if err := SendEncryptedSuccessWithBinaryData(s.ctx, s.msgType, map[string]any{
+			if err := SendEncryptedSuccess(s.ctx, s.msgType, map[string]any{
 				"chunkIndex": chunkIndex,
-			}, data); err != nil {
+				"chunk":      data,
+			}); err != nil {
 				log.Printf("RelayComm: Audio stream send failed, ending stream: %v", err)
 				go streams.end(false, "Audio stream send failed")
 				return

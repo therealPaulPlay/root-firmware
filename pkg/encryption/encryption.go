@@ -91,9 +91,9 @@ func SessionFromKey(key []byte) (*Session, error) {
 	return &Session{gcm: gcm}, nil
 }
 
-// Encrypt encrypts plaintext using AES-256-GCM
+// Encrypt encrypts plaintext using AES-256-GCM with optional AAD.
 // Format: [nonce][ciphertext] (nonce prepended)
-func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
+func (s *Session) Encrypt(plaintext, aad []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -102,20 +102,11 @@ func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	return s.gcm.Seal(nonce, nonce, plaintext, nil), nil
+	return s.gcm.Seal(nonce, nonce, plaintext, aad), nil
 }
 
-// EncryptToBase64 encrypts plaintext and returns base64-encoded result
-func (s *Session) EncryptToBase64(plaintext []byte) (string, error) {
-	ciphertext, err := s.Encrypt(plaintext)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
-// Decrypt decrypts raw ciphertext bytes
-func (s *Session) Decrypt(ciphertext []byte) ([]byte, error) {
+// Decrypt decrypts raw ciphertext bytes with optional AAD.
+func (s *Session) Decrypt(ciphertext, aad []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -125,16 +116,13 @@ func (s *Session) Decrypt(ciphertext []byte) ([]byte, error) {
 	}
 
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	return s.gcm.Open(nil, nonce, ciphertext, nil)
+	return s.gcm.Open(nil, nonce, ciphertext, aad)
 }
 
-// DecryptFromBase64 decrypts base64-encoded ciphertext
-func (s *Session) DecryptFromBase64(ciphertextB64 string) ([]byte, error) {
-	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextB64)
-	if err != nil {
-		return nil, err
-	}
-	return s.Decrypt(ciphertext)
+// ComputeAAD computes AAD from message type, origin ID, and target ID.
+func ComputeAAD(msgType, originId, targetId string) []byte {
+	h := sha256.Sum256([]byte(msgType + "|" + originId + "|" + targetId))
+	return h[:]
 }
 
 // EncodeKey converts public key to base64

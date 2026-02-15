@@ -2,13 +2,13 @@ package pairing
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"maps"
 	"strings"
 	"sync"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/go-ble/ble"
 	"github.com/go-ble/ble/linux"
 
@@ -55,32 +55,28 @@ var wifiNetworksCacheMu sync.Mutex
 var viewfinderChunksCache []map[string]any
 var viewfinderChunksCacheMu sync.Mutex
 
-// writeError writes a JSON error response to the BLE response writer
+// writeError writes a CBOR error response to the BLE response writer
 func writeError(rsp ble.ResponseWriter, message string) {
-	const maxMsgLen = 70 // JSON success and error fields add around 32 bytes
+	const maxMsgLen = 70 // Leave headroom for other fields
 	if len(message) > maxMsgLen {
-		message = message[:maxMsgLen-3] + "..." // Truncate so that json stays below 128 bytes
+		message = message[:maxMsgLen-3] + "..." // Truncate so that message stays below 128 bytes
 	}
-	fmt.Fprintf(rsp, `{"success":false,"error":"%s"}`, message)
+	data, _ := cbor.Marshal(map[string]any{"success": false, "error": message})
+	rsp.Write(data)
 }
 
-// writeSuccess writes a JSON success response to the BLE response writer
-func writeSuccess(rsp ble.ResponseWriter) {
-	rsp.Write([]byte(`{"success":true}`))
-}
+// writeSuccess writes a CBOR success response with optional data fields
+func writeSuccess(rsp ble.ResponseWriter, fields map[string]any) error {
+	payload := map[string]any{"success": true}
+	maps.Copy(payload, fields)
 
-// writeJSON marshals and writes JSON to BLE
-func writeJSON(rsp ble.ResponseWriter, data map[string]any) error {
-	response := map[string]any{"success": true}
-	maps.Copy(response, data)
-
-	jsonData, err := json.Marshal(response)
+	data, err := cbor.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	_, err = rsp.Write(jsonData)
+	_, err = rsp.Write(data)
 	if err != nil {
-		log.Printf("BLE: Write failed (%d bytes): %v", len(jsonData), err)
+		log.Printf("BLE: Write failed (%d bytes): %v", len(data), err)
 	}
 	return err
 }
@@ -114,7 +110,7 @@ func initBLE() error {
 	// Product model characteristic (read-only)
 	productModelChar := svc.NewCharacteristic(productModelCharUUID)
 	productModelChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
-		if err := writeJSON(rsp, map[string]any{"model": globals.ProductModel}); err != nil {
+		if err := writeSuccess(rsp, map[string]any{"model": globals.ProductModel}); err != nil {
 			writeError(rsp, err.Error())
 		}
 	}))
@@ -127,7 +123,7 @@ func initBLE() error {
 			writeError(rsp, "Config not initialized - ID not set")
 			return
 		}
-		if err := writeJSON(rsp, map[string]any{"productId": id}); err != nil {
+		if err := writeSuccess(rsp, map[string]any{"productId": id}); err != nil {
 			writeError(rsp, err.Error())
 		}
 	}))
@@ -141,7 +137,7 @@ func initBLE() error {
 		viewfinderChunksCacheMu.Unlock()
 
 		code := GetHelper().GenerateCode()
-		if err := writeJSON(rsp, map[string]any{"code": code}); err != nil {
+		if err := writeSuccess(rsp, map[string]any{"code": code}); err != nil {
 			writeError(rsp, err.Error())
 		}
 	}))
@@ -156,7 +152,7 @@ func initBLE() error {
 			return
 		}
 		log.Printf("BLE: QR code verified successfully")
-		writeSuccess(rsp)
+		writeSuccess(rsp, nil)
 	}))
 
 	// Viewfinder characteristic (read to get next chunk of 48x48 2-bit preview)
@@ -188,7 +184,7 @@ func initBLE() error {
 		chunk["hasMore"] = len(viewfinderChunksCache) > 0
 		viewfinderChunksCacheMu.Unlock()
 
-		if err := writeJSON(rsp, chunk); err != nil {
+		if err := writeSuccess(rsp, chunk); err != nil {
 			writeError(rsp, err.Error())
 		}
 	}))
@@ -197,12 +193,12 @@ func initBLE() error {
 	pairChar := svc.NewCharacteristic(pairCharUUID)
 	pairChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		var pairReq struct {
-			DeviceID        string `json:"deviceId"`
-			DeviceName      string `json:"deviceName"`
-			DevicePublicKey string `json:"devicePublicKey"`
+			DeviceID        string `cbor:"deviceId"`
+			DeviceName      string `cbor:"deviceName"`
+			DevicePublicKey string `cbor:"devicePublicKey"`
 		}
 
-		if err := json.Unmarshal(req.Data(), &pairReq); err != nil {
+		if err := cbor.Unmarshal(req.Data(), &pairReq); err != nil {
 			log.Printf("BLE: Failed to parse pair request: %v", err)
 			pairingStatus = operationStatus{completed: true, success: false, error: "Failed to parse request"}
 			return
@@ -236,7 +232,7 @@ func initBLE() error {
 		}
 		log.Printf("BLE: Sending pairing result (productId: %s, publicKey: %s)", pairingStatus.data["productId"], pairingStatus.data["publicKey"])
 		// Return only productId (product public key is in separate characteristic)
-		if err := writeJSON(rsp, map[string]any{"productId": pairingStatus.data["productId"]}); err != nil {
+		if err := writeSuccess(rsp, map[string]any{"productId": pairingStatus.data["productId"]}); err != nil {
 			log.Printf("BLE: Failed to send pairing result: %v", err)
 			writeError(rsp, err.Error())
 		}
@@ -253,7 +249,7 @@ func initBLE() error {
 			writeError(rsp, pairingStatus.error)
 			return
 		}
-		if err := writeJSON(rsp, map[string]any{"publicKey": pairingStatus.data["publicKey"]}); err != nil {
+		if err := writeSuccess(rsp, map[string]any{"publicKey": pairingStatus.data["publicKey"]}); err != nil {
 			log.Printf("BLE: Failed to send product public key: %v", err)
 			writeError(rsp, err.Error())
 		}
@@ -287,7 +283,7 @@ func initBLE() error {
 		wifiNetworksCache = wifiNetworksCache[1:]
 		hasMore := len(wifiNetworksCache) > 0
 
-		if err := writeJSON(rsp, map[string]any{
+		if err := writeSuccess(rsp, map[string]any{
 			"network": network,
 			"hasMore": hasMore,
 		}); err != nil {
@@ -299,7 +295,7 @@ func initBLE() error {
 	// Get WiFi Status characteristic (read-only)
 	wifiStatusChar := svc.NewCharacteristic(wifiStatusCharUUID)
 	wifiStatusChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
-		if err := writeJSON(rsp, map[string]any{
+		if err := writeSuccess(rsp, map[string]any{
 			"connected": wifi.Get().IsConnected(),
 			"ssid":      wifi.Get().GetCurrentNetwork(),
 		}); err != nil {
@@ -318,11 +314,11 @@ func initBLE() error {
 		}
 
 		var wifiReq struct {
-			SSID        string `json:"ssid"`
-			Password    string `json:"password"`
-			CountryCode string `json:"countryCode"` // Optional ISO 3166-1 alpha-2 code
+			SSID        string `cbor:"ssid"`
+			Password    string `cbor:"password"`
+			CountryCode string `cbor:"countryCode"` // Optional ISO 3166-1 alpha-2 code
 		}
-		if err := json.Unmarshal(decrypted, &wifiReq); err != nil {
+		if err := cbor.Unmarshal(decrypted, &wifiReq); err != nil {
 			log.Printf("BLE: WiFi parse failed: %v", err)
 			wifiStatus = operationStatus{completed: true, success: false, error: "Failed to parse request"}
 			return
@@ -342,21 +338,21 @@ func initBLE() error {
 	}))
 	wifiConnectChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if !wifiStatus.completed {
-			writeJSON(rsp, map[string]any{"status": "pending"})
+			writeSuccess(rsp, map[string]any{"status": "pending"})
 			return
 		}
 		if !wifiStatus.success {
 			writeError(rsp, wifiStatus.error)
 			return
 		}
-		writeSuccess(rsp)
+		writeSuccess(rsp, nil)
 	}))
 
 	// Get Relay status characteristic (read-only)
 	relayStatusChar := svc.NewCharacteristic(relayStatusCharUUID)
 	relayStatusChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		relayDomain, _ := config.Get().GetKey("relayDomain")
-		if err := writeJSON(rsp, map[string]any{
+		if err := writeSuccess(rsp, map[string]any{
 			"relayDomain": relayDomain,
 		}); err != nil {
 			writeError(rsp, err.Error())
@@ -374,9 +370,9 @@ func initBLE() error {
 		}
 
 		var relayReq struct {
-			RelayDomain string `json:"relayDomain"`
+			RelayDomain string `cbor:"relayDomain"`
 		}
-		if err := json.Unmarshal(decrypted, &relayReq); err != nil {
+		if err := cbor.Unmarshal(decrypted, &relayReq); err != nil {
 			log.Printf("BLE: Relay parse failed: %v", err)
 			relayStatus = operationStatus{completed: true, success: false, error: "Failed to parse request"}
 			return
@@ -410,7 +406,7 @@ func initBLE() error {
 			writeError(rsp, relayStatus.error)
 			return
 		}
-		writeSuccess(rsp)
+		writeSuccess(rsp, nil)
 	}))
 
 	// Add service to device
@@ -435,11 +431,11 @@ func initBLE() error {
 
 func decryptAndVerify(data []byte) ([]byte, error) {
 	var msg struct {
-		DeviceID string `json:"deviceId"`
-		Payload  string `json:"payload"`
+		DeviceID string `cbor:"deviceId"`
+		Payload  []byte `cbor:"payload"`
 	}
 
-	if err := json.Unmarshal(data, &msg); err != nil {
+	if err := cbor.Unmarshal(data, &msg); err != nil {
 		return nil, fmt.Errorf("invalid payload format: %w", err)
 	}
 
@@ -464,7 +460,7 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	decrypted, err := session.DecryptFromBase64(msg.Payload)
+	decrypted, err := session.Decrypt(msg.Payload, nil)
 	if err != nil {
 		return nil, fmt.Errorf("decryption failed: %w", err)
 	}

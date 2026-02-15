@@ -11,10 +11,12 @@ import (
 	"os/exec"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
+	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
 
 	"golang.org/x/image/draw"
@@ -38,6 +40,7 @@ type Recorder struct {
 	videoRing      *lookbackBuffer
 	audioRing      *lookbackBuffer
 	muxQueue       chan muxJob
+	videoHeartbeat atomic.Bool
 }
 
 type broadcast struct {
@@ -196,6 +199,7 @@ func (r *Recorder) startCamera() error {
 
 	r.videoCmd = cmd
 	go r.videoBroadcastLoop(stdout)
+	go r.videoWatchdog()
 	log.Println("Recorder: Camera (video broadcast) started")
 	return nil
 }
@@ -244,12 +248,28 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 			}
 
 			r.videoBroadcast.write(data)
+			r.videoHeartbeat.Store(true)
 		}
 
 		if err != nil {
 			log.Printf("Recorder: Video broadcast failed: %v", err)
 			r.videoBroadcast.closeAll()
+			sfx.Get().PlayCameraFailure()
 			log.Fatal("Recorder: Camera failure, exiting for restart")
+		}
+	}
+}
+
+func (r *Recorder) videoWatchdog() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if !r.videoHeartbeat.Swap(false) {
+			log.Println("Recorder: No video data received in last 10s")
+			r.videoBroadcast.closeAll()
+			sfx.Get().PlayCameraFailure()
+			log.Fatal("Recorder: Camera failure (no data), exiting for restart")
 		}
 	}
 }

@@ -12,11 +12,11 @@ import (
 )
 
 type Device struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`         // Device name
-	PublicKey    []byte    `json:"publicKey"`    // Device's public key
-	ProductAlias string    `json:"productAlias"` // User-defined name for the ROOT product (e.g. "Living Room Camera")
-	PairedAt     time.Time `json:"pairedAt"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`         // Device name
+	PublicKey    []byte  `json:"publicKey"`    // Device's public key
+	ProductAlias string  `json:"productAlias"` // User-defined name for the ROOT product (e.g. "Living Room Camera")
+	PairedAt     float64 `json:"pairedAt"`     // Unix milliseconds (float64 for compatibility)
 }
 
 type Devices struct {
@@ -80,7 +80,7 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 		Name:         name,
 		PublicKey:    publicKey,
 		ProductAlias: "My ROOT " + strings.ToUpper(globals.ProductModel[:1]) + globals.ProductModel[1:], // Prefix needs to match client-side default prefix
-		PairedAt:     time.Now(),
+		PairedAt:     float64(time.Now().UnixMilli()),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)

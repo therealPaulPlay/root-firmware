@@ -34,7 +34,7 @@ func encryptFileToPath(srcPath, dstPath string, key []byte) error {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	ciphertext, err := session.Encrypt(plaintext)
+	ciphertext, err := session.Encrypt(plaintext, nil)
 	if err != nil {
 		return err
 	}
@@ -58,8 +58,8 @@ type DetectionResult struct {
 
 type Event struct {
 	ID        string           `json:"id"`
-	Timestamp time.Time        `json:"timestamp"`
-	Duration  float64          `json:"duration"` // seconds
+	Timestamp float64          `json:"timestamp"` // Unix milliseconds (float64 for compatibility)
+	Duration  float64          `json:"duration"`  // seconds
 	EventType string           `json:"eventType"`
 	Detection *DetectionResult `json:"detection,omitempty"`
 }
@@ -165,7 +165,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 	// which is better than orphaned files that can never be cleaned up
 	event := Event{
 		ID:        id.String(),
-		Timestamp: time.Now().UTC(),
+		Timestamp: float64(time.Now().UnixMilli()),
 		Duration:  duration,
 		EventType: eventType,
 		Detection: detection,
@@ -210,7 +210,7 @@ func (s *Storage) SaveRecording(filePath string, duration float64, eventType str
 		session, err := encryption.SessionFromKey(productPrivateKey)
 		if err != nil {
 			log.Printf("Storage: Failed to create encryption session for %s: %v", id.String(), err)
-		} else if encryptedPreview, err := session.Encrypt(preview); err != nil {
+		} else if encryptedPreview, err := session.Encrypt(preview, nil); err != nil {
 			log.Printf("Storage: Failed to encrypt thumbnail for %s: %v", id.String(), err)
 		} else if err := fsutil.AtomicWrite(thumbnailPath, encryptedPreview, 0644); err != nil {
 			log.Printf("Storage: Failed to save thumbnail for %s: %v", id.String(), err)

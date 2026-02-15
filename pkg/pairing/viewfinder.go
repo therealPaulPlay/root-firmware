@@ -1,9 +1,5 @@
 package pairing
 
-import (
-	"encoding/base64"
-)
-
 const (
 	viewfinderWidth  = 96
 	viewfinderHeight = 54
@@ -12,7 +8,7 @@ const (
 // GetViewfinderChunks returns chunked 3-bit grayscale bitmap from raw grayscale data
 func GetViewfinderChunks(grayData []byte) ([]map[string]any, error) {
 	// Convert to 3-bit grayscale (8 shades)
-	bitLen := (len(grayData) * 3 + 7) / 8
+	bitLen := (len(grayData)*3 + 7) / 8
 	bitData := make([]byte, bitLen)
 
 	for i := 0; i < len(grayData); i += 8 {
@@ -41,19 +37,16 @@ func GetViewfinderChunks(grayData []byte) ([]map[string]any, error) {
 		}
 	}
 
-	// Base64 encode the entire thing once
-	encoded := base64.StdEncoding.EncodeToString(bitData)
-
-	// Chunk the base64 string into 90-char pieces
-	const size = 90 // Leave room for JSON overhead
-	total := (len(encoded) + size - 1) / size
+	// Chunk raw bytes - minimum BLE MTU is ~128B, leave headroom for other fields
+	const chunkSize = 90
+	total := (len(bitData) + chunkSize - 1) / chunkSize
 	chunks := make([]map[string]any, 0, total)
 
 	for i := range total {
-		start := i * size
-		end := min(start+size, len(encoded))
+		start := i * chunkSize
+		end := min(start+chunkSize, len(bitData))
 		chunks = append(chunks, map[string]any{
-			"data":  encoded[start:end],
+			"data":  bitData[start:end],
 			"index": i,
 		})
 	}

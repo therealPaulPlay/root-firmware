@@ -24,7 +24,7 @@ func decryptFileToReader(filePath string, key []byte) (io.Reader, int64, error) 
 		return nil, 0, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	plaintext, err := session.Decrypt(ciphertext)
+	plaintext, err := session.Decrypt(ciphertext, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to decrypt: %w", err)
 	}
@@ -124,11 +124,12 @@ func SendFileInChunksAsync(ctx *HandlerContext, msgType string, filePath string,
 				"fileType":    fileType,
 				"chunkIndex":  chunkIndex,
 				"totalChunks": totalChunks,
+				"chunk":       buffer[:n],
 			}
 			if metadata != nil {
 				payload["metadata"] = metadata
 			}
-			SendEncryptedSuccessWithBinaryData(currentCtx, msgType, payload, buffer[:n])
+			SendEncryptedSuccess(currentCtx, msgType, payload)
 
 			if chunkIndex < totalChunks-1 {
 				time.Sleep(delayBetweenChunks)

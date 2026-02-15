@@ -1,274 +1,164 @@
-# BLE GATT API documentation
+# BLE GATT API
 
-## Service UUID
-`a07498ca-ad5b-474e-940d-16f1fbe7e8cd`
+Service UUID: `a07498ca-ad5b-474e-940d-16f1fbe7e8cd`
 
-## Device discovery
+## Overview
 
-All ROOT cameras advertise with BLE names starting with `ROOT-` (e.g., `ROOT-Observer`).
+- All messages are CBOR-encoded
+- MTU limit: ~128 bytes
+- Device discovery: BLE names start with `ROOT-`
+
+## Pairing flow
+
+1. Read **Pairing code** → receive UUID
+2. Display UUID as QR code on phone
+3. Point camera at phone screen
+4. Read **Scan QR code** → camera verifies
+5. Write to **Pair device** with device info
+6. Read **Pair device** → get product ID
+7. Read **Product public key** → get camera's public key
 
 ## Response format
 
-**All successful responses include `"success": true`** automatically:
-
-```json
-{
-  "success": true,
-  "field": "value"
-}
+**Success:**
+```cbor
+{success: true, ...fields}
 ```
 
-Error responses use `"success": false`:
-
-```json
-{
-  "success": false,
-  "error": "Error message"
-}
+**Error:**
+```cbor
+{success: false, error: "message"}
 ```
-
-## Message size limit
-
-Messages need to stay below ~128 bytes to work across devices. 
-
-## Pairing Flow
-
-The pairing process uses QR code verification to prove physical presence:
-
-1. **Phone reads pairing code**: Read from Get Pairing Code characteristic to get UUID
-2. **Phone displays QR code**: Generate and display QR code containing the UUID
-3. **User shows QR to camera**: Physically point camera at phone screen
-4. **Phone triggers scan**: Write to Scan QR Code characteristic to trigger camera scan
-5. **Camera verifies internally**: Camera scans QR, verifies match, sets internal flag
-6. **Phone sends pairing request**: Write to Pair Device characteristic (no code needed)
-7. **Camera checks verification**: Camera verifies QR was scanned before completing pairing
-
-This ensures a compromised IoT device cannot pair remotely - physical access is required.
 
 ## Characteristics
 
-### 1. Get product ID
-**UUID**: `8f3c4d5e-9a2b-4f1e-8d6c-7e5f4a3b2c1d`
-**Properties**: Read
-**Description**: Returns the unique product ID of the camera. This ID is generated on first boot.
+### Product model
+UUID: `fa3fd066-de2d-4a15-8e0c-4a8d45a847a5`
+Read only
 
-**Response**:
-```json
-{
-  "success": true,
-  "productId": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| model | string | Product model name |
 
----
+### Product ID
+UUID: `8f3c4d5e-9a2b-4f1e-8d6c-7e5f4a3b2c1d`
+Read only
 
-### 2. Get pairing code
-**UUID**: `51ff12bb-3ed8-46e5-b4f9-d64e2fec021b`
-**Properties**: Read
-**Description**: Generates and returns a new UUID-based pairing code. Code expires after 15 minutes.
+| Field | Type | Description |
+|-------|------|-------------|
+| productId | string | Unique product UUID |
 
-**Response**:
-```json
-{
-  "success": true,
-  "code": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
+### Pairing code
+UUID: `51ff12bb-3ed8-46e5-b4f9-d64e2fec021b`
+Read only
 
----
+| Field | Type | Description |
+|-------|------|-------------|
+| code | string | UUID valid for 15 minutes |
 
-### 3. Scan QR code
-**UUID**: `2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e`
-**Properties**: Read
-**Description**: Triggers camera to capture a frame and scan for QR code. Verifies the scanned code matches the expected pairing code and marks it as verified.
+### Scan QR code
+UUID: `2c8b0a8e-5f3d-4a9b-8e7c-1d4f6a8b9c2e`
+Read only
 
-**Response**:
-```json
-{
-  "success": true
-}
-```
+Triggers camera to scan for QR code. Returns success if code matches.
 
-**Error response**:
-```json
-{
-  "success": false,
-  "error": "rate limited: wait 1s between scans"
-}
-```
+Rate limited: 1 scan per second.
 
----
+### Pair device
+UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
+Write then Read
 
-### 4. Pair device
-**UUID**: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
-**Properties**: Write, Read
-**Description**: Pairs a device after QR code verification. Write to initiate pairing, then read to get result. Requires prior successful QR scan.
+**Write:**
+| Field | Type | Description |
+|-------|------|-------------|
+| deviceId | string | Unique device identifier |
+| deviceName | string | Human-readable name |
+| devicePublicKey | string | Base64-encoded P-256 public key |
 
-**Request**:
-```json
-{
-  "deviceId": "unique-device-id",
-  "deviceName": "My Phone",
-  "devicePublicKey": "base64-encoded-public-key"
-}
-```
+**Read:**
+| Field | Type | Description |
+|-------|------|-------------|
+| productId | string | Camera's product ID |
 
-**Response**:
-```json
-{
-  "success": true,
-  "productId": "camera-product-id"
-}
-```
+### Product public key
+UUID: `2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a`
+Read only (after pairing)
 
-**Note**: Camera public key must be retrieved from the Get Camera Public Key characteristic. WiFi and relay status can be queried separately using the WiFi Status and Relay Status characteristics.
+| Field | Type | Description |
+|-------|------|-------------|
+| publicKey | string | Base64-encoded P-256 public key |
 
----
+### Viewfinder
+UUID: `3d9e1f7a-4b6c-5e8d-9f0a-1b2c3d4e5f6a`
+Read only (chunked)
 
-### 5. Get product public key
-**UUID**: `2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a`
-**Properties**: Read
-**Description**: Returns the product's (camera's) public key after successful pairing. Must be read after pairing completes.
+Returns 3-bit grayscale bitmap (96x54) for QR alignment preview.
 
-**Response**:
-```json
-{
-  "success": true,
-  "publicKey": "base64-encoded-public-key"
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| data | bytes | Chunk of bitmap data |
+| index | int | Chunk index |
+| hasMore | bool | More chunks available |
 
----
+### WiFi networks
+UUID: `c2be2bc9-cee3-40ae-af50-f9959f25ee5b`
+Read only (paginated)
 
-### 6. Get WiFi networks (Paginated)
-**UUID**: `c2be2bc9-cee3-40ae-af50-f9959f25ee5b`
-**Properties**: Read
-**Description**: Returns WiFi networks one at a time. First read scans, subsequent reads return next network. Read after `hasMore: false` triggers fresh scan.
+First read triggers scan. Keep reading until `hasMore: false`.
 
-**Response**:
-```json
-{
-  "success": true,
-  "network": {
-    "ssid": "Network1",
-    "signal": 85,
-    "secured": true,
-    "unsupported": false
-  },
-  "hasMore": true
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| network.ssid | string | Network name |
+| network.signal | int | Signal strength (0-100) |
+| network.secured | bool | Requires password |
+| network.unsupported | bool | Unsupported security type |
+| hasMore | bool | More networks available |
 
-**Usage**: Keep reading until `hasMore: false`. To refresh, read again.
+### WiFi status
+UUID: `d96453d5-1f49-47d6-8cbd-ac5547fc51a9`
+Read only
 
----
+| Field | Type | Description |
+|-------|------|-------------|
+| connected | bool | Currently connected |
+| ssid | string | Connected network name |
 
-### 7. Get WiFi status
-**UUID**: `d96453d5-1f49-47d6-8cbd-ac5547fc51a9`
-**Properties**: Read
-**Description**: Returns current WiFi connection status and SSID.
+### WiFi connect
+UUID: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
+Write then Read (encrypted)
 
-**Response**:
-```json
-{
-  "success": true,
-  "connected": true,
-  "ssid": "MyNetwork"
-}
-```
+**Write:**
+| Field | Type | Description |
+|-------|------|-------------|
+| deviceId | string | Paired device ID |
+| payload | bytes | AES-GCM encrypted CBOR |
 
----
+**Decrypted payload:**
+| Field | Type | Description |
+|-------|------|-------------|
+| ssid | string | Network name |
+| password | string | Network password |
+| countryCode | string | ISO 3166-1 alpha-2 (optional) |
 
-### 8. Set WiFi
-**UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
-**Properties**: Write, Read
-**Description**: Configures WiFi credentials. Write operation blocks until connection completes, then read to verify success. Requires encrypted payload from paired device.
+### Relay status
+UUID: `a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab`
+Read only
 
-**Write request**:
-```json
-{
-  "deviceId": "unique-device-id",
-  "payload": "base64-encrypted-json"
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| relayDomain | string | Configured relay server (null if unset) |
 
-**Encrypted payload**:
-```json
-{
-  "ssid": "MyWiFi",
-  "password": "wifi-password",
-  "countryCode": "US"
-}
-```
+### Relay set
+UUID: `cba1d466-344c-4be3-ab3f-189f80dd7518`
+Write then Read (encrypted)
 
-**Note**: `countryCode` is optional but recommended for regulatory compliance. It should be an ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "DE"). The client can obtain this from the browser's locale or geolocation.
+**Write:**
+| Field | Type | Description |
+|-------|------|-------------|
+| deviceId | string | Paired device ID |
+| payload | bytes | AES-GCM encrypted CBOR |
 
-**Read response (Success)**:
-```json
-{
-  "success": true
-}
-```
-
-**Read response (Failure)**:
-```json
-{
-  "success": false,
-  "error": "WiFi connection failed"
-}
-```
-
----
-
-### 9. Get relay status
-**UUID**: `a9988b7b-e4ea-49b1-b9d1-548aeb0ec5ab`
-**Properties**: Read
-**Description**: Returns currently configured relay server domain.
-
-**Response**:
-```json
-{
-  "success": true,
-  "relayDomain": "relay.example.com"
-}
-```
-
-**Note**: `relayDomain` will be `null` if not configured.
-
----
-
-### 10. Set relay
-**UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
-**Properties**: Write, Read
-**Description**: Configures relay server domain. Write operation blocks until configuration completes, then read to verify success. Requires encrypted payload from paired device.
-
-**Write request**:
-```json
-{
-  "deviceId": "unique-device-id",
-  "payload": "base64-encrypted-json"
-}
-```
-
-**Encrypted payload**:
-```json
-{
-  "relayDomain": "relay.example.com"
-}
-```
-
-**Read response (Success)**:
-```json
-{
-  "success": true
-}
-```
-
-**Read response (Failure)**:
-```json
-{
-  "success": false,
-  "error": "Relay configuration failed"
-}
-```
-
+**Decrypted payload:**
+| Field | Type | Description |
+|-------|------|-------------|
+| relayDomain | string | Relay server domain |
