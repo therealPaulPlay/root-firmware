@@ -3,6 +3,7 @@ module root-firmware
 go 1.25
 
 require (
+	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/go-ble/ble v0.0.0-20240122180141-8c5522f54333
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/gorilla/websocket v1.5.3
@@ -18,7 +19,6 @@ require (
 
 require (
 	github.com/ebitengine/purego v0.6.1 // indirect
-	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mattn/go-colorable v0.1.6 // indirect
