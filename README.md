@@ -164,6 +164,10 @@ Play sound effects.
 
 Save recordings and update the event log.
 
+### Testutil
+
+Utilities used for unit testing.
+
 ### Updater
 
 Check for and download firmware updates via RAUC.

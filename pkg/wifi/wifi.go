@@ -167,6 +167,7 @@ func (w *WiFi) connectNetwork(ssid, password string) error {
 	return nil
 }
 
+// Wait until Cloudflare DNS (1.1.1.1) can be reached
 func (w *WiFi) waitForInternet(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -218,7 +219,7 @@ func (w *WiFi) parseNetworks(output string) []Network {
 	var networks []Network
 	seen := make(map[string]int)
 
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

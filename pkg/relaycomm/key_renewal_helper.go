@@ -45,28 +45,31 @@ func initKeyRenewalManager() *keyRenewalManager {
 	return renewalManager
 }
 
-// cleanupExpired removes stale pending renewals and expired previous encryptions (older than 30 seconds)
+// cleanupExpired runs the cleanup loop on a ticker
 func (m *keyRenewalManager) cleanupExpired() {
 	for {
 		select {
 		case <-m.cleanupTicker.C:
-			m.mu.Lock()
-			now := time.Now()
-			// Clean up stale pending renewals
-			for deviceID, renewal := range m.pending {
-				if now.Sub(renewal.CreatedAt) > 30*time.Second {
-					delete(m.pending, deviceID)
-				}
-			}
-			// Clean up stale previous encryptions
-			for deviceID, prev := range m.previous {
-				if now.Sub(prev.CreatedAt) > 30*time.Second {
-					delete(m.previous, deviceID)
-				}
-			}
-			m.mu.Unlock()
+			m.runCleanup()
 		case <-m.stopCleanup:
 			return
+		}
+	}
+}
+
+// runCleanup removes stale pending renewals and expired previous encryptions (older than 30 seconds)
+func (m *keyRenewalManager) runCleanup() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for deviceID, renewal := range m.pending {
+		if now.Sub(renewal.CreatedAt) > 30*time.Second {
+			delete(m.pending, deviceID)
+		}
+	}
+	for deviceID, prev := range m.previous {
+		if now.Sub(prev.CreatedAt) > 30*time.Second {
+			delete(m.previous, deviceID)
 		}
 	}
 }

@@ -1,0 +1,366 @@
+package config
+
+import (
+	"os"
+	"testing"
+
+	"root-firmware/pkg/globals"
+	"root-firmware/pkg/testutil"
+)
+
+func setupTestConfig(t *testing.T) func() {
+	t.Helper()
+	ResetForTesting()
+
+	cleanupGlobals := testutil.SetupTempGlobals(t)
+
+	return func() {
+		cleanupGlobals()
+		ResetForTesting()
+	}
+}
+
+func TestGenerateRandomSuffix(t *testing.T) {
+	randomString6 := generateRandomSuffix(6)
+	if len(randomString6) != 6 {
+		t.Fatal("random string should be 6 chars long")
+	}
+	if randomString6 == "XXXXXX" {
+		t.Fatal("random should not fail")
+	}
+	for i, char := range randomString6 {
+		if char < 'A' || char > 'Z' {
+			t.Errorf("char %d = %c, want A-Z", i, char)
+		}
+	}
+	if secondRandomString6 := generateRandomSuffix(6); secondRandomString6 == randomString6 {
+		t.Fatal("random strings should not be equal")
+	}
+}
+
+func TestInit_CreatesConfigFile(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	if err := Init(); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	// Config file should exist
+	if _, err := os.Stat(globals.ConfigPath); os.IsNotExist(err) {
+		t.Error("Init() did not create config file")
+	}
+
+	// Should have required keys
+	cfg := Get()
+	if id, ok := cfg.GetKey("id"); !ok || id == "" {
+		t.Error("Init() did not set device id")
+	}
+	if name, ok := cfg.GetKey("bluetoothName"); !ok || name == "" {
+		t.Error("Init() did not set bluetoothName")
+	}
+	if _, ok := cfg.GetKey("productPrivateKey"); !ok {
+		t.Error("Init() did not set productPrivateKey")
+	}
+	if _, ok := cfg.GetKey("productPublicKey"); !ok {
+		t.Error("Init() did not set productPublicKey")
+	}
+}
+
+func TestInit_LoadsExistingConfig(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	// Create a config file manually
+	if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configData := `{"id": "test-id-123", "customKey": "customValue"}`
+	if err := os.WriteFile(globals.ConfigPath, []byte(configData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Init(); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	cfg := Get()
+	if id, _ := cfg.GetKey("id"); id != "test-id-123" {
+		t.Errorf("GetKey(id) = %v, want test-id-123", id)
+	}
+	if val, _ := cfg.GetKey("customKey"); val != "customValue" {
+		t.Errorf("GetKey(customKey) = %v, want customValue", val)
+	}
+}
+
+func TestInit_HandlesCorruptedConfig(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	// Create a corrupted config file
+	if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(globals.ConfigPath, []byte("not valid json{{{"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should not error - it recreates the config
+	if err := Init(); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	// Corrupted backup should exist
+	if _, err := os.Stat(globals.ConfigPath + ".corrupted"); os.IsNotExist(err) {
+		t.Error("Init() did not backup corrupted config")
+	}
+
+	// New config should be valid
+	cfg := Get()
+	if _, ok := cfg.GetKey("id"); !ok {
+		t.Error("Init() did not create new config after corruption")
+	}
+}
+
+func TestGet_PanicsWithoutInit(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Get() should panic when not initialized")
+		}
+	}()
+
+	Get()
+}
+
+func TestSetKey_AndGetKey(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Get()
+
+	// Set string value
+	if err := cfg.SetKey("testString", "hello"); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+	if val, ok := cfg.GetKey("testString"); !ok || val != "hello" {
+		t.Errorf("GetKey(testString) = %v, %v; want hello, true", val, ok)
+	}
+
+	// Set numeric value (becomes float64 after JSON normalization)
+	if err := cfg.SetKey("testNumber", 42); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+	if val, ok := cfg.GetKey("testNumber"); !ok || val != float64(42) {
+		t.Errorf("GetKey(testNumber) = %v (%T), want 42 (float64)", val, val)
+	}
+
+	// Set boolean value
+	if err := cfg.SetKey("testBool", true); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+	if val, ok := cfg.GetKey("testBool"); !ok || val != true {
+		t.Errorf("GetKey(testBool) = %v, want true", val)
+	}
+
+	// Set slice value (becomes []any after JSON normalization)
+	if err := cfg.SetKey("testSlice", []string{"a", "b", "c"}); err != nil {
+		t.Fatalf("SetKey() error = %v", err)
+	}
+	if val, ok := cfg.GetKey("testSlice"); !ok {
+		t.Error("GetKey(testSlice) not found")
+	} else if arr, ok := val.([]any); !ok || len(arr) != 3 {
+		t.Errorf("GetKey(testSlice) = %v (%T), want []any with 3 elements", val, val)
+	}
+}
+
+func TestSetKey_DeletesWithNil(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Get()
+
+	// Set then delete
+	cfg.SetKey("toDelete", "value")
+	if _, ok := cfg.GetKey("toDelete"); !ok {
+		t.Fatal("SetKey() did not set value")
+	}
+
+	if err := cfg.SetKey("toDelete", nil); err != nil {
+		t.Fatalf("SetKey(nil) error = %v", err)
+	}
+	if _, ok := cfg.GetKey("toDelete"); ok {
+		t.Error("SetKey(nil) did not delete key")
+	}
+}
+
+func TestSetKey_PersistsToDisk(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Get()
+	cfg.SetKey("persisted", "value123")
+
+	// Reset and reload
+	ResetForTesting()
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg = Get()
+	if val, ok := cfg.GetKey("persisted"); !ok || val != "value123" {
+		t.Errorf("Value not persisted: got %v, %v", val, ok)
+	}
+}
+
+func TestGetKey_NonexistentKey(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Get()
+	val, ok := cfg.GetKey("nonexistent")
+	if ok {
+		t.Errorf("GetKey(nonexistent) ok = true, want false")
+	}
+	if val != nil {
+		t.Errorf("GetKey(nonexistent) = %v, want nil", val)
+	}
+}
+
+func TestGetProductPrivateKey(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Get()
+	key, err := cfg.GetProductPrivateKey()
+	if err != nil {
+		t.Fatalf("GetProductPrivateKey() error = %v", err)
+	}
+	if len(key) == 0 {
+		t.Error("GetProductPrivateKey() returned empty key")
+	}
+	// P-256 private key should be 32 bytes
+	if len(key) != 32 {
+		t.Errorf("GetProductPrivateKey() key length = %d, want 32", len(key))
+	}
+}
+
+func TestGetProductPrivateKey_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		configData string
+	}{
+		{"missing key", `{"id": "test-id"}`},
+		{"invalid type", `{"id": "test-id", "productPrivateKey": 12345}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := setupTestConfig(t)
+			defer cleanup()
+
+			if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(globals.ConfigPath, []byte(tt.configData), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := Init(); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Get().GetProductPrivateKey()
+			if err == nil {
+				t.Error("GetProductPrivateKey() should error")
+			}
+		})
+	}
+}
+
+func TestJsonNormalize(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+		check func(t *testing.T, result any)
+	}{
+		{
+			name:  "string",
+			input: "hello",
+			check: func(t *testing.T, result any) {
+				if result != "hello" {
+					t.Errorf("got %v, want hello", result)
+				}
+			},
+		},
+		{
+			name:  "int becomes float64",
+			input: 42,
+			check: func(t *testing.T, result any) {
+				if result != float64(42) {
+					t.Errorf("got %v (%T), want 42 (float64)", result, result)
+				}
+			},
+		},
+		{
+			name:  "[]string becomes []any",
+			input: []string{"a", "b"},
+			check: func(t *testing.T, result any) {
+				arr, ok := result.([]any)
+				if !ok {
+					t.Errorf("got %T, want []any", result)
+					return
+				}
+				if len(arr) != 2 || arr[0] != "a" || arr[1] != "b" {
+					t.Errorf("got %v, want [a b]", arr)
+				}
+			},
+		},
+		{
+			name:  "map[string]string becomes map[string]any",
+			input: map[string]string{"key": "value"},
+			check: func(t *testing.T, result any) {
+				m, ok := result.(map[string]any)
+				if !ok {
+					t.Errorf("got %T, want map[string]any", result)
+					return
+				}
+				if m["key"] != "value" {
+					t.Errorf("got %v, want map[key:value]", m)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := jsonNormalize(tt.input)
+			if err != nil {
+				t.Fatalf("jsonNormalize() error = %v", err)
+			}
+			tt.check(t, result)
+		})
+	}
+}

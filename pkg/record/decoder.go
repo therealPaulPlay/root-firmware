@@ -56,12 +56,17 @@ func newDecoder() (*h264Decoder, error) {
 func splitNALs(data []byte) [][]byte {
 	var nals [][]byte
 	start := -1
-	for i := 0; i < len(data)-3; i++ {
-		if data[i] == 0 && data[i+1] == 0 && ((data[i+2] == 1) || (i+3 < len(data) && data[i+2] == 0 && data[i+3] == 1)) {
-			if start >= 0 {
-				nals = append(nals, data[start:i])
+	for i := 0; i < len(data)-2; i++ {
+		if data[i] == 0 && data[i+1] == 0 && data[i+2] == 1 {
+			// Skip leading zero for 4-byte start code (0x00 0x00 0x00 0x01)
+			nalStart := i
+			if i > 0 && data[i-1] == 0 {
+				nalStart = i - 1
 			}
-			start = i
+			if start >= 0 {
+				nals = append(nals, data[start:nalStart])
+			}
+			start = nalStart
 		}
 	}
 	if start >= 0 {

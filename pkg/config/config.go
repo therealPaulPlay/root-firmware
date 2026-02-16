@@ -34,6 +34,13 @@ func Init() error {
 	return err
 }
 
+// ResetForTesting resets the config singleton for test isolation
+// Should only be used in unit tests
+func ResetForTesting() {
+	instance = nil
+	once = sync.Once{}
+}
+
 // Get returns the singleton config instance
 func Get() *Config {
 	if instance == nil {

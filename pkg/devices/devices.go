@@ -32,6 +32,13 @@ func Init() {
 	})
 }
 
+// ResetForTesting resets the devices singleton for test isolation
+// Should only be used in unit tests
+func ResetForTesting() {
+	instance = nil
+	once = sync.Once{}
+}
+
 func Get() *Devices {
 	if instance == nil {
 		panic("devices not initialized - call Init() first")
