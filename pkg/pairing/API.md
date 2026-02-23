@@ -15,7 +15,7 @@ Service UUID: `a07498ca-ad5b-474e-940d-16f1fbe7e8cd`
 3. Point camera at phone screen
 4. Read **Scan QR code** → camera verifies
 5. Write to **Pair device** with device info
-6. Read **Pair device** → get product ID
+6. Read **Pair device** → confirm success
 7. Read **Product public key** → get camera's public key
 
 ## Response format
@@ -76,13 +76,11 @@ Write then Read
 | devicePublicKey | string | Base64-encoded P-256 public key |
 
 **Read:**
-| Field | Type | Description |
-|-------|------|-------------|
-| productId | string | Camera's product ID |
+Returns success/error status.
 
 ### Product public key
 UUID: `2d7c0e8f-5a3b-4c1d-8e6a-0f4b9d2c7e1a`
-Read only (after pairing)
+Read only
 
 | Field | Type | Description |
 |-------|------|-------------|

@@ -42,7 +42,6 @@ type operationStatus struct {
 	completed bool
 	success   bool
 	error     string
-	data      map[string]any
 }
 
 var bleDevice ble.Device
@@ -93,9 +92,13 @@ func initBLE() error {
 	if !ok {
 		return fmt.Errorf("bluetoothName not set in config")
 	}
+	nameStr, ok := name.(string)
+	if !ok {
+		return fmt.Errorf("bluetoothName has invalid type")
+	}
 
 	// Create Linux BLE device with configured name
-	d, err := linux.NewDeviceWithName(name.(string))
+	d, err := linux.NewDeviceWithName(nameStr)
 	if err != nil {
 		return fmt.Errorf("failed to create BLE device: %w", err)
 	}
@@ -211,14 +214,13 @@ func initBLE() error {
 			return
 		}
 
-		result, err := GetHelper().PairDevice(pairReq.DeviceID, pairReq.DeviceName, devicePublicKey)
-		if err != nil {
+		if err := GetHelper().PairDevice(pairReq.DeviceID, pairReq.DeviceName, devicePublicKey); err != nil {
 			log.Printf("BLE: Pairing failed: %v", err)
 			pairingStatus = operationStatus{completed: true, success: false, error: err.Error()}
 			return
 		}
 
-		pairingStatus = operationStatus{completed: true, success: true, data: result}
+		pairingStatus = operationStatus{completed: true, success: true}
 		log.Printf("BLE: Device paired: %s (%s)", pairReq.DeviceName, pairReq.DeviceID)
 	}))
 	pairChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
@@ -230,26 +232,23 @@ func initBLE() error {
 			writeError(rsp, pairingStatus.error)
 			return
 		}
-		log.Printf("BLE: Sending pairing result (productId: %s, publicKey: %s)", pairingStatus.data["productId"], pairingStatus.data["publicKey"])
-		// Return only productId (product public key is in separate characteristic)
-		if err := writeSuccess(rsp, map[string]any{"productId": pairingStatus.data["productId"]}); err != nil {
-			log.Printf("BLE: Failed to send pairing result: %v", err)
-			writeError(rsp, err.Error())
-		}
+		writeSuccess(rsp, nil)
 	}))
 
-	// Get Product Public Key characteristic (read after pairing)
+	// Get Product Public Key characteristic (read-only)
 	productPublicKeyChar := svc.NewCharacteristic(productPublicKeyCharUUID)
 	productPublicKeyChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
-		if !pairingStatus.completed {
-			writeError(rsp, "No pairing result available")
+		publicKey, ok := config.Get().GetKey("productPublicKey")
+		if !ok {
+			writeError(rsp, "Product public key not found")
 			return
 		}
-		if !pairingStatus.success {
-			writeError(rsp, pairingStatus.error)
+		publicKeyStr, ok := publicKey.(string)
+		if !ok {
+			writeError(rsp, "Product public key has invalid type")
 			return
 		}
-		if err := writeSuccess(rsp, map[string]any{"publicKey": pairingStatus.data["publicKey"]}); err != nil {
+		if err := writeSuccess(rsp, map[string]any{"publicKey": publicKeyStr}); err != nil {
 			log.Printf("BLE: Failed to send product public key: %v", err)
 			writeError(rsp, err.Error())
 		}
@@ -416,10 +415,10 @@ func initBLE() error {
 
 	// Start advertising
 	ctx := context.Background()
-	log.Printf("BLE: Starting advertising as '%s' with service UUID %s", name.(string), serviceUUID)
+	log.Printf("BLE: Starting advertising as '%s' with service UUID %s", nameStr, serviceUUID)
 
 	go func() {
-		if err := ble.AdvertiseNameAndServices(ctx, name.(string), serviceUUID); err != nil {
+		if err := ble.AdvertiseNameAndServices(ctx, nameStr, serviceUUID); err != nil {
 			log.Printf("BLE: Advertising error: %v", err)
 		} else {
 			log.Printf("BLE: Advertising stopped without error")

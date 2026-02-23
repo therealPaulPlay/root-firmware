@@ -69,8 +69,13 @@ func (r *RelayComm) Start() {
 	r.Stop()
 
 	relayDomain, ok := config.Get().GetKey("relayDomain")
-	if !ok || relayDomain == "" {
+	if !ok {
 		log.Println("RelayComm: Not starting, relay domain not configured")
+		return
+	}
+	relayDomainStr, ok := relayDomain.(string)
+	if !ok {
+		log.Println("RelayComm: Not starting, relay domain has invalid type")
 		return
 	}
 
@@ -83,7 +88,7 @@ func (r *RelayComm) Start() {
 	r.stopChan = make(chan struct{})
 	r.doneChan = make(chan struct{})
 
-	go r.run(relayDomain.(string))
+	go r.run(relayDomainStr)
 }
 
 // Stop shuts down the relay connection and waits for cleanup

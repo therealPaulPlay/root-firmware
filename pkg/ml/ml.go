@@ -158,8 +158,10 @@ func (m *ML) check() {
 	if m.recordingPath == "" {
 		log.Printf("ML: Starting recording for %s event", eventType)
 		m.startRecording(eventType, frame, detection.Result, true)
-		if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
-			sfx.Get().PlayRecording()
+		if val, ok := config.Get().GetKey("playRecordingSound"); ok {
+			if b, ok := val.(bool); ok && b {
+				sfx.Get().PlayRecording()
+			}
 		}
 	} else if time.Since(m.recordingStart) >= m.recordingSplitAfter {
 		// Split recording if duration limit reached

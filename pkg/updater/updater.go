@@ -87,9 +87,14 @@ func (u *Updater) CheckForUpdates() {
 		log.Println("Updater: Skipping update check: relay domain not configured")
 		return
 	}
+	relayDomainStr, ok := relayDomain.(string)
+	if !ok {
+		log.Println("Updater: Skipping update check: relay domain has invalid type")
+		return
+	}
 
 	client := &http.Client{Timeout: updateCheckTimeout}
-	resp, err := client.Get("https://" + relayDomain.(string) + firmwareEndpoint)
+	resp, err := client.Get("https://" + relayDomainStr + firmwareEndpoint)
 	if err != nil {
 		log.Printf("Updater: Failed to check for updates: %v", err)
 		return

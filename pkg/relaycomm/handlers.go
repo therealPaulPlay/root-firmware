@@ -537,8 +537,10 @@ func handleStartStream(ctx *HandlerContext, payload []byte) {
 		return
 	}
 
-	if val, ok := config.Get().GetKey("playRecordingSound"); ok && val.(bool) {
-		sfx.Get().PlayStream()
+	if val, ok := config.Get().GetKey("playRecordingSound"); ok {
+		if b, ok := val.(bool); ok && b {
+			sfx.Get().PlayStream()
+		}
 	}
 
 	// Start streaming video to this client

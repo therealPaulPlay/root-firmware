@@ -178,7 +178,7 @@ func TestPairDevice_NoCodeGenerated(t *testing.T) {
 
 	helper := GetHelper()
 
-	_, err := helper.PairDevice("device-123", "Test Device", []byte{0x01, 0x02})
+	err := helper.PairDevice("device-123", "Test Device", []byte{0x01, 0x02})
 	if err == nil {
 		t.Error("PairDevice() should error when no code generated")
 	}
@@ -191,7 +191,7 @@ func TestPairDevice_CodeNotVerified(t *testing.T) {
 	helper := GetHelper()
 	helper.GenerateCode()
 
-	_, err := helper.PairDevice("device-123", "Test Device", []byte{0x01, 0x02})
+	err := helper.PairDevice("device-123", "Test Device", []byte{0x01, 0x02})
 	if err == nil {
 		t.Error("PairDevice() should error when code not verified")
 	}

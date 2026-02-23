@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/qr"
@@ -157,28 +156,18 @@ func (b *Pairing) ScanWiFiNetworks() ([]wifi.Network, error) {
 }
 
 // PairDevice pairs a device after QR code verification
-func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte) (map[string]any, error) {
+func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Verify code was scanned and verified via QR
 	if b.code == nil || !b.code.CodeVerified || time.Now().After(b.code.ExpiresAt) {
-		return nil, fmt.Errorf("code not verified or expired")
-	}
-
-	// Get product public key (generated during config initialization, stored as base64)
-	productPublicKey, ok := config.Get().GetKey("productPublicKey")
-	if !ok {
-		return nil, fmt.Errorf("product public key not found in config")
-	}
-	productPublicKeyStr, ok := productPublicKey.(string)
-	if !ok {
-		return nil, fmt.Errorf("product public key has invalid type: %T", productPublicKey)
+		return fmt.Errorf("code not verified or expired")
 	}
 
 	// Add device with its public key
 	if err := devices.Get().Add(deviceID, deviceName, devicePublicKey); err != nil {
-		return nil, fmt.Errorf("failed to add device: %w", err)
+		return fmt.Errorf("failed to add device: %w", err)
 	}
 
 	// Invalidate code after successful pairing
@@ -187,11 +176,5 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 	// Play success sound
 	sfx.Get().PlayPairingSuccess()
 
-	// Get product ID
-	productID, _ := config.Get().GetKey("id")
-
-	return map[string]any{
-		"productId": productID,
-		"publicKey": productPublicKeyStr,
-	}, nil
+	return nil
 }
