@@ -149,7 +149,7 @@ jobs:
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
-          # Extract rootfs partition (partition 2) before compressing the full image
+          # Extract rootfs partition (partition 2) before creating variants & compression
           sudo ./build/scripts/extract-rootfs.sh "root-observer-${VERSION}.img" rootfs.img 2
 
           # Write signing credentials
@@ -168,10 +168,16 @@ jobs:
           # Clean up
           rm -f signing.key.pem signing.cert.pem rootfs.img
 
-      - name: Compress image
+      - name: Create config.txt variants
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
-          gzip -9 "root-observer-${VERSION}.img"
+          sudo ./build/scripts/create-config-variants.sh "root-observer-${VERSION}.img" "$VERSION"
+
+      - name: Compress images
+        run: |
+          VERSION="${{ needs.build-firmware.outputs.version }}"
+          gzip -9 "root-observer-${VERSION}-auto-detect.img"
+          gzip -9 "root-observer-${VERSION}-custom.img"
 
       - name: Calculate bundle hash and create metadata
         if: env.IS_RELEASE == 'true'
@@ -235,7 +241,7 @@ jobs:
             "use_https = True" \
             > ~/.s3cfg
 
-      - name: Upload dev image to S3
+      - name: Upload dev images to S3
         if: env.IS_RELEASE == 'false'
         env:
           S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
@@ -243,8 +249,11 @@ jobs:
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
           s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/dev/" --recursive --force || true
-          s3cmd put "artifacts/root-observer-${VERSION}.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/dev/root-observer-${VERSION}.img.gz" \
+          s3cmd put "artifacts/root-observer-${VERSION}-auto-detect.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/dev/root-observer-${VERSION}-auto-detect.img.gz" \
+            --acl-public
+          s3cmd put "artifacts/root-observer-${VERSION}-custom.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/dev/root-observer-${VERSION}-custom.img.gz" \
             --acl-public
 
       - name: Upload release image and rauc bundle to S3
@@ -258,9 +267,12 @@ jobs:
           s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/release/" --recursive --force || true
           s3cmd rm "s3://${S3_BUCKET}/rootprivacy/updates/release/" --recursive --force || true
 
-          echo "Uploading full image..."
-          s3cmd put "artifacts/root-observer-${VERSION}.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/release/root-observer-${VERSION}.img.gz" \
+          echo "Uploading images..."
+          s3cmd put "artifacts/root-observer-${VERSION}-auto-detect.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/release/root-observer-${VERSION}-auto-detect.img.gz" \
+            --acl-public
+          s3cmd put "artifacts/root-observer-${VERSION}-custom.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/release/root-observer-${VERSION}-custom.img.gz" \
             --acl-public
 
           echo "Uploading RAUC bundle..."

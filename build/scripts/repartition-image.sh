@@ -120,7 +120,7 @@ echo "  Loop device: $LOOP_DEV"
 
 # Create device mappings
 kpartx -av "$LOOP_DEV"
-sleep 2
+sleep 1
 
 # Get mapper device names
 MAPPER_BASE=$(basename "$LOOP_DEV")
@@ -166,7 +166,7 @@ if file "$INPUT_IMG" | grep -q "boot sector"; then
     # Set up loop device for input image
     INPUT_LOOP=$(losetup -f --show -r "$INPUT_IMG")
     kpartx -av "$INPUT_LOOP"
-    sleep 2
+    sleep 1
 
     INPUT_MAPPER_BASE=$(basename "$INPUT_LOOP")
     INPUT_BOOT="/dev/mapper/${INPUT_MAPPER_BASE}p1"

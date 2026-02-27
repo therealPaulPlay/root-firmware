@@ -3,8 +3,8 @@
 # Enable 64-bit mode
 arm_64bit=1
 
-# Enable camera
-camera_auto_detect=1
+# Camera configuration (replaced during image build)
+CAMERA_CONFIG_PLACEHOLDER
 
 # Enable I2C
 dtparam=i2c_arm=on
