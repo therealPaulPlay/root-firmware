@@ -185,7 +185,6 @@ func (r *Recorder) startCamera() error {
 		"--height", fmt.Sprintf("%d", globals.CameraHeight),
 		"-b", fmt.Sprintf("%d", globals.CameraBitrate),
 		"-g", fmt.Sprintf("%d", globals.CameraGOPSize),
-		"--ev", "5.0",
 	)
 
 	stdout, err := cmd.StdoutPipe()
