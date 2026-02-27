@@ -57,6 +57,7 @@ jobs:
             VERSION="${GITHUB_REF_NAME#v}"
           else
             VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
           fi
 
           if [ -z "$VERSION" ]; then
