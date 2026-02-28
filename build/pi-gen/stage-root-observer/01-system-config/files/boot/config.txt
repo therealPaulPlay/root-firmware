@@ -3,7 +3,7 @@
 # Enable 64-bit mode
 arm_64bit=1
 
-# Camera configuration (replaced during image build)
+# Camera (set by create-config-variants.sh in build step)
 CAMERA_CONFIG_PLACEHOLDER
 
 # Enable I2C
