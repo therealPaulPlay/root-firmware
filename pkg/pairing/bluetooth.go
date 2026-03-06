@@ -378,7 +378,7 @@ func initBLE() error {
 		}
 
 		// Validate relay domain (no protocol, no spaces, must have a dot)
-		domain := strings.TrimSpace(relayReq.RelayDomain)
+		domain := strings.TrimRight(strings.TrimSpace(relayReq.RelayDomain), "/")
 		if domain == "" || strings.Contains(domain, "://") || strings.Contains(domain, " ") || !strings.Contains(domain, ".") {
 			log.Printf("BLE: Invalid relay domain: %s", domain)
 			relayStatus = operationStatus{completed: true, success: false, error: "Invalid relay domain"}

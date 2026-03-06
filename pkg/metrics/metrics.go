@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	maxDataPoints      = 1200             // 1 hour at 3s intervals
+	maxDataPoints      = 600              // 30 minutes at 3s intervals
 	collectionInterval = 3 * time.Second  // Balance resolution vs resource usage
 	saveInterval       = 30 * time.Second // Persist periodically, not every tick
 )

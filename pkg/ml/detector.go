@@ -2,12 +2,10 @@ package ml
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	_ "image/jpeg"
 	"log"
 	"sort"
-	"strings"
 
 	"root-firmware/pkg/storage"
 
@@ -42,24 +40,6 @@ func decodeLabel(classID int) string {
 	default:
 		return "other"
 	}
-}
-
-func formatScores(scores map[string]float32) string {
-	labels := make([]string, 0, len(scores))
-	for l := range scores {
-		labels = append(labels, l)
-	}
-	sort.Slice(labels, func(i, j int) bool {
-		return scores[labels[i]] > scores[labels[j]]
-	})
-	var s strings.Builder
-	for i, l := range labels {
-		if i > 0 {
-			s.WriteString(" ")
-		}
-		fmt.Fprintf(&s, "%s=%.4f", l, scores[l])
-	}
-	return s.String()
 }
 
 type objectDetector struct {
@@ -242,8 +222,6 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 			}
 		}
 	}
-
-	log.Printf("ML: Top scores - %s | candidates=%d thresh=%.2f", formatScores(topScores), len(boxes), confThresh)
 
 	if len(boxes) == 0 {
 		return &Detection{EventType: "", Count: 0}

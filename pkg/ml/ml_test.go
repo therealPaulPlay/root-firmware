@@ -169,22 +169,6 @@ func TestNMS_KeepsNonOverlapping(t *testing.T) {
 	}
 }
 
-// --- Format scores tests ---
-
-func TestFormatScores(t *testing.T) {
-	scores := map[string]float32{
-		"person": 0.95,
-		"car":    0.30,
-	}
-
-	result := formatScores(scores)
-
-	// Should be sorted by score descending
-	if result != "person=0.9500 car=0.3000" {
-		t.Errorf("formatScores() = %q", result)
-	}
-}
-
 // --- Config-dependent tests ---
 
 func TestIsEventDetectionEnabled(t *testing.T) {

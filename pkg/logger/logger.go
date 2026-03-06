@@ -12,8 +12,8 @@ import (
 	"root-firmware/pkg/globals"
 )
 
-const maxLogs = 500
-const maxLogMsgSize = 2500 // Max characters per log message
+const maxLogs = 250
+const maxLogMsgSize = 1500 // Max characters per log message
 
 type Entry struct {
 	Timestamp float64 `json:"timestamp"` // Unix milliseconds (float64 for compatibility)
