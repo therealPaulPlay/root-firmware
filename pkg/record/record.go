@@ -435,7 +435,7 @@ func (r *Recorder) StartRecording(outputPath string, withLookback bool) {
 }
 
 // StopRecording flushes the ring buffer and enqueues an MP4 mux job
-func (r *Recorder) StopRecording(eventType string, preview []byte, detection *storage.DetectionResult) (time.Duration, error) {
+func (r *Recorder) StopRecording(eventID string, eventType string, preview []byte, detection *storage.DetectionResult) (time.Duration, error) {
 	r.mu.Lock()
 	if !r.recording {
 		r.mu.Unlock()
@@ -469,6 +469,7 @@ func (r *Recorder) StopRecording(eventType string, preview []byte, detection *st
 		audioEntries: audioEntries,
 		outputPath:   outputPath,
 		duration:     durationSec,
+		eventID:      eventID,
 		eventType:    eventType,
 		preview:      preview,
 		detection:    detection,

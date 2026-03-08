@@ -7,8 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/uuid"
+
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
+	"root-firmware/pkg/notifications"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
@@ -26,6 +29,7 @@ type ML struct {
 	objectDetector      *objectDetector
 	motionDetector      *motionDetector
 	recordingPath       string
+	recordingID         string
 	recordingEvent      string
 	recordingStart      time.Time
 	recordingPreview    []byte
@@ -163,6 +167,7 @@ func (m *ML) check() {
 				sfx.Get().PlayRecording()
 			}
 		}
+		notifications.Get().SendEventToAll(eventType, m.recordingID)
 	} else if time.Since(m.recordingStart) >= m.recordingSplitAfter {
 		// Split recording if duration limit reached
 		log.Printf("ML: Splitting recording (%.2fs elapsed)", time.Since(m.recordingStart).Seconds())
@@ -175,9 +180,16 @@ func (m *ML) check() {
 func (m *ML) startRecording(eventType string, preview []byte, detection *storage.DetectionResult, withLookback bool) {
 	tempPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
+	id, err := uuid.NewV4()
+	if err != nil {
+		log.Printf("ML: Failed to generate event ID: %v", err)
+		return
+	}
+
 	record.Get().StartRecording(tempPath, withLookback)
 
 	m.recordingPath = tempPath
+	m.recordingID = id.String()
 	m.recordingEvent = eventType
 	m.recordingStart = time.Now()
 	m.recordingPreview = preview
@@ -192,7 +204,7 @@ func (m *ML) startRecording(eventType string, preview []byte, detection *storage
 }
 
 func (m *ML) stopRecording(applyCooldown bool) {
-	_, err := record.Get().StopRecording(m.recordingEvent, m.recordingPreview, m.recordingDetection)
+	_, err := record.Get().StopRecording(m.recordingID, m.recordingEvent, m.recordingPreview, m.recordingDetection)
 	if err != nil {
 		log.Printf("ML: Failed to stop recording: %v", err)
 	}

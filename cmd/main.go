@@ -16,6 +16,7 @@ import (
 	"root-firmware/pkg/logger"
 	"root-firmware/pkg/metrics"
 	"root-firmware/pkg/ml"
+	"root-firmware/pkg/notifications"
 	"root-firmware/pkg/pairing"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/relaycomm"
@@ -50,6 +51,12 @@ func main() {
 
 	// Initialize packages where init() cannot return errors
 	devices.Init()
+	notifications.Init()
+	devices.Get().OnRemove(func(deviceID string) {
+		if err := notifications.Get().Disable(deviceID); err != nil {
+			log.Printf("Failed to disable notifications for removed device %s: %v", deviceID, err)
+		}
+	})
 	metrics.Init()
 	wifi.Init()
 	relaycomm.Init()

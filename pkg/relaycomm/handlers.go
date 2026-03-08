@@ -19,6 +19,7 @@ import (
 	"root-firmware/pkg/logger"
 	"root-firmware/pkg/metrics"
 	"root-firmware/pkg/ml"
+	"root-firmware/pkg/notifications"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
@@ -54,6 +55,8 @@ const (
 	MsgSetProductAlias          = "setProductAlias"
 	MsgGetUpdateStatus          = "getUpdateStatus"
 	MsgSetVersionDev            = "setVersionDev"
+	MsgGetNotifications         = "getNotifications"
+	MsgSetNotifications         = "setNotifications"
 )
 
 // Error code constants
@@ -247,6 +250,10 @@ func registerHandlers(relay *RelayComm) {
 	relay.On(MsgGetEventDetectionConfig, useEncryption(MsgGetEventDetectionConfig, handleGetEventDetectionConfig))
 	relay.On(MsgSetEventDetectionEnabled, useEncryption(MsgSetEventDetectionEnabled, handleSetEventDetectionEnabled))
 	relay.On(MsgSetEventDetectionTypes, useEncryption(MsgSetEventDetectionTypes, handleSetEventDetectionTypes))
+
+	// Notifications
+	relay.On(MsgGetNotifications, useEncryption(MsgGetNotifications, handleGetNotifications))
+	relay.On(MsgSetNotifications, useEncryption(MsgSetNotifications, handleSetNotifications))
 
 	// System
 	relay.On(MsgGetHealth, useEncryption(MsgGetHealth, handleGetHealth))
@@ -783,4 +790,47 @@ func handleSetVersionDev(ctx *HandlerContext, payload []byte) {
 	globals.FirmwareVersion = "dev"
 	updater.Get().CheckForUpdates()
 	SendEncryptedSuccess(ctx, MsgSetVersionDev, nil)
+}
+
+func handleGetNotifications(ctx *HandlerContext, payload []byte) {
+	SendEncryptedSuccess(ctx, MsgGetNotifications, map[string]any{
+		"enabled": notifications.Get().IsEnabled(ctx.DeviceID),
+	})
+}
+
+func handleSetNotifications(ctx *HandlerContext, payload []byte) {
+	var req struct {
+		Enabled  bool   `cbor:"enabled"`
+		FCMToken string `cbor:"fcmToken"`
+	}
+
+	if err := cbor.Unmarshal(payload, &req); err != nil {
+		SendEncryptedError(ctx, MsgSetNotifications, ErrInvalidPayload, "Invalid payload")
+		return
+	}
+
+	if req.Enabled {
+		if req.FCMToken == "" {
+			SendEncryptedError(ctx, MsgSetNotifications, ErrInvalidPayload, "FCM token required")
+			return
+		}
+
+		if err := notifications.Get().Enable(ctx.DeviceID, req.FCMToken); err != nil {
+			SendEncryptedError(ctx, MsgSetNotifications, ErrInternalError, err.Error())
+			return
+		}
+
+		SendEncryptedSuccess(ctx, MsgSetNotifications, map[string]any{
+			"enabled": true,
+		})
+	} else {
+		if err := notifications.Get().Disable(ctx.DeviceID); err != nil {
+			SendEncryptedError(ctx, MsgSetNotifications, ErrInternalError, err.Error())
+			return
+		}
+
+		SendEncryptedSuccess(ctx, MsgSetNotifications, map[string]any{
+			"enabled": false,
+		})
+	}
 }

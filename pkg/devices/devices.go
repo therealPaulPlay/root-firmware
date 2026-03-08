@@ -20,7 +20,8 @@ type Device struct {
 }
 
 type Devices struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	onRemove func(deviceID string)
 }
 
 var instance *Devices
@@ -134,7 +135,12 @@ func (d *Devices) SetProductAlias(id string, alias string) error {
 	return fmt.Errorf("device not found: %s", id)
 }
 
-// Remove immediately removes a device
+// OnRemove registers a callback that is invoked after a device is removed
+func (d *Devices) OnRemove(fn func(deviceID string)) {
+	d.onRemove = fn
+}
+
+// Remove immediately removes a device and invokes the onRemove callback
 func (d *Devices) Remove(deviceID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -147,7 +153,14 @@ func (d *Devices) Remove(deviceID string) error {
 		}
 	}
 
-	return config.Get().SetKey("connectedDevices", filtered)
+	if err := config.Get().SetKey("connectedDevices", filtered); err != nil {
+		return err
+	}
+
+	if d.onRemove != nil {
+		d.onRemove(deviceID)
+	}
+	return nil
 }
 
 func (d *Devices) getDevices() []Device {

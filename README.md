@@ -144,6 +144,10 @@ Collect logs and store them in a JSON for easy access.
 
 Uses ONNX for event detection. Inspired by [Secluso's](https://github.com/secluso/secluso) implementation. 
 
+### Notifications
+
+Send notifications to the relay server's notification router.
+
 ### Pairing
 
 The firmware uses Bluetooth Low Energy for providing endpoints needed during the pairing process.

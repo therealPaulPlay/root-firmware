@@ -77,6 +77,7 @@ type muxJob struct {
 	audioEntries []lookbackEntry
 	outputPath   string
 	duration     float64
+	eventID      string
 	eventType    string
 	preview      []byte
 	detection    *storage.DetectionResult
@@ -90,7 +91,7 @@ func (r *Recorder) muxWorker() {
 			continue
 		}
 		r.muxAudio(job.audioEntries, job.videoEntries[0].timestamp, job.outputPath)
-		storage.Get().SaveRecording(job.outputPath, job.duration, job.eventType, job.preview, job.detection)
+		storage.Get().SaveRecording(job.eventID, job.outputPath, job.duration, job.eventType, job.preview, job.detection)
 	}
 }
 
