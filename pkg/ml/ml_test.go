@@ -101,10 +101,13 @@ func TestDecodeLabel(t *testing.T) {
 		expected string
 	}{
 		{0, "person"},
-		{2, "car"},
-		{15, "pet"},  // cat
-		{16, "pet"},  // dog
-		{1, "other"}, // bicycle
+		{1, "vehicle"},  // bicycle
+		{2, "vehicle"},  // car
+		{3, "vehicle"},  // motorcycle
+		{5, "vehicle"},  // bus
+		{7, "vehicle"},  // truck
+		{15, "pet"},     // cat
+		{16, "pet"},     // dog
 		{99, "other"},
 	}
 
@@ -197,9 +200,9 @@ func TestGetEnabledEventTypes(t *testing.T) {
 	}
 
 	// With types set
-	config.Get().SetKey("eventDetectionEnabledTypes", []string{"person", "car"})
+	config.Get().SetKey("eventDetectionEnabledTypes", []string{"person", "vehicle"})
 	types := GetEnabledEventTypes()
-	if len(types) != 2 || types[0] != "person" || types[1] != "car" {
+	if len(types) != 2 || types[0] != "person" || types[1] != "vehicle" {
 		t.Errorf("GetEnabledEventTypes() = %v", types)
 	}
 }
@@ -221,8 +224,8 @@ func TestIsEventTypeEnabled(t *testing.T) {
 	if !isEventTypeEnabled("person", false) {
 		t.Error("person should be enabled")
 	}
-	if isEventTypeEnabled("car", true) {
-		t.Error("car should not be enabled")
+	if isEventTypeEnabled("vehicle", true) {
+		t.Error("vehicle should not be enabled")
 	}
 }
 

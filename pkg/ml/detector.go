@@ -33,8 +33,8 @@ func decodeLabel(classID int) string {
 	switch classID {
 	case 0:
 		return "person"
-	case 2:
-		return "car"
+	case 1, 2, 3, 5, 7: // bicycle, car, motorcycle, bus, truck
+		return "vehicle"
 	case 15, 16: // cat, dog
 		return "pet"
 	default:
@@ -155,7 +155,7 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	outputData := outputTensor.GetData()
 
 	// Output shape: [1, 3598, 112] = 80 class scores + 32 bbox distribution bins (4 edges × 8 bins)
-	targetClasses := map[int]bool{0: true, 2: true, 15: true, 16: true} // person, car, cat, dog
+	targetClasses := map[int]bool{0: true, 1: true, 2: true, 3: true, 5: true, 7: true, 15: true, 16: true} // person, bicycle, car, motorcycle, bus, truck, cat, dog
 
 	var boxes [][4]float32
 	var scores []float32
