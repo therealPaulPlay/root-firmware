@@ -23,7 +23,7 @@ const (
 )
 
 type Detection struct {
-	EventType string // "person", "pet", "car", "other"
+	EventType string // "person", "pet" etc.
 	Count     int
 	Result    *storage.DetectionResult // per-box detections with model size context
 }

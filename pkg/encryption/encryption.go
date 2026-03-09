@@ -63,7 +63,7 @@ func DeriveSharedSecret(yourPrivateKey, theirPublicKey []byte) ([]byte, error) {
 	}
 
 	// Use HKDF to derive key material
-	hkdfReader := hkdf.New(sha256.New, secret, nil, []byte("root-camera-encryption"))
+	hkdfReader := hkdf.New(sha256.New, secret, nil, []byte("root-privacy-encryption"))
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(hkdfReader, key); err != nil {
 		return nil, err

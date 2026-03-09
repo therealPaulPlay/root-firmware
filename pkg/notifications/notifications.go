@@ -12,9 +12,15 @@ import (
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
+	"root-firmware/pkg/encryption"
 )
 
-const MaxNotificationDevices = 5
+const (
+	MaxNotificationDevices = 5
+	sendEndpoint           = "/notifications/send"
+	uploadPreviewEndpoint  = "/notifications/upload-preview"
+	httpTimeout            = 10 * time.Second
+)
 
 // NotificationDevice represents a device registered to receive push notifications
 type NotificationDevice struct {
@@ -104,7 +110,8 @@ func (n *Notifications) IsEnabled(deviceID string) bool {
 
 // SendEventToAll sends an event notification to all registered devices,
 // resolving each device's ProductAlias for the notification body
-func (n *Notifications) SendEventToAll(eventType string, eventID string) {
+// If preview is non-nil, it is encrypted per-device and uploaded for rich notifications
+func (n *Notifications) SendEventToAll(eventType string, eventID string, preview []byte) {
 	if eventType == "" {
 		log.Printf("Notifications: SendEventToAll called with empty event type")
 		return
@@ -126,6 +133,12 @@ func (n *Notifications) SendEventToAll(eventType string, eventID string) {
 		return
 	}
 
+	productPrivateKey, err := config.Get().GetProductPrivateKey()
+	if err != nil {
+		log.Printf("Notifications: Failed to get product private key: %v", err)
+		return
+	}
+
 	title := strings.ToUpper(eventType[:1]) + eventType[1:] + " detected"
 
 	for _, entry := range entries {
@@ -134,7 +147,13 @@ func (n *Notifications) SendEventToAll(eventType string, eventID string) {
 			log.Printf("Notifications: Skipping device %s - not found in paired devices", entry.DeviceID)
 			continue
 		}
-		go n.sendNotification(relayDomain, entry.FCMToken, title, dev.ProductAlias, productID, eventID)
+
+		var imageURL string
+		if preview != nil {
+			imageURL = n.uploadEncryptedPreview(relayDomain, productPrivateKey, dev.PublicKey, preview)
+		}
+
+		go n.sendNotification(relayDomain, entry.FCMToken, title, dev.ProductAlias, productID, eventID, imageURL)
 	}
 }
 
@@ -160,32 +179,42 @@ func (n *Notifications) getRelayAndProductID() (string, string, error) {
 	return relayDomain, productID, nil
 }
 
-func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, productID, eventID string) {
-	// Build the full FCM message so the relay stays schema-agnostic
+func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, productID, eventID, imageURL string) {
+	data := map[string]string{
+		"productId": productID,
+		"eventId":   eventID,
+		"title":     title,
+		"body":      body,
+	}
+	if imageURL != "" {
+		data["imageUrl"] = imageURL
+	}
+
+	// Data-only message: no top-level "notification" key so Android always
+	// routes through our custom messaging service, even when the app is backgrounded
 	message := map[string]any{
 		"token": fcmToken,
-		"notification": map[string]string{
-			"title": title,
-			"body":  body,
-		},
-		"data": map[string]string{
-			"productId": productID,
-			"eventId":   eventID,
-		},
-		"android": map[string]string{
+		"data":  data,
+		"android": map[string]any{
 			"priority": "high",
 		},
 		"apns": map[string]any{
 			"headers": map[string]string{"apns-priority": "10"},
-			"payload": map[string]interface{}{
-				"aps": map[string]string{"sound": "default"},
+			"payload": map[string]any{
+				"aps": map[string]any{
+					"alert": map[string]string{
+						"title": title,
+						"body":  body,
+					},
+					"sound":           "default",
+					"mutable-content": 1,
+				},
 			},
 		},
 	}
 
 	payload := map[string]any{
-		"fcmToken": fcmToken,
-		"message":  message,
+		"message": message,
 	}
 
 	jsonBody, err := json.Marshal(payload)
@@ -194,8 +223,8 @@ func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, pro
 		return
 	}
 
-	url := fmt.Sprintf("https://%s/notifications/send", relayDomain)
-	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("https://%s%s", relayDomain, sendEndpoint)
+	client := &http.Client{Timeout: httpTimeout}
 
 	resp, err := client.Post(url, "application/json", bytes.NewReader(jsonBody))
 	if err != nil {
@@ -207,6 +236,53 @@ func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, pro
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Notifications: Relay returned status %d", resp.StatusCode)
 	}
+}
+
+// uploadEncryptedPreview encrypts the preview for a specific device and uploads it to the relay
+// Returns the image URL, or empty string on failure
+func (n *Notifications) uploadEncryptedPreview(relayDomain string, productPrivateKey, devicePublicKey, preview []byte) string {
+	sharedSecret, err := encryption.DeriveSharedSecret(productPrivateKey, devicePublicKey)
+	if err != nil {
+		log.Printf("Notifications: Failed to derive shared secret: %v", err)
+		return ""
+	}
+
+	session, err := encryption.SessionFromKey(sharedSecret)
+	if err != nil {
+		log.Printf("Notifications: Failed to create encryption session: %v", err)
+		return ""
+	}
+
+	encrypted, err := session.Encrypt(preview, nil)
+	if err != nil {
+		log.Printf("Notifications: Failed to encrypt preview: %v", err)
+		return ""
+	}
+
+	uploadURL := fmt.Sprintf("https://%s%s", relayDomain, uploadPreviewEndpoint)
+	client := &http.Client{Timeout: httpTimeout}
+
+	resp, err := client.Post(uploadURL, "application/octet-stream", bytes.NewReader(encrypted))
+	if err != nil {
+		log.Printf("Notifications: Failed to upload preview: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Notifications: Preview upload returned status %d", resp.StatusCode)
+		return ""
+	}
+
+	var result struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("Notifications: Failed to parse upload response: %v", err)
+		return ""
+	}
+
+	return result.URL
 }
 
 func (n *Notifications) removeEntry(deviceID string) error {

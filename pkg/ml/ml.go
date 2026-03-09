@@ -167,7 +167,7 @@ func (m *ML) check() {
 				sfx.Get().PlayRecording()
 			}
 		}
-		notifications.Get().SendEventToAll(eventType, m.recordingID)
+		notifications.Get().SendEventToAll(eventType, m.recordingID, m.recordingPreview)
 	} else if time.Since(m.recordingStart) >= m.recordingSplitAfter {
 		// Split recording if duration limit reached
 		log.Printf("ML: Splitting recording (%.2fs elapsed)", time.Since(m.recordingStart).Seconds())

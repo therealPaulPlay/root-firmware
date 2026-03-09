@@ -17,8 +17,8 @@ const AudioSampleRate = 48000    // Hz
 const AudioChunkSize = 48 * 1024 // Bytes per audio chunk (~500ms at 48kHz mono S16_LE)
 
 // Recording
-const MaxRecordDuration = 30 * time.Second // Max recording duration (higher require take more memory)
-const LookbackDuration = 8 * time.Second   // Pre-event buffer included in recordings (must be higher than max recording duration)
+const MaxRecordDuration = 30 * time.Second // Max recording duration (higher durations take more memory)
+const LookbackDuration = 8 * time.Second   // Pre-event buffer included in recordings (must be lower than the max recording duration)
 
 // Model name lowercase
 const ProductModel = "observer"
