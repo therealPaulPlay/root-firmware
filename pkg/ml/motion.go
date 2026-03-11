@@ -1,7 +1,6 @@
 package ml
 
 import (
-	"bytes"
 	"image"
 	"math"
 )
@@ -22,16 +21,13 @@ func newMotionDetector() *motionDetector {
 	return &motionDetector{}
 }
 
-func (m *motionDetector) detectMotion(jpegData []byte) (bool, error) {
-	gray, err := toGrayscale(jpegData)
-	if err != nil {
-		return false, err
-	}
+func (m *motionDetector) detectMotion(img image.Image) bool {
+	gray := toGrayscale(img)
 
 	// Initialize background on first frame
 	if m.background == nil {
 		m.background = gray
-		return false, nil
+		return false
 	}
 
 	// Count changed pixels and update background
@@ -44,24 +40,10 @@ func (m *motionDetector) detectMotion(jpegData []byte) (bool, error) {
 		m.background[i] = m.background[i]*(1-backgroundAlpha) + gray[i]*backgroundAlpha
 	}
 
-	return changedPixels >= minChangedPixels, nil
+	return changedPixels >= minChangedPixels
 }
 
-func (m *motionDetector) reset(jpegData []byte) error {
-	gray, err := toGrayscale(jpegData)
-	if err != nil {
-		return err
-	}
-	m.background = gray
-	return nil
-}
-
-func toGrayscale(jpegData []byte) ([]float32, error) {
-	img, _, err := image.Decode(bytes.NewReader(jpegData))
-	if err != nil {
-		return nil, err
-	}
-
+func toGrayscale(img image.Image) []float32 {
 	gray := make([]float32, scaledWidth*scaledHeight)
 	bounds := img.Bounds()
 
@@ -75,5 +57,5 @@ func toGrayscale(jpegData []byte) ([]float32, error) {
 		}
 	}
 
-	return gray, nil
+	return gray
 }

@@ -2,6 +2,7 @@ package ml
 
 import (
 	"fmt"
+	"image"
 	"log"
 	"path/filepath"
 	"sync"
@@ -84,7 +85,9 @@ func (m *ML) loop() {
 func (m *ML) stopRecordingIfActive(reason string) {
 	if m.recordingPath != "" {
 		log.Printf("ML: Stopping recording - %s", reason)
-		m.stopRecording(true)
+		if err := m.stopRecording(true); err != nil {
+			log.Printf("ML: Failed to stop recording: %v", err)
+		}
 	}
 }
 
@@ -113,13 +116,7 @@ func (m *ML) check() {
 	}
 
 	// Gate 1: Motion detection (motion detection works with a decay system – not a hard cut)
-	hasMotion, err := m.motionDetector.detectMotion(frame)
-	if err != nil {
-		log.Printf("ML: Motion detection failed: %v", err)
-		return
-	}
-
-	if !hasMotion {
+	if !m.motionDetector.detectMotion(frame) {
 		m.mu.Lock()
 		m.stopRecordingIfActive("no motion")
 		m.mu.Unlock()
@@ -161,7 +158,10 @@ func (m *ML) check() {
 
 	if m.recordingPath == "" {
 		log.Printf("ML: Starting recording for %s event", eventType)
-		m.startRecording(eventType, frame, detection.Result, true)
+		if err := m.startRecording(eventType, frame, detection.Result, true); err != nil {
+			log.Printf("ML: Failed to start recording: %v", err)
+			return
+		}
 		if val, ok := config.Get().GetKey("playRecordingSound"); ok {
 			if b, ok := val.(bool); ok && b {
 				sfx.Get().PlayRecording()
@@ -171,19 +171,26 @@ func (m *ML) check() {
 	} else if time.Since(m.recordingStart) >= m.recordingSplitAfter {
 		// Split recording if duration limit reached
 		log.Printf("ML: Splitting recording (%.2fs elapsed)", time.Since(m.recordingStart).Seconds())
-		m.stopRecording(false)
-		m.startRecording(eventType, frame, detection.Result, false)
-		m.motionDetector.reset(frame)
+		if err := m.stopRecording(false); err != nil {
+			log.Printf("ML: Failed to stop recording for split: %v", err)
+		}
+		if err := m.startRecording(eventType, frame, detection.Result, false); err != nil {
+			log.Printf("ML: Failed to start split recording: %v", err)
+		}
 	}
 }
 
-func (m *ML) startRecording(eventType string, preview []byte, detection *storage.DetectionResult, withLookback bool) {
+func (m *ML) startRecording(eventType string, preview image.Image, detection *storage.DetectionResult, withLookback bool) error {
 	tempPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
 	id, err := uuid.NewV4()
 	if err != nil {
-		log.Printf("ML: Failed to generate event ID: %v", err)
-		return
+		return fmt.Errorf("failed to generate event ID: %w", err)
+	}
+
+	previewJPEG, err := record.PreviewToJPEG(preview)
+	if err != nil {
+		return fmt.Errorf("failed to encode preview: %w", err)
 	}
 
 	record.Get().StartRecording(tempPath, withLookback)
@@ -192,7 +199,7 @@ func (m *ML) startRecording(eventType string, preview []byte, detection *storage
 	m.recordingID = id.String()
 	m.recordingEvent = eventType
 	m.recordingStart = time.Now()
-	m.recordingPreview = preview
+	m.recordingPreview = previewJPEG
 	m.recordingDetection = detection
 
 	// When lookback is included, the flush adds LookbackDuration of pre-event
@@ -201,13 +208,12 @@ func (m *ML) startRecording(eventType string, preview []byte, detection *storage
 	if withLookback {
 		m.recordingSplitAfter -= globals.LookbackDuration
 	}
+
+	return nil
 }
 
-func (m *ML) stopRecording(applyCooldown bool) {
+func (m *ML) stopRecording(applyCooldown bool) error {
 	_, err := record.Get().StopRecording(m.recordingID, m.recordingEvent, m.recordingPreview, m.recordingDetection)
-	if err != nil {
-		log.Printf("ML: Failed to stop recording: %v", err)
-	}
 
 	m.recordingPath = ""
 	m.recordingPreview = nil
@@ -215,4 +221,6 @@ func (m *ML) stopRecording(applyCooldown bool) {
 	if applyCooldown {
 		m.lastRecordedAt = time.Now()
 	}
+
+	return err
 }

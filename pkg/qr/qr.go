@@ -1,10 +1,8 @@
 package qr
 
 import (
-	"bytes"
 	"fmt"
 	"image"
-	_ "image/jpeg" // Register JPEG decoder
 
 	"github.com/makiuchi-d/gozxing"
 	"github.com/makiuchi-d/gozxing/qrcode"
@@ -22,15 +20,9 @@ func NewScanner() *Scanner {
 	}
 }
 
-// Scan attempts to decode a QR code from JPEG image data
+// Scan attempts to decode a QR code from an image
 // Returns the decoded string or error if no QR code found
-func (s *Scanner) Scan(jpegData []byte) (string, error) {
-	// Decode JPEG to image.Image
-	img, _, err := image.Decode(bytes.NewReader(jpegData))
-	if err != nil {
-		return "", fmt.Errorf("failed to decode image: %w", err)
-	}
-
+func (s *Scanner) Scan(img image.Image) (string, error) {
 	// Convert to gozxing BinaryBitmap
 	bmp, err := gozxing.NewBinaryBitmapFromImage(img)
 	if err != nil {

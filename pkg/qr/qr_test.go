@@ -1,17 +1,23 @@
 package qr
 
 import (
+	"bytes"
+	"image"
+	_ "image/jpeg"
 	"os"
 	"testing"
 )
 
-var testQRImage []byte
+var testQRImage image.Image
 
 func TestMain(m *testing.M) {
-	var err error
-	testQRImage, err = os.ReadFile("testdata/test.jpg")
+	data, err := os.ReadFile("testdata/test.jpg")
 	if err != nil {
 		panic("failed to load test QR image: " + err.Error())
+	}
+	testQRImage, _, err = image.Decode(bytes.NewReader(data))
+	if err != nil {
+		panic("failed to decode test QR image: " + err.Error())
 	}
 	os.Exit(m.Run())
 }
@@ -40,20 +46,13 @@ func TestScan_ValidQRCode(t *testing.T) {
 	}
 }
 
-func TestScan_InvalidJPEG(t *testing.T) {
+func TestScan_NoQRCode(t *testing.T) {
 	scanner := NewScanner()
 
-	_, err := scanner.Scan([]byte("not a jpeg"))
+	// Blank image with no QR code
+	blank := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	_, err := scanner.Scan(blank)
 	if err == nil {
-		t.Error("Scan() should error on invalid JPEG")
-	}
-}
-
-func TestScan_EmptyData(t *testing.T) {
-	scanner := NewScanner()
-
-	_, err := scanner.Scan([]byte{})
-	if err == nil {
-		t.Error("Scan() should error on empty data")
+		t.Error("Scan() should error when no QR code is present")
 	}
 }

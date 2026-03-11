@@ -659,14 +659,20 @@ func handleGetHealth(ctx *HandlerContext, payload []byte) {
 }
 
 func handleGetPreview(ctx *HandlerContext, payload []byte) {
-	frameData, err := record.Get().CapturePreview(640, 360)
+	img, err := record.Get().CapturePreview(640, 360)
+	if err != nil {
+		SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
+		return
+	}
+
+	jpegData, err := record.PreviewToJPEG(img)
 	if err != nil {
 		SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
 		return
 	}
 
 	SendEncryptedSuccess(ctx, MsgGetPreview, map[string]any{
-		"data": frameData,
+		"data": jpegData,
 	})
 }
 

@@ -498,7 +498,7 @@ func (r *Recorder) decodeAndScale(frame []byte, x, y int) (*image.NRGBA, error) 
 	return dst, nil
 }
 
-func (r *Recorder) CapturePreview(x int, y int) ([]byte, error) {
+func (r *Recorder) CapturePreview(x int, y int) (image.Image, error) {
 	r.videoBroadcast.frameMu.RLock()
 	frame := r.videoBroadcast.latestFrame
 	r.videoBroadcast.frameMu.RUnlock()
@@ -507,14 +507,14 @@ func (r *Recorder) CapturePreview(x int, y int) ([]byte, error) {
 		return nil, fmt.Errorf("no frame available yet")
 	}
 
-	img, err := r.decodeAndScale(frame, x, y)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode preview frame: %w", err)
-	}
+	return r.decodeAndScale(frame, x, y)
+}
 
+// PreviewToJPEG encodes an image to JPEG
+func PreviewToJPEG(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 50}); err != nil {
-		return nil, fmt.Errorf("failed to encode preview: %w", err)
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 65}); err != nil {
+		return nil, fmt.Errorf("failed to encode JPEG: %w", err)
 	}
 	return buf.Bytes(), nil
 }

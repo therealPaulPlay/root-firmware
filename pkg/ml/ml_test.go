@@ -1,6 +1,9 @@
 package ml
 
 import (
+	"bytes"
+	"image"
+	_ "image/jpeg"
 	"math"
 	"os"
 	"testing"
@@ -9,19 +12,28 @@ import (
 	"root-firmware/pkg/testutil"
 )
 
-var testImage1 []byte
-var testImage2 []byte
+var testImage1 image.Image
+var testImage2 image.Image
 
 func TestMain(m *testing.M) {
-	var err error
-	testImage1, err = os.ReadFile("testdata/test1.jpg")
+	data1, err := os.ReadFile("testdata/test1.jpg")
 	if err != nil {
 		panic("failed to load test image 1: " + err.Error())
 	}
-	testImage2, err = os.ReadFile("testdata/test2.jpg")
+	testImage1, _, err = image.Decode(bytes.NewReader(data1))
+	if err != nil {
+		panic("failed to decode test image 1: " + err.Error())
+	}
+
+	data2, err := os.ReadFile("testdata/test2.jpg")
 	if err != nil {
 		panic("failed to load test image 2: " + err.Error())
 	}
+	testImage2, _, err = image.Decode(bytes.NewReader(data2))
+	if err != nil {
+		panic("failed to decode test image 2: " + err.Error())
+	}
+
 	os.Exit(m.Run())
 }
 
@@ -232,10 +244,7 @@ func TestIsEventTypeEnabled(t *testing.T) {
 // --- Image processing tests ---
 
 func TestToGrayscale(t *testing.T) {
-	gray, err := toGrayscale(testImage1)
-	if err != nil {
-		t.Fatalf("toGrayscale() error = %v", err)
-	}
+	gray := toGrayscale(testImage1)
 
 	expectedLen := scaledWidth * scaledHeight
 	if len(gray) != expectedLen {
@@ -251,20 +260,10 @@ func TestToGrayscale(t *testing.T) {
 	}
 }
 
-func TestToGrayscale_InvalidJPEG(t *testing.T) {
-	_, err := toGrayscale([]byte("not a jpeg"))
-	if err == nil {
-		t.Error("toGrayscale() should error on invalid JPEG")
-	}
-}
-
 func TestMotionDetector_FirstFrameNoMotion(t *testing.T) {
 	md := newMotionDetector()
 
-	motion, err := md.detectMotion(testImage1)
-	if err != nil {
-		t.Fatalf("detectMotion() error = %v", err)
-	}
+	motion := md.detectMotion(testImage1)
 
 	// First frame initializes background, no motion
 	if motion {
@@ -283,12 +282,7 @@ func TestMotionDetector_SameFrameNoMotion(t *testing.T) {
 	md.detectMotion(testImage1)
 
 	// Same frame again - no motion
-	motion, err := md.detectMotion(testImage1)
-	if err != nil {
-		t.Fatalf("detectMotion() error = %v", err)
-	}
-
-	if motion {
+	if md.detectMotion(testImage1) {
 		t.Error("identical frames should not detect motion")
 	}
 }
@@ -297,46 +291,11 @@ func TestMotionDetector_DifferentFramesDetectMotion(t *testing.T) {
 	md := newMotionDetector()
 
 	// First frame - initializes background
-	_, err := md.detectMotion(testImage1)
-	if err != nil {
-		t.Fatalf("detectMotion(testImage1) error = %v", err)
-	}
+	md.detectMotion(testImage1)
 
 	// Different frame - should detect motion
-	motion, err := md.detectMotion(testImage2)
-	if err != nil {
-		t.Fatalf("detectMotion(testImage2) error = %v", err)
-	}
-
-	if !motion {
+	if !md.detectMotion(testImage2) {
 		t.Error("different frames should detect motion")
 	}
 }
 
-func TestMotionDetector_Reset(t *testing.T) {
-	md := newMotionDetector()
-
-	// Initialize with first frame
-	md.detectMotion(testImage1)
-	originalBackground := make([]float32, len(md.background))
-	copy(originalBackground, md.background)
-
-	// Reset should reinitialize background
-	err := md.reset(testImage1)
-	if err != nil {
-		t.Fatalf("reset() error = %v", err)
-	}
-
-	if md.background == nil {
-		t.Error("background should exist after reset")
-	}
-}
-
-func TestMotionDetector_Reset_InvalidJPEG(t *testing.T) {
-	md := newMotionDetector()
-
-	err := md.reset([]byte("not a jpeg"))
-	if err == nil {
-		t.Error("reset() should error on invalid JPEG")
-	}
-}

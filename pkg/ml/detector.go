@@ -1,9 +1,7 @@
 package ml
 
 import (
-	"bytes"
 	"image"
-	_ "image/jpeg"
 	"log"
 	"sort"
 
@@ -72,12 +70,7 @@ func newObjectDetector(modelPath string) (*objectDetector, error) {
 	return &objectDetector{session: session}, nil
 }
 
-func (d *objectDetector) detect(jpegData []byte) (*Detection, error) {
-	img, _, err := image.Decode(bytes.NewReader(jpegData))
-	if err != nil {
-		return nil, err
-	}
-
+func (d *objectDetector) detect(img image.Image) (*Detection, error) {
 	inputTensor := d.preprocess(img)
 	defer inputTensor.Destroy()
 
