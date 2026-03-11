@@ -94,7 +94,7 @@ jobs:
 
   build-image-and-bundle:
     name: Build image and RAUC bundle
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: build-firmware
     steps:
       - name: Checkout
@@ -105,11 +105,6 @@ jobs:
         with:
           name: firmware-binary
           path: ./firmware-artifact/
-
-      - name: Set up QEMU for ARM64 emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
 
       - name: Prepare pi-gen stage
         run: |
