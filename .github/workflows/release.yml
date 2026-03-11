@@ -94,7 +94,7 @@ jobs:
 
   build-image-and-bundle:
     name: Build image and RAUC bundle
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04-arm # Pi-gen needs to run arm64 binaries in its container
     needs: build-firmware
     steps:
       - name: Checkout
