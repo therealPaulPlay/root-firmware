@@ -671,15 +671,15 @@ func handleGetPreview(ctx *HandlerContext, payload []byte) {
 }
 
 func handleStartUpdate(ctx *HandlerContext, payload []byte) {
-	if err := updater.Get().StartUpdate(); err != nil {
-		SendEncryptedError(ctx, MsgStartUpdate, ErrInternalError, err.Error())
+	if !updater.Get().StartUpdate() {
+		SendEncryptedError(ctx, MsgStartUpdate, ErrInternalError, "No update available or already in progress")
 		return
 	}
 	SendEncryptedSuccess(ctx, MsgStartUpdate, nil)
 }
 
 func handleGetUpdateStatus(ctx *HandlerContext, payload []byte) {
-	status, availableVersion, updateError := updater.Get().GetStatus()
+	status, availableVersion, updateError, scheduledFor := updater.Get().GetStatus()
 	result := map[string]any{
 		"status":         string(status),
 		"currentVersion": globals.FirmwareVersion,
@@ -690,13 +690,16 @@ func handleGetUpdateStatus(ctx *HandlerContext, payload []byte) {
 	if updateError != "" {
 		result["error"] = updateError
 	}
+	if !scheduledFor.IsZero() {
+		result["scheduledFor"] = scheduledFor.UnixMilli()
+	}
 
 	SendEncryptedSuccess(ctx, MsgGetUpdateStatus, result)
 }
 
 func handleRestart(ctx *HandlerContext, payload []byte) {
 	// Prevent restart while update is in progress
-	status, _, _ := updater.Get().GetStatus()
+	status, _, _, _ := updater.Get().GetStatus()
 	if status == updater.StatusDownloading || status == updater.StatusInstalling {
 		SendEncryptedError(ctx, MsgRestart, ErrInternalError, "Cannot restart while update is in progress")
 		return
@@ -711,7 +714,7 @@ func handleRestart(ctx *HandlerContext, payload []byte) {
 
 func handleReset(ctx *HandlerContext, payload []byte) {
 	// Prevent reset while update is in progress
-	status, _, _ := updater.Get().GetStatus()
+	status, _, _, _ := updater.Get().GetStatus()
 	if status == updater.StatusDownloading || status == updater.StatusInstalling {
 		SendEncryptedError(ctx, MsgReset, ErrInternalError, "Cannot reset while update is in progress")
 		return
@@ -788,7 +791,12 @@ func handleSetEventDetectionTypes(ctx *HandlerContext, payload []byte) {
 
 func handleSetVersionDev(ctx *HandlerContext, payload []byte) {
 	globals.FirmwareVersion = "dev"
-	updater.Get().CheckForUpdates()
+
+	// Remove scheduled update, since when version is dev auto updates are disabled
+	u := updater.Get()
+	u.RemoveScheduledUpdateWithLock()
+	u.CheckForUpdates()
+
 	SendEncryptedSuccess(ctx, MsgSetVersionDev, nil)
 }
 

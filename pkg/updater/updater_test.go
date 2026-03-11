@@ -3,15 +3,19 @@ package updater
 import (
 	"bytes"
 	"io"
-	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"root-firmware/pkg/config"
+	"root-firmware/pkg/testutil"
 )
 
 // resetSingletons resets updater singleton and boot confirm state for test isolation
 func resetSingletons() {
 	instance = nil
 	once = sync.Once{}
+	config.ResetForTesting()
 
 	healthMu.Lock()
 	initComplete = false
@@ -19,6 +23,24 @@ func resetSingletons() {
 	updateCheckSuccess = false
 	slotMarkedGood = false
 	healthMu.Unlock()
+}
+
+func setupTestUpdater(t *testing.T) func() {
+	t.Helper()
+	resetSingletons()
+
+	cleanupGlobals := testutil.SetupTempGlobals(t)
+
+	if err := config.Init(); err != nil {
+		t.Fatalf("config.Init() error = %v", err)
+	}
+
+	Init()
+
+	return func() {
+		cleanupGlobals()
+		resetSingletons()
+	}
 }
 
 func TestGet_PanicsWithoutInit(t *testing.T) {
@@ -48,7 +70,7 @@ func TestGetStatus(t *testing.T) {
 	u.errorMsg = ""
 	u.mu.Unlock()
 
-	status, version, errMsg := u.GetStatus()
+	status, version, errMsg, _ := u.GetStatus()
 	if status != StatusUpdateAvailable {
 		t.Errorf("status = %s, want %s", status, StatusUpdateAvailable)
 	}
@@ -69,7 +91,7 @@ func TestSetError(t *testing.T) {
 
 	u.setError("something went wrong")
 
-	status, _, errMsg := u.GetStatus()
+	status, _, errMsg, _ := u.GetStatus()
 	if status != StatusError {
 		t.Errorf("status = %s, want %s", status, StatusError)
 	}
@@ -83,14 +105,9 @@ func TestStartUpdate_NoUpdateAvailable(t *testing.T) {
 	defer resetSingletons()
 
 	Init()
-	u := Get()
 
-	err := u.StartUpdate()
-	if err == nil {
-		t.Error("StartUpdate() should error when no update available")
-	}
-	if !strings.Contains(err.Error(), "no update available") {
-		t.Errorf("error = %v, want 'no update available'", err)
+	if Get().StartUpdate() {
+		t.Error("StartUpdate() should return false when no update available")
 	}
 }
 
@@ -105,12 +122,8 @@ func TestStartUpdate_AlreadyInProgress(t *testing.T) {
 	u.status = StatusDownloading
 	u.mu.Unlock()
 
-	err := u.StartUpdate()
-	if err == nil {
-		t.Error("StartUpdate() should error when already in progress")
-	}
-	if !strings.Contains(err.Error(), "already in progress") {
-		t.Errorf("error = %v, want 'already in progress'", err)
+	if u.StartUpdate() {
+		t.Error("StartUpdate() should return false when already in progress")
 	}
 }
 
@@ -163,6 +176,72 @@ func TestProgressReader_UnknownTotal(t *testing.T) {
 	// Should not panic with unknown total
 	if reader.lastLogged != 0 {
 		t.Errorf("lastLogged = %d, want 0 (no progress logged for unknown total)", reader.lastLogged)
+	}
+}
+
+func TestScheduleAutoUpdate(t *testing.T) {
+	cleanup := setupTestUpdater(t)
+	defer cleanup()
+
+	u := Get()
+
+	u.mu.Lock()
+	u.status = StatusUpdateAvailable
+	u.availableVersion = "2.0.0"
+	u.scheduleAutoUpdate()
+	u.mu.Unlock()
+
+	_, _, _, scheduled := u.GetStatus()
+	if scheduled.IsZero() {
+		t.Fatal("scheduledFor should not be zero after scheduling")
+	}
+
+	// Scheduled time must be between 5:00 and 8:00 and at least 3h away
+	if h := scheduled.Hour(); h < 5 || h >= 8 {
+		t.Errorf("scheduled hour %d is outside 5-8 window", h)
+	}
+	if time.Until(scheduled) < 3*time.Hour {
+		t.Error("scheduled time should be at least 3h away")
+	}
+
+	// Verify persisted config
+	val, ok := config.Get().GetKey("scheduledUpdateAt")
+	if !ok {
+		t.Fatal("scheduledUpdateAt should be persisted in config")
+	}
+	if ms, ok := val.(float64); !ok || int64(ms) != scheduled.UnixMilli() {
+		t.Errorf("persisted scheduledUpdateAt = %v, want %d", val, scheduled.UnixMilli())
+	}
+
+	// Clean up timer
+	u.mu.Lock()
+	u.scheduleTimer.Stop()
+	u.mu.Unlock()
+}
+
+func TestCancelScheduledUpdate(t *testing.T) {
+	cleanup := setupTestUpdater(t)
+	defer cleanup()
+
+	u := Get()
+
+	u.mu.Lock()
+	u.status = StatusUpdateAvailable
+	u.availableVersion = "2.0.0"
+	u.scheduleAutoUpdate()
+	u.mu.Unlock()
+
+	if _, _, _, s := u.GetStatus(); s.IsZero() {
+		t.Fatal("scheduledFor should not be zero after scheduling")
+	}
+
+	u.RemoveScheduledUpdateWithLock()
+
+	if _, _, _, s := u.GetStatus(); !s.IsZero() {
+		t.Error("scheduledFor should be zero after cancellation")
+	}
+	if val, ok := config.Get().GetKey("scheduledUpdateAt"); ok {
+		t.Errorf("persisted schedule should be cleared, got %v", val)
 	}
 }
 

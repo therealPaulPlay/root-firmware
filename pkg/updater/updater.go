@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -51,6 +52,8 @@ type Updater struct {
 	downloadURL      string
 	downloadSHA256   string
 	errorMsg         string
+	scheduledFor     time.Time
+	scheduleTimer    *time.Timer
 }
 
 var instance *Updater
@@ -67,10 +70,10 @@ func Get() *Updater {
 	return instance
 }
 
-func (u *Updater) GetStatus() (UpdateStatus, string, string) {
+func (u *Updater) GetStatus() (UpdateStatus, string, string, time.Time) {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
-	return u.status, u.availableVersion, u.errorMsg
+	return u.status, u.availableVersion, u.errorMsg, u.scheduledFor
 }
 
 // CheckForUpdates queries the relay server for available firmware updates
@@ -78,6 +81,8 @@ func (u *Updater) CheckForUpdates() {
 	u.mu.RLock()
 	status := u.status
 	u.mu.RUnlock()
+
+	// Skip if update in progress
 	if status == StatusDownloading || status == StatusInstalling {
 		return
 	}
@@ -128,15 +133,29 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
-	// Available version must ONLY be set if an update is available
 	u.mu.Lock()
+
+	// Re-check under write lock: status may have changed during the HTTP request
+	// (e.g. a scheduled auto-update started while we were checking)
+	if u.status == StatusDownloading || u.status == StatusInstalling {
+		u.mu.Unlock()
+		return
+	}
+
 	if info.Version != globals.FirmwareVersion {
+		alreadyScheduled := u.availableVersion == info.Version && !u.scheduledFor.IsZero()
 		u.status = StatusUpdateAvailable
 		u.availableVersion = info.Version
 		u.downloadURL = info.URL
 		u.downloadSHA256 = info.SHA256
 		u.errorMsg = ""
+
+		// Schedule auto-update if not already scheduled for this version and not a dev build
+		if !alreadyScheduled && globals.FirmwareVersion != "dev" {
+			u.scheduleAutoUpdate()
+		}
 	} else {
+		u.removeScheduledUpdate()
 		u.status = StatusUpToDate
 		u.errorMsg = ""
 	}
@@ -147,24 +166,29 @@ func (u *Updater) CheckForUpdates() {
 }
 
 // StartUpdate begins downloading and installing the available update via RAUC asynchronously
-func (u *Updater) StartUpdate() error {
+// Returns false if no update is available or an update is already in progress
+func (u *Updater) StartUpdate() bool {
 	u.mu.Lock()
-	if u.status == StatusDownloading || u.status == StatusInstalling {
-		u.mu.Unlock()
-		return fmt.Errorf("update already in progress")
-	}
 	if u.status != StatusUpdateAvailable {
 		u.mu.Unlock()
-		return fmt.Errorf("no update available")
+		return false
 	}
 	downloadURL := u.downloadURL
 	expectedSHA256 := u.downloadSHA256
 	log.Printf("Updater: Starting RAUC update to version %s", u.availableVersion)
 	u.status = StatusDownloading
+
+	// Stop the schedule timer but keep the persisted config value
+	// so a power loss during update can recover it; cleared on success before reboot
+	if u.scheduleTimer != nil {
+		u.scheduleTimer.Stop()
+		u.scheduleTimer = nil
+	}
+	u.scheduledFor = time.Time{}
 	u.mu.Unlock()
 
 	go u.performUpdate(downloadURL, expectedSHA256)
-	return nil
+	return true
 }
 
 func (u *Updater) performUpdate(downloadURL, expectedSHA256 string) {
@@ -194,8 +218,11 @@ func (u *Updater) performUpdate(downloadURL, expectedSHA256 string) {
 		return
 	}
 
-	// Clean up and schedule reboot
+	// Clean up bundle, persisted schedule, and reboot
 	os.Remove(raucBundlePath)
+	if err := config.Get().SetKey("scheduledUpdateAt", nil); err != nil {
+		log.Printf("Updater: Failed to clear scheduled update config: %v", err)
+	}
 	log.Println("Updater: RAUC update successful, rebooting in 2 seconds...")
 
 	time.Sleep(2 * time.Second)
@@ -268,6 +295,65 @@ func (u *Updater) downloadFile(url, destination, expectedSHA256 string) error {
 
 	log.Printf("Updater: Downloaded and verified %d bytes (SHA256: %s)", bytesWritten, actualSHA256)
 	return nil
+}
+
+// scheduleAutoUpdate picks a random time between 5:00-8:00 AM local time, or recovers a persisted schedule
+// mu must be held by the caller
+func (u *Updater) scheduleAutoUpdate() {
+	now := time.Now()
+	scheduled := time.Time{}
+
+	// Try to recover a persisted schedule (e.g. after power outage)
+	if val, ok := config.Get().GetKey("scheduledUpdateAt"); ok {
+		if ms, ok := val.(float64); ok {
+			scheduled = time.UnixMilli(int64(ms))
+		}
+	}
+
+	// Generate a new schedule if none persisted or still valid
+	if scheduled.IsZero() || time.Until(scheduled) < 3*time.Hour {
+		daysAhead := 1 // Push to next day (if e.g. missed persisted schedule)
+
+		// If no persisted schedule, choose random day within next 3-6 days
+		if scheduled.IsZero() {
+			daysAhead = 3 + rand.Intn(4) // 0 - 3
+		}
+		offsetMinutes := rand.Intn(180) // random minute within 5:00-8:00 (180min window)
+		scheduled = time.Date(now.Year(), now.Month(), now.Day()+daysAhead, 5, offsetMinutes, 0, 0, now.Location())
+	}
+
+	if u.scheduleTimer != nil {
+		u.scheduleTimer.Stop()
+	}
+
+	u.scheduledFor = scheduled
+	if err := config.Get().SetKey("scheduledUpdateAt", scheduled.UnixMilli()); err != nil {
+		log.Printf("Updater: Failed to persist scheduled update: %v", err)
+	}
+
+	u.scheduleTimer = time.AfterFunc(time.Until(scheduled), func() {
+		log.Println("Updater: Starting scheduled auto-update")
+		u.StartUpdate()
+	})
+}
+
+// RemoveScheduledUpdateWithLock cancels a pending scheduled auto-update
+func (u *Updater) RemoveScheduledUpdateWithLock() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.removeScheduledUpdate()
+}
+
+// removeScheduledUpdate is the internal version; mu must be held by the caller
+func (u *Updater) removeScheduledUpdate() {
+	if u.scheduleTimer != nil {
+		u.scheduleTimer.Stop()
+		u.scheduleTimer = nil
+	}
+	u.scheduledFor = time.Time{}
+	if err := config.Get().SetKey("scheduledUpdateAt", nil); err != nil {
+		log.Printf("Updater: Failed to clear scheduled update config: %v", err)
+	}
 }
 
 func (u *Updater) setError(msg string) {
