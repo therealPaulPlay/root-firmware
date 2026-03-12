@@ -25,10 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "stable"
 
@@ -43,10 +43,10 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "stable"
 
@@ -86,7 +86,7 @@ jobs:
             cmd/main.go
 
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: firmware-binary
           path: root-firmware
@@ -98,10 +98,10 @@ jobs:
     needs: build-firmware
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download firmware binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: firmware-binary
           path: ./firmware-artifact/
@@ -199,7 +199,7 @@ jobs:
             "$VERSION" "$SHA256" "$SIZE" "$VERSION" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > latest.json
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: release-artifacts
           path: |
@@ -215,7 +215,7 @@ jobs:
     needs: [build-firmware, build-image-and-bundle]
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: release-artifacts
           path: ./artifacts
