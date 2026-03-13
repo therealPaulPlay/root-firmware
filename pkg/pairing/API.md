@@ -109,7 +109,6 @@ First read triggers scan. Keep reading until `hasMore: false`.
 | network.ssid | string | Network name |
 | network.signal | int | Signal strength (0-100) |
 | network.secured | bool | Requires password |
-| network.unsupported | bool | Unsupported security type |
 | hasMore | bool | More networks available |
 
 ### WiFi status
@@ -118,8 +117,7 @@ Read only
 
 | Field | Type | Description |
 |-------|------|-------------|
-| connected | bool | Currently connected |
-| ssid | string | Connected network name |
+| connectedSSID | string | Connected network name (empty if not connected) |
 
 ### WiFi connect
 UUID: `beb5483e-36e1-4688-b7f5-ea07361b26a8`

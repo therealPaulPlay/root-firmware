@@ -646,8 +646,7 @@ func handleGetHealth(ctx *HandlerContext, payload []byte) {
 
 	health := map[string]any{
 		"wifi": map[string]any{
-			"connected": wifi.Get().IsConnected(),
-			"ssid":      wifi.Get().GetCurrentNetwork(),
+			"connectedSSID": wifi.Get().GetCurrentNetwork(),
 		},
 		"relayDomain":   relayDomain,
 		"logs":          logger.GetLogs(),

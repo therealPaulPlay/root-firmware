@@ -180,10 +180,6 @@ func (w *WiFi) waitForInternet(timeout time.Duration) error {
 	return fmt.Errorf("no internet connection")
 }
 
-func (w *WiFi) IsConnected() bool {
-	return w.getActiveSSID() != ""
-}
-
 func (w *WiFi) GetCurrentNetwork() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -295,8 +295,7 @@ func initBLE() error {
 	wifiStatusChar := svc.NewCharacteristic(wifiStatusCharUUID)
 	wifiStatusChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if err := writeSuccess(rsp, map[string]any{
-			"connected": wifi.Get().IsConnected(),
-			"ssid":      wifi.Get().GetCurrentNetwork(),
+			"connectedSSID": wifi.Get().GetCurrentNetwork(),
 		}); err != nil {
 			writeError(rsp, err.Error())
 		}
