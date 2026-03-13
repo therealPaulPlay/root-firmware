@@ -494,7 +494,7 @@ func (r *Recorder) decodeAndScale(frame []byte, x, y int) (*image.NRGBA, error) 
 
 	expandLimitedRange(decoded)
 	dst := image.NewNRGBA(image.Rect(0, 0, x, y))
-	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
+	draw.BiLinear.Scale(dst, dst.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
 	return dst, nil
 }
 
