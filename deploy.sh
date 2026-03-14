@@ -5,9 +5,6 @@ PI_HOST="${1:-observer@ROOT-Observer.local}"
 REPO="/home/observer/firmware-repository"
 VERSION="${FIRMWARE_VERSION:-dev}"
 
-echo "Checking prerequisites..."
-ssh "$PI_HOST" "/sbin/ldconfig -p | grep -q onnxruntime && command -v go > /dev/null || exit 1"
-
 echo "Deploying source..."
 ssh "$PI_HOST" "mkdir -p $REPO"
 rsync -az --delete --progress --exclude 'root-firmware' --exclude '*.swp' ./ "$PI_HOST:$REPO/"

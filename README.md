@@ -10,15 +10,19 @@ This firmware turns a Raspberry Pi into a private home security camera. It utili
 
 The relay server solely relays the data that's sent across and has no ability to decrypt it. During setup, the relay server URL can be determined, making it easy to choose a self-hosted instance. This allows for remotely accessing cameras in a secure and convenient way.
 
-In the ROOT Connect web or mobile app, you can connect to paired cameras, view recorded events, logs, and health metrics. Adjust settings like microphone, event recording preferences, and stream video and audio with low latency.
+The ROOT Connect web and mobile app lets you connect to paired cameras, stream video and audio with low latency, view recorded events, logs, and health metrics, and adjust settings like microphone, event recording preferences, and push notifications.
+
+## Install on your own Pi
+
+Please refer to [this installation guide](https://rootprivacy.com/blog/building-your-own-security-camera), where you can find download links for the latest prebuilt images.
+
+### Supported Raspberry Pi models:
+
+- Pi Zero 2w
 
 ## Contributing
 
 Contributions are welcome. For inquiries, please reach out via [email](mailto:paulplaystudio@gmail.com).
-
-## Tested Raspberry Pi models
-
-- Pi Zero 2w
 
 ## Building
 
@@ -42,9 +46,13 @@ go build -ldflags="-X 'root-firmware/pkg/globals.FirmwareVersion=1.0.0'" -o root
 
 The version is injected at build time via `-ldflags`. Without it, the version defaults to `dev`. To cross-compile for the Pi (64-bit), prepend `GOOS=linux GOARCH=arm64`.
 
-## Deploying to the Pi
+## Deploying to a Pi for development
 
-Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer`, install the Go language and the ONNX Runtime on the Pi.
+Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer` and install `golang-go`.
+
+> [!TIP]
+> Using an SSH key for development instead of a password is significantly more convenient. 
+> Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it over using `ssh-copy-id observer@ROOT-Observer local`. 
 
 ```bash
 ./deploy.sh
@@ -58,17 +66,16 @@ Check if running:
 ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 ```
 
-### Setting up an SSH key
+To build and run the firmware using this script, you need to install all necessary dependencies mentioned under [Building](#building). Most of them can be installed using the `apt` package manager. For the remaining ones, please follow the steps below.
 
-Using an SSH key for development instead of an SSH password is significantly more convenient. Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it onto the Pi using `ssh-copy-id observer@ROOT-Observer.local`. 
+### ONNX runtime
 
-## Installing the ONNX runtime on the Pi
+> [!IMPORTANT]
+> Ensure `docker` is installed on your system.
 
-Compiling inside a docker container on a fast machine is recommended over compiling on the single-board computer itself.
+Compiling inside a docker container on a fast machine is recommended over compiling on the SBC itself.
 
-### 1. Compile the ONNX runtime
-
-Use this script to spin up a docker container & compile the runtime. Ensure `docker` is installed on your system.
+**1. Compile the ONNX runtime for the Pi**
 
 ```bash
 docker run -it --rm --platform linux/arm64 \
@@ -91,9 +98,7 @@ echo "Build complete! Files in ./onnx-output/"
 '
 ```
 
-### 2. Install the runtime on the Pi
-
-Use this script to copy all output files over to the Pi, set up the symlink for `onnxruntime.so`, and update the dynamic linker cache.
+**2. Install the runtime on the Pi**
 
 ```bash
 # Copy both library files to Pi
@@ -106,9 +111,11 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib
   sudo ldconfig'
 ```
 
-## Installing OpenH264 on the Pi
+This script copies all output files over to the Pi, sets up the symlink for `onnxruntime.so`, and updates the dynamic linker cache.
 
-A precompiled binary from [OpenH264 GitHub releases](https://github.com/cisco/openh264/releases) is included in `build/libs-precompiled/`. Use the script below to set up the symlink for `libopenh264.so`, and update the dynamic linker cache.
+### Installing OpenH264 on the Pi
+
+A precompiled binary from [OpenH264 GitHub](https://github.com/cisco/openh264/releases) is included in `build/libs-precompiled/`. Use the script below to set it up.
 
 ```bash
 scp build/libs-precompiled/libopenh264-2.5.1-linux-arm64.7.so observer@ROOT-Observer.local:/tmp/
@@ -120,69 +127,24 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libopenh264-2.5.1-linux-arm64.7.s
 
 ## Package overview
 
-### Config
-
-All configuration values are stored in a config `JSON` file in the `/data` partition.
-
-### Devices
-
-This package is used for managing paired devices.
-
-### Encryption
-
-This package exposes functions for creating encryption keys using the Diffie-Hellman key exchange method.
-
-### Globals
-
-Global variables. All paths or other constants that are reused across packages go here.
-
-### Logger
-
-Collect logs and store them in a JSON for easy access.
-
-### ML (Machine learning)
-
-Uses ONNX for event detection. Inspired by [Secluso's](https://github.com/secluso/secluso) implementation. 
-
-### Notifications
-
-Send notifications to the relay server's notification router.
-
-### Pairing
-
-The firmware uses Bluetooth Low Energy for providing endpoints needed during the pairing process.
-
-### Record
-
-Handles recording video and audio via the camera and microphone components. Camera and microphone (if enabled) input is constantly being read and fanned out to multiple consumers (e.g. stream and/or recording).
-
-### Relaycomm
-
-Communication with the product the firmware runs on happens via a relay server (using WebSockets).
-
-### SFX
-
-Play sound effects.
-
-### Storage
-
-Save recordings and update the event log.
-
-### Testutil
-
-Utilities used for unit testing.
-
-### Updater
-
-Check for and download firmware updates via RAUC.
-
-### WiFi
-
-Scan for WiFi networks and establish a wifi connection.
-
-### Metrics
-
-Collects performance, memory utilization, and disk usage statistics.
+| Package | Description |
+|---------|-------------|
+| Config | Store and persist configuration values at runtime. |
+| Devices | Manage paired devices. |
+| Encryption | Create encryption keys, encrypt and decrypt values, Diffie-Hellman key exchange helpers. |
+| Globals | Constants that are reused across packages. |
+| Logger | Collect logs and store them in a JSON for easy access. |
+| ML | ONNX-based event detection. Inspired by [Secluso's](https://github.com/secluso/secluso) implementation. |
+| Notifications | Send notifications to the relay server's notification router. |
+| Pairing | Bluetooth Low Energy endpoints for the pairing process. |
+| Record | Record video and audio. Input from camera and mic is constantly read and fanned out to multiple consumers (e.g. stream and/or recording). |
+| Relaycomm | Communicate with the relay server via WebSockets. |
+| SFX | Play sound effects. |
+| Storage | Save recordings and update the event log. |
+| Testutil | Utilities used for unit testing. |
+| Updater | Check for, download and install firmware updates utilizing RAUC. |
+| WiFi | Scan for WiFi networks and establish a connection. |
+| Metrics | Performance, memory utilization, and disk usage statistics. |
 
 ## CI/CD
 
