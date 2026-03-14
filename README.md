@@ -58,9 +58,6 @@ Most dependencies listed in [Building](#building) can be installed via `apt`. Th
 
 ### ONNX runtime
 
-> [!IMPORTANT]
-> Ensure `docker` is installed on your system.
-
 Compiling inside a docker container on a fast machine is recommended over compiling on the SBC itself. A precompiled version can be found under `build/libs-precompiled/`; if you prefer using that you can skip step 1 and adjust the folder paths accordingly for step 2. 
 
 **1. Compile the ONNX runtime for the Pi**
