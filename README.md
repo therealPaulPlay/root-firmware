@@ -54,9 +54,11 @@ Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer`, an
 > Using an SSH key for development instead of a password is significantly more convenient.
 > Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it over using `ssh-copy-id observer@ROOT-Observer.local`.
 
+### Installing dependencies
+
 Most dependencies listed in [Building](#building) can be installed via `apt`. The ones that require manual setup are explained below.
 
-### ONNX runtime
+#### ONNX runtime
 
 Compiling inside a docker container on a fast machine is recommended over compiling on the SBC itself. A precompiled binary can be found under `build/libs-precompiled/`; if you prefer using that you can skip step 1 and adjust the folder paths accordingly for step 2. 
 
@@ -98,7 +100,7 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib
 
 This script copies all output files over to the Pi, sets up the symlink for `onnxruntime.so`, and updates the dynamic linker cache.
 
-### OpenH264
+#### OpenH264
 
 A precompiled binary from [OpenH264 GitHub](https://github.com/cisco/openh264/releases) is included in `build/libs-precompiled/`. Use the script below to set it up.
 
