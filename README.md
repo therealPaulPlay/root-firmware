@@ -16,7 +16,7 @@ The ROOT Connect web and mobile app lets you connect to paired cameras, stream v
 
 Please refer to [this installation guide](https://rootprivacy.com/blog/building-your-own-security-camera), where you can find download links for the latest prebuilt images.
 
-### Supported Raspberry Pi models:
+### Supported Raspberry Pi models
 
 - Pi Zero 2w
 
@@ -29,8 +29,8 @@ Contributions are welcome. For inquiries, please reach out via [email](mailto:pa
 **Build dependency:** [Go](https://go.dev/doc/install)
 
 **Runtime dependencies:**
-- ONNX Runtime (binary found in `build/libs-precompiled/`, see [Installing the ONNX runtime on the Pi](#installing-the-onnx-runtime-on-the-pi))
-- OpenH264 (binary found in `build/libs-precompiled/`, see [Installing OpenH264 on the Pi](#installing-openh264-on-the-pi))
+- ONNX Runtime (see [Installing ONNX runtime](#onnx-runtime))
+- OpenH264 (see [Installing OpenH264](#openh264))
 - FFmpeg
 - rpicam-apps
 - BlueZ
@@ -48,32 +48,20 @@ The version is injected at build time via `-ldflags`. Without it, the version de
 
 ## Deploying to a Pi for development
 
-Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer` and install `golang-go`.
+Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer`, and ensure SSH is enabled.
 
 > [!TIP]
-> Using an SSH key for development instead of a password is significantly more convenient. 
-> Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it over using `ssh-copy-id observer@ROOT-Observer local`. 
+> Using an SSH key for development instead of a password is significantly more convenient.
+> Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it over using `ssh-copy-id observer@ROOT-Observer.local`.
 
-```bash
-./deploy.sh
-```
-
-This syncs the source to `/home/observer/firmware-repository`, builds on the Pi, copies the binary to `/home/observer/root-firmware`, and auto-starts the firmware service via systemd.
-
-Check if running:
-
-```bash
-ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
-```
-
-To build and run the firmware using this script, you need to install all necessary dependencies mentioned under [Building](#building). Most of them can be installed using the `apt` package manager. For the remaining ones, please follow the steps below.
+Most dependencies listed in [Building](#building) can be installed via `apt`. The ones that require manual setup are explained below.
 
 ### ONNX runtime
 
 > [!IMPORTANT]
 > Ensure `docker` is installed on your system.
 
-Compiling inside a docker container on a fast machine is recommended over compiling on the SBC itself.
+Compiling inside a docker container on a fast machine is recommended over compiling on the SBC itself. A precompiled version can be found under `build/libs-precompiled/`; if you prefer using that you can skip step 1 and adjust the folder paths accordingly for step 2. 
 
 **1. Compile the ONNX runtime for the Pi**
 
@@ -113,7 +101,7 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libonnxruntime.so* /usr/local/lib
 
 This script copies all output files over to the Pi, sets up the symlink for `onnxruntime.so`, and updates the dynamic linker cache.
 
-### Installing OpenH264 on the Pi
+### OpenH264
 
 A precompiled binary from [OpenH264 GitHub](https://github.com/cisco/openh264/releases) is included in `build/libs-precompiled/`. Use the script below to set it up.
 
@@ -123,6 +111,20 @@ scp build/libs-precompiled/libopenh264-2.5.1-linux-arm64.7.so observer@ROOT-Obse
 ssh observer@ROOT-Observer.local 'sudo mv /tmp/libopenh264-2.5.1-linux-arm64.7.so /usr/local/lib/ && \
   sudo ln -sf /usr/local/lib/libopenh264-2.5.1-linux-arm64.7.so /usr/local/lib/libopenh264.so && \
   sudo ldconfig'
+```
+
+### Deploy script
+
+```bash
+./deploy.sh
+```
+
+This syncs the source to `~/firmware-repository`, builds on the Pi, copies the binary to `~/root-firmware`, and auto-starts the firmware service via systemd.
+
+Check if running:
+
+```bash
+ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 ```
 
 ## Package overview
