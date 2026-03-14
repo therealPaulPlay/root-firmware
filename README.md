@@ -48,10 +48,12 @@ The version is injected at build time via `-ldflags`. Without it, the version de
 
 ## Deploying to a Pi for development
 
-Prerequisites: Create a user `observer`, set the hostname to `ROOT-Observer`, and ensure SSH is enabled.
+### Prerequisites
+
+Create a user `observer`, set the hostname to `ROOT-Observer`, and ensure SSH is enabled.
 
 > [!TIP]
-> Using an SSH key for development instead of a password is significantly more convenient.
+> Using an SSH key instead of a password is significantly more convenient.
 > Create one using `ssh-keygen -t ed25519 -C "your_email@example.com"` and copy it over using `ssh-copy-id observer@ROOT-Observer.local`.
 
 ### Installing dependencies
