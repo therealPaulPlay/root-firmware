@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,8 +99,13 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
+	updateURL := "https://" + relayDomainStr + firmwareEndpoint
+	if globals.HardwareModel != "" {
+		updateURL += "?hardware=" + url.PathEscape(globals.HardwareModel)
+	}
+
 	client := &http.Client{Timeout: updateCheckTimeout}
-	resp, err := client.Get("https://" + relayDomainStr + firmwareEndpoint)
+	resp, err := client.Get(updateURL)
 	if err != nil {
 		log.Printf("Updater: Failed to check for updates: %v", err)
 		return

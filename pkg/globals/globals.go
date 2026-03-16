@@ -1,9 +1,28 @@
 package globals
 
-import "time"
+import (
+	"log"
+	"os"
+	"strings"
+	"time"
+)
 
 // FirmwareVersion is set at build time via -ldflags
 var FirmwareVersion = "dev"
+
+// HardwareModel is set at startup, e.g. "Raspberry Pi Zero 2 W Rev 1.0"
+var HardwareModel string
+
+// init runs automatically when the package is loaded
+func init() {
+	// Read hardware model from device tree
+	data, err := os.ReadFile("/proc/device-tree/model")
+	if err != nil {
+		log.Printf("Globals: Could not read hardware model: %v", err)
+		return
+	}
+	HardwareModel = strings.TrimRight(string(data), "\x00")
+}
 
 // Camera
 const CameraFramerate = 15      // Frames per second
