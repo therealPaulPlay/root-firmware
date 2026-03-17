@@ -550,6 +550,10 @@ func handleStartStream(ctx *HandlerContext, payload []byte) {
 		}
 	}
 
+	// Acknowledge stream start before starting goroutines
+	// since they might synchronously return the init frame
+	SendEncryptedSuccess(ctx, MsgStartStream, nil)
+
 	// Start streaming video to this client
 	StartVideoStreamForClient(ctx, stream, MsgStreamVideoChunk)
 
@@ -562,8 +566,6 @@ func handleStartStream(ctx *HandlerContext, payload []byte) {
 			StartAudioStreamForClient(ctx, audioStream)
 		}
 	}
-
-	SendEncryptedSuccess(ctx, MsgStartStream, nil)
 }
 
 // If clients do not send this, stream will be stopped after 5s (recommended interval is 2s)

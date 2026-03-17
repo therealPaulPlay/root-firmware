@@ -355,21 +355,8 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 		return nil, fmt.Errorf("video stream already active")
 	}
 
-	// Create channel consumer for raw H.264
-	videoCh := make(chan []byte, 50)
-	r.videoBroadcast.addConsumer(videoCh)
-	r.videoStreamCh = videoCh
-
 	// Create pipe for ffmpeg
 	reader, writer := io.Pipe()
-
-	// Goroutine to drain channel into pipe for ffmpeg
-	go func() {
-		for data := range videoCh {
-			writer.Write(data)
-		}
-		writer.Close()
-	}()
 
 	// Convert H.264 to fragmented MP4
 	cmd := exec.Command("ffmpeg",
@@ -386,16 +373,44 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 
 	outputReader, err := cmd.StdoutPipe()
 	if err != nil {
-		r.videoBroadcast.removeConsumer(videoCh)
 		writer.Close()
 		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
-		r.videoBroadcast.removeConsumer(videoCh)
 		writer.Close()
 		return nil, err
 	}
+
+	// Grab the latest keyframe before subscribing
+	r.videoBroadcast.frameMu.RLock()
+	keyframe := r.videoBroadcast.latestFrame
+	r.videoBroadcast.frameMu.RUnlock()
+
+	// Register consumer (for raw h264) after ffmpeg starts to avoid dropped chunks during startup
+	videoCh := make(chan []byte, 50)
+	r.videoStreamCh = videoCh
+
+	go func() {
+		// Seed ffmpeg with the keyframe (blocks until ffmpeg reads it)
+		if len(keyframe) > 0 {
+			writer.Write(keyframe)
+		}
+		// Atomically check-and-register to avoid race with StopVideoStream
+		r.mu.Lock()
+		if r.videoStreamCh != videoCh {
+			r.mu.Unlock()
+			writer.Close()
+			return
+		}
+		r.videoBroadcast.addConsumer(videoCh)
+		r.mu.Unlock()
+
+		for data := range videoCh {
+			writer.Write(data)
+		}
+		writer.Close()
+	}()
 
 	// Cleanup when ffmpeg exits
 	go func() {
