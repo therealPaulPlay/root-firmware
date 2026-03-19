@@ -31,7 +31,6 @@ Contributions are welcome. For inquiries, please reach out via [email](mailto:pa
 **Runtime dependencies:**
 - ONNX Runtime (see [Installing ONNX runtime](#onnx-runtime))
 - OpenH264 (see [Installing OpenH264](#openh264))
-- FFmpeg
 - rpicam-apps
 - BlueZ
 - RAUC (only needed for OTA updates)

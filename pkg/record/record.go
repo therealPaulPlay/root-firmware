@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"os"
 	"os/exec"
 	"regexp"
 	"sync"
@@ -98,12 +99,6 @@ var once sync.Once
 func Init() error {
 	var initErr error
 	once.Do(func() {
-		for _, cmd := range []string{"rpicam-vid", "ffmpeg"} {
-			if _, err := exec.LookPath(cmd); err != nil {
-				initErr = fmt.Errorf("ffmpeg and/or rpicam-vid are missing (need to install via apt!)")
-				return
-			}
-		}
 		if err := initOpenH264(); err != nil {
 			initErr = fmt.Errorf("failed to load OpenH264: %w", err)
 			return
@@ -114,10 +109,6 @@ func Init() error {
 			initErr = fmt.Errorf("failed to create H.264 decoder: %w", err)
 			return
 		}
-
-		// Warm up ffmpeg with h264 demuxer + fmp4 muxer (same pipeline as streaming)
-		exec.Command("ffmpeg", "-f", "lavfi", "-i", "testsrc=d=0.1:r=1", "-c:v", "libx264",
-			"-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-y", "/dev/null").Run()
 
 		instance = &Recorder{
 			decoder:        dec,
@@ -355,71 +346,39 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 		return nil, fmt.Errorf("video stream already active")
 	}
 
-	// Create pipe for ffmpeg
-	reader, writer := io.Pipe()
-
-	// Convert H.264 to fragmented MP4
-	cmd := exec.Command("ffmpeg",
-		"-fflags", "+nobuffer",
-		"-flags", "low_delay",
-		"-f", "h264", "-i", "pipe:0",
-		"-c:v", "copy",
-		"-f", "mp4",
-		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-		"-frag_duration", "200000",
-		"pipe:1",
-	)
-	cmd.Stdin = reader
-
-	outputReader, err := cmd.StdoutPipe()
+	// os.Pipe gives a real kernel-buffered pipe (~64KB), so muxer writes
+	// return immediately without blocking on the reader — unlike io.Pipe
+	// which has zero buffering and would block the broadcast goroutine
+	pr, pw, err := os.Pipe()
 	if err != nil {
-		writer.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed to create pipe: %w", err)
 	}
+	muxer := newFMP4Muxer(pw)
 
-	if err := cmd.Start(); err != nil {
-		writer.Close()
-		return nil, err
-	}
-
-	// Grab the latest keyframe before subscribing
+	// Seed init segment (ftyp+moov) from latest keyframe before subscribing
 	r.videoBroadcast.frameMu.RLock()
 	keyframe := r.videoBroadcast.latestFrame
 	r.videoBroadcast.frameMu.RUnlock()
+	if len(keyframe) > 0 {
+		muxer.SeedKeyframe(keyframe)
+	}
 
-	// Register consumer (for raw h264) after ffmpeg starts to avoid dropped chunks during startup
 	videoCh := make(chan []byte, 50)
 	r.videoStreamCh = videoCh
+	r.videoBroadcast.addConsumer(videoCh)
 
 	go func() {
-		// Seed ffmpeg with the keyframe (blocks until ffmpeg reads it)
-		if len(keyframe) > 0 {
-			writer.Write(keyframe)
-		}
-		// Atomically check-and-register to avoid race with StopVideoStream
-		r.mu.Lock()
-		if r.videoStreamCh != videoCh {
-			r.mu.Unlock()
-			writer.Close()
-			return
-		}
-		r.videoBroadcast.addConsumer(videoCh)
-		r.mu.Unlock()
-
 		for data := range videoCh {
-			writer.Write(data)
+			if _, err := muxer.Write(data); err != nil {
+				break
+			}
 		}
-		writer.Close()
-	}()
-
-	// Cleanup when ffmpeg exits
-	go func() {
-		cmd.Wait()
-		r.videoBroadcast.removeConsumer(videoCh)
+		muxer.Flush()
+		pw.Close()
 	}()
 
 	log.Println("Recorder: Started video streaming")
-	return outputReader, nil
+	return pr, nil
 }
 
 func (r *Recorder) StopVideoStream() error {
@@ -436,8 +395,8 @@ func (r *Recorder) StopVideoStream() error {
 }
 
 // StartRecording marks the start of a recording
-// The ring buffer continuously captures GOPs – On StopRecording, the buffered
-// data is muxed to MP4 to ensure a gapless recording (ffmpeg fails if any data is missing or duplicate)
+// The ring buffer continuously captures GOPs – on StopRecording, the buffered
+// data is muxed to MP4 to ensure a gapless recording
 func (r *Recorder) StartRecording(outputPath string, withLookback bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

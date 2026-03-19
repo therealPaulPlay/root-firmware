@@ -4,72 +4,17 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"os/exec"
-	"sync"
+	"os"
 	"time"
+
+	aac "github.com/gen2brain/aac-go"
+
+	mp4aac "github.com/Eyevinn/mp4ff/aac"
+	"github.com/Eyevinn/mp4ff/mp4"
 
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/storage"
 )
-
-// Ring buffer capacities derived from max recording + lookback durations
-var (
-	maxBufferDuration = globals.MaxRecordDuration + globals.LookbackDuration + 5*time.Second // headroom
-	gopsPerSecond     = globals.CameraFramerate / globals.CameraGOPSize
-	audioChunksPerSec = (globals.AudioSampleRate * 2) / globals.AudioChunkSize // S16_LE mono = 2 bytes/sample
-	videoRingCapacity = int(maxBufferDuration.Seconds())*gopsPerSecond + 10
-	audioRingCapacity = int(maxBufferDuration.Seconds())*audioChunksPerSec + 10
-)
-
-// lookbackEntry holds a timestamped chunk of video (complete GOP) or audio (raw PCM)
-type lookbackEntry struct {
-	data      []byte
-	timestamp time.Time
-}
-
-// lookbackBuffer is a fixed-capacity circular buffer that retains recent entries
-type lookbackBuffer struct {
-	mu       sync.Mutex
-	entries  []lookbackEntry
-	head     int
-	count    int
-	capacity int
-}
-
-func newLookbackBuffer(capacity int) *lookbackBuffer {
-	return &lookbackBuffer{entries: make([]lookbackEntry, capacity), capacity: capacity}
-}
-
-func (lb *lookbackBuffer) push(data []byte) {
-	lb.mu.Lock()
-	copied := make([]byte, len(data))
-	copy(copied, data)
-	lb.entries[lb.head] = lookbackEntry{data: copied, timestamp: time.Now()}
-	lb.head = (lb.head + 1) % lb.capacity
-	if lb.count < lb.capacity {
-		lb.count++
-	}
-	lb.mu.Unlock()
-}
-
-// flush returns entries from the last maxAge, oldest first.
-// Returned entries reference the ring's byte slices directly — callers must
-// consume them before the ring overwrites those slots (~28s of headroom).
-func (lb *lookbackBuffer) flush(maxAge time.Duration) []lookbackEntry {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
-	cutoff := time.Now().Add(-maxAge)
-	result := make([]lookbackEntry, 0, lb.count)
-	start := (lb.head - lb.count + lb.capacity) % lb.capacity
-	for i := 0; i < lb.count; i++ {
-		e := lb.entries[(start+i)%lb.capacity]
-		if e.timestamp.After(cutoff) {
-			result = append(result, e)
-		}
-	}
-	return result
-}
 
 // muxJob represents a recording that needs to be muxed to MP4/M4A and saved
 type muxJob struct {
@@ -83,63 +28,183 @@ type muxJob struct {
 	detection    *storage.DetectionResult
 }
 
-// muxWorker processes mux jobs serially — one ffmpeg at a time to avoid CPU contention on the Pi
+// muxWorker processes mux jobs serially to avoid CPU contention on the Pi
 func (r *Recorder) muxWorker() {
 	for job := range r.muxQueue {
-		if err := r.muxVideo(job.videoEntries, job.outputPath, job.duration); err != nil {
+		if err := muxVideo(job.videoEntries, job.outputPath, job.duration); err != nil {
 			log.Printf("Recorder: Skipping save for %s due to mux failure", job.outputPath)
 			continue
 		}
-		r.muxAudio(job.audioEntries, job.videoEntries[0].timestamp, job.outputPath)
+		muxAudio(job.audioEntries, job.videoEntries[0].timestamp, job.outputPath)
 		storage.Get().SaveRecording(job.eventID, job.outputPath, job.duration, job.eventType, job.preview, job.detection)
 	}
 }
 
-// muxVideo writes H.264 GOPs to an MP4 file using ffmpeg copy mode
-func (r *Recorder) muxVideo(entries []lookbackEntry, outputPath string, duration float64) error {
+// muxVideo writes H.264 GOPs to a fragmented MP4 file
+func muxVideo(entries []lookbackEntry, outputPath string, duration float64) error {
 	if len(entries) == 0 {
 		return fmt.Errorf("no video entries")
 	}
 
-	var buf bytes.Buffer
-	for _, e := range entries {
-		buf.Write(e.data)
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create %s: %w", outputPath, err)
 	}
+	defer f.Close()
 
-	log.Printf("Recorder: Muxing %d GOPs (%.2fs, %dKB) to %s", len(entries), duration, buf.Len()/1024, outputPath)
-
-	cmd := exec.Command("ffmpeg", "-f", "h264", "-i", "pipe:0", "-c:v", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", outputPath)
-	cmd.Stdin = &buf
-	if err := cmd.Run(); err != nil {
-		log.Printf("Recorder: Failed to mux video: %v", err)
+	muxer := newFMP4Muxer(f)
+	totalBytes := 0
+	for _, e := range entries {
+		totalBytes += len(e.data)
+		if _, err := muxer.Write(e.data); err != nil {
+			log.Printf("Recorder: Failed to mux video: %v", err)
+			return err
+		}
+	}
+	if err := muxer.Flush(); err != nil {
 		return err
 	}
+
+	log.Printf("Recorder: Muxed %d GOPs (%.2fs, %dKB) to %s", len(entries), duration, totalBytes/1024, outputPath)
 	return nil
 }
 
-// muxAudio writes PCM audio entries to an M4A file, aligned to the video start time
-func (r *Recorder) muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) {
+// muxAudio encodes PCM audio entries to AAC and wraps in an M4A container
+func muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) {
 	if len(entries) == 0 {
 		return
 	}
 
-	var buf bytes.Buffer
+	// Audio and video chunks overlap differently before their timestamps,
+	// so align the first audio chunk's start to the video's effective start
+	gopInterval := time.Second * time.Duration(globals.CameraGOPSize) / time.Duration(globals.CameraFramerate)
+	videoActualStart := videoStart.Add(-gopInterval)
+	bytesPerSec := float64(globals.AudioSampleRate * 2)
+
+	var pcm bytes.Buffer
+	var prev lookbackEntry
 	for _, e := range entries {
-		if !e.timestamp.Before(videoStart) {
-			buf.Write(e.data)
+		if e.timestamp.Before(videoStart) {
+			prev = e
+			continue
 		}
+		if pcm.Len() == 0 {
+			chunkDur := time.Duration(len(e.data)) * time.Second / time.Duration(globals.AudioSampleRate*2)
+			audioStart := e.timestamp.Add(-chunkDur)
+			lead := videoActualStart.Sub(audioStart)
+			if lead > 0 {
+				// Audio starts before video — trim leading bytes
+				trimBytes := int(lead.Seconds()*bytesPerSec) &^ 1
+				if trimBytes < len(e.data) {
+					pcm.Write(e.data[trimBytes:])
+					continue
+				}
+			} else if lead < 0 && len(prev.data) > 0 {
+				// Audio starts after video — include tail of previous chunk
+				tailBytes := int((-lead).Seconds()*bytesPerSec) &^ 1
+				if tailBytes > 0 && tailBytes <= len(prev.data) {
+					pcm.Write(prev.data[len(prev.data)-tailBytes:])
+				}
+			}
+		}
+		pcm.Write(e.data)
+	}
+	if pcm.Len() == 0 {
+		return
+	}
+	pcmSize := pcm.Len()
+
+	// Encode PCM to ADTS AAC
+	var adtsBuf bytes.Buffer
+	enc, err := aac.NewEncoder(&adtsBuf, &aac.Options{
+		SampleRate:  globals.AudioSampleRate,
+		NumChannels: 1,
+	})
+	if err != nil {
+		log.Printf("Recorder: Failed to create AAC encoder: %v", err)
+		return
+	}
+	if err := enc.Encode(&pcm); err != nil {
+		log.Printf("Recorder: Failed to encode AAC: %v", err)
+		return
+	}
+	enc.Close()
+
+	// Parse ADTS frames into raw AAC payloads
+	adtsData := adtsBuf.Bytes()
+	var frames [][]byte
+	for len(adtsData) > 7 {
+		hdr, offset, err := mp4aac.DecodeADTSHeader(bytes.NewReader(adtsData))
+		if err != nil {
+			break
+		}
+		adtsData = adtsData[offset:] // Skip any bytes before sync word
+		frameLen := int(hdr.HeaderLength) + int(hdr.PayloadLength)
+		if frameLen > len(adtsData) {
+			break
+		}
+		frames = append(frames, adtsData[hdr.HeaderLength:frameLen])
+		adtsData = adtsData[frameLen:]
 	}
 
-	// Check buffer length since all entries might be from before videoStart
-	if buf.Len() == 0 {
+	if len(frames) == 0 {
+		log.Printf("Recorder: No AAC frames produced")
 		return
 	}
 
+	// Write M4A (fragmented MP4 with AAC audio track)
 	audioPath := outputPath[:len(outputPath)-4] + "_audio.m4a"
-	log.Printf("Recorder: Muxing audio (%dKB) to %s", buf.Len()/1024, audioPath)
-	cmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", fmt.Sprintf("%d", globals.AudioSampleRate), "-ac", "1", "-i", "pipe:0", "-c:a", "aac", "-f", "mp4", audioPath)
-	cmd.Stdin = &buf
-	if err := cmd.Run(); err != nil {
-		log.Printf("Recorder: Failed to mux audio: %v", err)
+	f, err := os.Create(audioPath)
+	if err != nil {
+		log.Printf("Recorder: Failed to create %s: %v", audioPath, err)
+		return
 	}
+	defer f.Close()
+
+	timescale := uint32(globals.AudioSampleRate)
+	samplesPerFrame := uint32(1024) // Standard AAC frame = 1024 samples
+
+	// Build mono AAC descriptor (SetAACDescriptor hardcodes stereo)
+	asc := &mp4aac.AudioSpecificConfig{
+		ObjectType:           mp4aac.AAClc,
+		ChannelConfiguration: 1, // Mono
+		SamplingFrequency:    globals.AudioSampleRate,
+	}
+	var ascBuf bytes.Buffer
+	if err := asc.Encode(&ascBuf); err != nil {
+		log.Printf("Recorder: Failed to encode AAC config: %v", err)
+		return
+	}
+
+	init := mp4.CreateEmptyInit()
+	trak := init.AddEmptyTrack(timescale, "audio", "en")
+	esds := mp4.CreateEsdsBox(ascBuf.Bytes())
+	mp4a := mp4.CreateAudioSampleEntryBox("mp4a", 1, 16, uint16(globals.AudioSampleRate), esds)
+	trak.Mdia.Minf.Stbl.Stsd.AddChild(mp4a)
+	if err := init.Encode(f); err != nil {
+		log.Printf("Recorder: Failed to write M4A init: %v", err)
+		return
+	}
+
+	// Write all frames in a single fragment
+	frag, err := mp4.CreateFragment(1, 1)
+	if err != nil {
+		log.Printf("Recorder: Failed to create M4A fragment: %v", err)
+		return
+	}
+	var decodeTime uint64
+	for _, frame := range frames {
+		frag.AddFullSample(mp4.FullSample{
+			Sample:     mp4.NewSample(mp4.SyncSampleFlags, samplesPerFrame, uint32(len(frame)), 0),
+			DecodeTime: decodeTime,
+			Data:       frame,
+		})
+		decodeTime += uint64(samplesPerFrame)
+	}
+	if err := frag.Encode(f); err != nil {
+		log.Printf("Recorder: Failed to write M4A fragment: %v", err)
+		return
+	}
+
+	log.Printf("Recorder: Muxed audio (%d frames, %dKB PCM) to %s", len(frames), pcmSize/1024, audioPath)
 }

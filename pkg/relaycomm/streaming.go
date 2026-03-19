@@ -13,7 +13,7 @@ import (
 
 type stream struct {
 	ctx        *HandlerContext
-	reader     io.ReadCloser // For video (from ffmpeg)
+	reader     io.ReadCloser // For video
 	ch         chan []byte   // For audio (direct channel)
 	msgType    string
 	endCh      chan struct{}

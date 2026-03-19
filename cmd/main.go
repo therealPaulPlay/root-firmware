@@ -62,7 +62,7 @@ func main() {
 	relaycomm.Init()
 	updater.Init()
 
-	// Initialize recorder (requires ffmpeg)
+	// Initialize recorder
 	if err := record.Init(); err != nil {
 		log.Fatalf("Failed to initialize recorder: %v", err)
 	}

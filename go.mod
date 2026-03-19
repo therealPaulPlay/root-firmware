@@ -3,7 +3,9 @@ module root-firmware
 go 1.25
 
 require (
+	github.com/Eyevinn/mp4ff v0.51.0
 	github.com/fxamacker/cbor/v2 v2.9.0
+	github.com/gen2brain/aac-go v0.0.0-20230119102159-ef1e76509d21
 	github.com/go-ble/ble v0.0.0-20240122180141-8c5522f54333
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/gorilla/websocket v1.5.3
