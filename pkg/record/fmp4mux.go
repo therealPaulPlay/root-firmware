@@ -1,6 +1,7 @@
 package record
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -29,7 +30,11 @@ func newFMP4Muxer(w io.Writer) *fmp4Muxer {
 // SeedKeyframe emits the init segment (ftyp+moov) from a keyframe's SPS/PPS
 // Frame data is not emitted — stale frames would cause decoder timestamp errors
 func (m *fmp4Muxer) SeedKeyframe(data []byte) error {
-	spss, ppss := avc.GetParameterSetsFromByteStream(data)
+	return m.writeInit(avc.GetParameterSetsFromByteStream(data))
+}
+
+// writeInit creates and writes the init segment (ftyp+moov) from SPS/PPS
+func (m *fmp4Muxer) writeInit(spss, ppss [][]byte) error {
 	if len(spss) == 0 || len(ppss) == 0 {
 		return nil
 	}
@@ -38,8 +43,13 @@ func (m *fmp4Muxer) SeedKeyframe(data []byte) error {
 	if err := trak.SetAVCDescriptor("avc1", spss, ppss, true); err != nil {
 		return err
 	}
+	var buf bytes.Buffer
+	if err := init.Encode(&buf); err != nil {
+		return err
+	}
 	m.initDone = true
-	return init.Encode(m.w)
+	_, err := m.w.Write(buf.Bytes())
+	return err
 }
 
 // Write accepts raw H.264 Annex B data, flushing a fragment at each GOP boundary (SPS)
@@ -73,20 +83,15 @@ func (m *fmp4Muxer) Flush() error {
 
 	// Emit init segment on first GOP with SPS/PPS
 	if !m.initDone {
-		spss, ppss := avc.GetParameterSetsFromByteStream(gopData)
-		if len(spss) == 0 || len(ppss) == 0 {
-			return nil
-		}
-		init := mp4.CreateEmptyInit()
-		trak := init.AddEmptyTrack(fmp4Timescale, "video", "und")
-		if err := trak.SetAVCDescriptor("avc1", spss, ppss, true); err != nil {
+		if err := m.writeInit(avc.GetParameterSetsFromByteStream(gopData)); err != nil {
 			return err
 		}
-		if err := init.Encode(m.w); err != nil {
-			return err
+		if !m.initDone {
+			return nil // No SPS/PPS found
 		}
-		m.initDone = true
 	}
+
+	var buf bytes.Buffer
 
 	nalus := avc.ExtractNalusFromByteStream(gopData)
 	frag, err := mp4.CreateFragment(m.seqNum+1, 1)
@@ -128,7 +133,11 @@ func (m *fmp4Muxer) Flush() error {
 	}
 	m.seqNum++
 	m.decodeTime += uint64(len(samples)) * uint64(sampleDur)
-	return frag.Encode(m.w)
+	if err := frag.Encode(&buf); err != nil {
+		return err
+	}
+	_, err = m.w.Write(buf.Bytes())
+	return err
 }
 
 // lengthPrefix wraps a raw NALU with a 4-byte big-endian length (AVCC format)

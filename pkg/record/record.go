@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"math"
-	"os"
 	"os/exec"
 	"regexp"
 	"sync"
@@ -32,7 +31,6 @@ type Recorder struct {
 	videoStreamCh  chan []byte
 	audioCmd       *exec.Cmd
 	audioBroadcast *broadcast
-	audioStreamCh  chan []byte
 	recording      bool
 	recordPath     string
 	recordStart    time.Time
@@ -338,7 +336,7 @@ func (r *Recorder) stopMicrophone() {
 	log.Println("Recorder: Stopped audio broadcast")
 }
 
-func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
+func (r *Recorder) StartVideoStream(w io.Writer) (done chan struct{}, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -346,14 +344,7 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 		return nil, fmt.Errorf("video stream already active")
 	}
 
-	// os.Pipe gives a real kernel-buffered pipe (~64KB), so muxer writes
-	// return immediately without blocking on the reader — unlike io.Pipe
-	// which has zero buffering and would block the broadcast goroutine
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pipe: %w", err)
-	}
-	muxer := newFMP4Muxer(pw)
+	muxer := newFMP4Muxer(w)
 
 	// Seed init segment (ftyp+moov) from latest keyframe before subscribing
 	r.videoBroadcast.frameMu.RLock()
@@ -363,22 +354,21 @@ func (r *Recorder) StartVideoStream() (io.ReadCloser, error) {
 		muxer.SeedKeyframe(keyframe)
 	}
 
-	videoCh := make(chan []byte, 50)
+	videoCh := make(chan []byte, 50) // Buffer up to 50 chunks (~8s)
 	r.videoStreamCh = videoCh
 	r.videoBroadcast.addConsumer(videoCh)
 
+	done = make(chan struct{})
 	go func() {
+		defer close(done)
 		for data := range videoCh {
-			if _, err := muxer.Write(data); err != nil {
-				break
-			}
+			muxer.Write(data)
 		}
-		muxer.Flush()
-		pw.Close()
+		// No Flush — partial GOP on teardown would poison initSegment cache
 	}()
 
 	log.Println("Recorder: Started video streaming")
-	return pr, nil
+	return done, nil
 }
 
 func (r *Recorder) StopVideoStream() error {
@@ -547,27 +537,19 @@ func (r *Recorder) StartAudioStream() (chan []byte, error) {
 	if r.audioCmd == nil {
 		return nil, fmt.Errorf("microphone not available")
 	}
-	if r.audioStreamCh != nil {
-		return nil, fmt.Errorf("audio stream already active")
-	}
 
-	ch := make(chan []byte, 100) // Buffer 100 chunks (~400KB)
+	ch := make(chan []byte, 20) // Buffer up to 20 chunks (~10s)
 	r.audioBroadcast.addConsumer(ch)
-	r.audioStreamCh = ch
 
 	log.Println("Recorder: Started audio streaming")
 	return ch, nil
 }
 
-func (r *Recorder) StopAudioStream() error {
+func (r *Recorder) StopAudioStream(ch chan []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.audioStreamCh != nil {
-		r.audioBroadcast.removeConsumer(r.audioStreamCh)
-	}
-	r.audioStreamCh = nil
+	r.audioBroadcast.removeConsumer(ch)
 
 	log.Println("Recorder: Stopped audio streaming")
-	return nil
 }

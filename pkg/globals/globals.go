@@ -35,6 +35,9 @@ const CameraBitrate = 3_000_000 // Bits ber second
 const AudioSampleRate = 48000    // Hz
 const AudioChunkSize = 48 * 1024 // Bytes per audio chunk (~500ms at 48kHz mono S16_LE)
 
+// Streaming
+const MaxConcurrentStreams = 3 // Max simultaneous stream viewers, needs to be balanced with buffers, channel sizes, relay rate limits, incoming WS rate limit etc.
+
 // Recording
 const MaxRecordDuration = 30 * time.Second // Max recording duration (higher durations take more memory)
 const LookbackDuration = 8 * time.Second   // Pre-event buffer included in recordings (must be lower than the max recording duration)

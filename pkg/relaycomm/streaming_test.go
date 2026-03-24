@@ -1,119 +1,105 @@
 package relaycomm
 
 import (
-	"bytes"
-	"encoding/binary"
-	"io"
 	"testing"
+	"time"
 )
 
-func TestReadMP4Box_ValidBox(t *testing.T) {
-	// Create a valid MP4 box: 4 bytes size (big endian) + 4 bytes type + payload
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(12)) // size = 12 (8 header + 4 payload)
-	buf.WriteString("ftyp")                         // box type
-	buf.WriteString("test")                         // payload
-
-	box, err := readMP4Box(buf)
-	if err != nil {
-		t.Fatalf("readMP4Box() error = %v", err)
+func newTestStream() *stream {
+	s := &stream{
+		ch:    make(chan []byte, 3),
+		endCh: make(chan struct{}),
 	}
+	s.wg.Go(func() { <-s.endCh })
+	return s
+}
 
-	if len(box) != 12 {
-		t.Errorf("box length = %d, want 12", len(box))
-	}
-	if string(box[4:8]) != "ftyp" {
-		t.Errorf("box type = %s, want ftyp", string(box[4:8]))
+func newTestManager() *streamManager {
+	return &streamManager{
+		video: make(map[string]*stream),
+		audio: make(map[string]*stream),
 	}
 }
 
-func TestReadMP4Box_MinimalBox(t *testing.T) {
-	// Box with just header (size=8), no payload
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(8))
-	buf.WriteString("moov")
+func TestWriteFansOutToViewers(t *testing.T) {
+	sm := newTestManager()
+	s1 := newTestStream()
+	s2 := newTestStream()
+	defer func() { close(s1.endCh); close(s2.endCh) }()
 
-	box, err := readMP4Box(buf)
-	if err != nil {
-		t.Fatalf("readMP4Box() error = %v", err)
+	sm.video["a"] = s1
+	sm.video["b"] = s2
+	sm.Write([]byte("segment1"))
+
+	if got := string(<-s1.ch); got != "segment1" {
+		t.Errorf("viewer a: got %q, want segment1", got)
 	}
-
-	if len(box) != 8 {
-		t.Errorf("box length = %d, want 8", len(box))
-	}
-}
-
-func TestReadMP4Box_SizeTooSmall(t *testing.T) {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(4)) // size < 8 is invalid
-	buf.WriteString("test")
-
-	_, err := readMP4Box(buf)
-	if err != io.ErrUnexpectedEOF {
-		t.Errorf("readMP4Box() error = %v, want io.ErrUnexpectedEOF", err)
+	if got := string(<-s2.ch); got != "segment1" {
+		t.Errorf("viewer b: got %q, want segment1", got)
 	}
 }
 
-func TestReadMP4Box_ExceedsSafetyLimit(t *testing.T) {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(11*1024*1024)) // 11MB > 10MB limit
-	buf.WriteString("mdat")
+func TestWriteCachesInitSegment(t *testing.T) {
+	sm := newTestManager()
+	sm.Write([]byte("init"))
+	sm.Write([]byte("fragment"))
 
-	_, err := readMP4Box(buf)
-	if err == nil {
-		t.Error("readMP4Box() should error when size exceeds safety limit")
+	if string(sm.initSegment) != "init" {
+		t.Errorf("init segment = %q, want 'init'", sm.initSegment)
 	}
 }
 
-func TestReadMP4Box_IncompleteHeader(t *testing.T) {
-	buf := bytes.NewBuffer([]byte{0x00, 0x00, 0x00}) // Only 3 bytes
+func TestWriteDropsWhenChannelFull(t *testing.T) {
+	sm := newTestManager()
+	s := newTestStream()
+	defer close(s.endCh)
 
-	_, err := readMP4Box(buf)
-	if err != io.ErrUnexpectedEOF {
-		t.Errorf("readMP4Box() error = %v, want io.ErrUnexpectedEOF", err)
+	sm.video["a"] = s
+	sm.Write([]byte("1"))
+	sm.Write([]byte("2"))
+	sm.Write([]byte("3"))
+
+	// 4th write must not block (channel buffer is 3)
+	done := make(chan struct{})
+	go func() { sm.Write([]byte("4")); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Write blocked on full channel")
 	}
 }
 
-func TestReadMP4Box_IncompletePayload(t *testing.T) {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(100)) // Claims 100 bytes
-	buf.WriteString("mdat")
-	buf.WriteString("short") // But only 5 bytes of payload
+func TestInitSegmentResetBetweenSessions(t *testing.T) {
+	sm := newTestManager()
 
-	_, err := readMP4Box(buf)
-	if err != io.ErrUnexpectedEOF {
-		t.Errorf("readMP4Box() error = %v, want io.ErrUnexpectedEOF", err)
+	// Session 1: muxer writes init
+	sm.Write([]byte("init-v1"))
+	if string(sm.initSegment) != "init-v1" {
+		t.Fatalf("session 1: initSegment = %q, want init-v1", sm.initSegment)
+	}
+
+	// Teardown clears init
+	sm.initSegment = nil
+
+	// Session 2: new muxer writes fresh init
+	sm.Write([]byte("init-v2"))
+	if string(sm.initSegment) != "init-v2" {
+		t.Errorf("session 2: initSegment = %q, want init-v2", sm.initSegment)
 	}
 }
 
-func TestReadMP4Box_MultipleBoxes(t *testing.T) {
-	buf := new(bytes.Buffer)
 
-	// First box
-	binary.Write(buf, binary.BigEndian, uint32(12))
-	buf.WriteString("ftyp")
-	buf.WriteString("mp41")
+func TestWriteCopiesData(t *testing.T) {
+	sm := newTestManager()
+	s := newTestStream()
+	defer close(s.endCh)
 
-	// Second box
-	binary.Write(buf, binary.BigEndian, uint32(16))
-	buf.WriteString("moov")
-	buf.WriteString("testdata")
+	sm.video["a"] = s
+	data := []byte("hello")
+	sm.Write(data)
+	data[0] = 'X'
 
-	// Read first box
-	box1, err := readMP4Box(buf)
-	if err != nil {
-		t.Fatalf("first readMP4Box() error = %v", err)
-	}
-	if string(box1[4:8]) != "ftyp" {
-		t.Errorf("first box type = %s, want ftyp", string(box1[4:8]))
-	}
-
-	// Read second box
-	box2, err := readMP4Box(buf)
-	if err != nil {
-		t.Fatalf("second readMP4Box() error = %v", err)
-	}
-	if string(box2[4:8]) != "moov" {
-		t.Errorf("second box type = %s, want moov", string(box2[4:8]))
+	if got := string(<-s.ch); got != "hello" {
+		t.Errorf("got %q after mutation, want 'hello'", got)
 	}
 }

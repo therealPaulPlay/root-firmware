@@ -529,21 +529,6 @@ func handleGetThumbnail(ctx *HandlerContext, payload []byte) {
 }
 
 func handleStartStream(ctx *HandlerContext, payload []byte) {
-	// End existing streams (if any are active) and notify if a different device was streaming
-	errorMsg := ""
-	if currentViewer := GetVideoStreamDeviceID(); currentViewer != "" && currentViewer != ctx.DeviceID {
-		errorMsg = "Another viewer started streaming"
-	}
-	EndVideoStream(errorMsg)
-	EndAudioStream(errorMsg)
-
-	// Start fresh video stream
-	stream, err := record.Get().StartVideoStream()
-	if err != nil {
-		SendEncryptedError(ctx, MsgStartStream, ErrInternalError, err.Error())
-		return
-	}
-
 	if val, ok := config.Get().GetKey("playRecordingSound"); ok {
 		if b, ok := val.(bool); ok && b {
 			sfx.Get().PlayStream()
@@ -555,7 +540,7 @@ func handleStartStream(ctx *HandlerContext, payload []byte) {
 	SendEncryptedSuccess(ctx, MsgStartStream, nil)
 
 	// Start streaming video to this client
-	StartVideoStreamForClient(ctx, stream, MsgStreamVideoChunk)
+	StartVideoStreamForClient(ctx, MsgStreamVideoChunk)
 
 	// Start audio stream if microphone is enabled
 	if record.MicEnabled() {
@@ -570,7 +555,7 @@ func handleStartStream(ctx *HandlerContext, payload []byte) {
 
 // If clients do not send this, stream will be stopped after 5s (recommended interval is 2s)
 func handleContinueStream(ctx *HandlerContext, payload []byte) {
-	UpdateStreamActivity()
+	UpdateStreamActivity(ctx.DeviceID)
 	SendEncryptedSuccess(ctx, MsgContinueStream, nil)
 }
 

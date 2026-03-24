@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,10 +16,9 @@ import (
 )
 
 const (
-	initialReconnectDelay = time.Second
-	maxReconnectDelay     = 10 * time.Second
-	dialTimeout           = 8 * time.Second
-	maxMessagesPerSecond  = 25
+	maxReconnectDelay    = 10 * time.Second
+	dialTimeout          = 8 * time.Second
+	maxMessagesPerSecond = 25
 )
 
 type Message struct {
@@ -30,13 +30,14 @@ type Message struct {
 }
 
 type RelayComm struct {
-	handlers  map[string]func(Message)
-	sendChan  chan Message
-	stopChan  chan struct{}
-	doneChan  chan struct{}
-	rateMu    sync.Mutex
-	rateCount int
-	rateReset time.Time
+	handlers        map[string]func(Message)
+	sendChan        chan Message // Most messages (prioritized)
+	lowPrioSendChan chan Message // Low priority data (stream, recordings..) — only sent when sendChan is empty (lower priority)
+	stopChan        chan struct{}
+	doneChan        chan struct{}
+	rateMu          sync.Mutex
+	rateCount       int
+	rateReset       time.Time
 }
 
 var instance *RelayComm
@@ -84,7 +85,8 @@ func (r *RelayComm) Start() {
 	r.rateReset = time.Now()
 	r.rateMu.Unlock()
 
-	r.sendChan = make(chan Message, 50)
+	r.sendChan = make(chan Message, 25) // Keep buffer low, don't overwhelm WS
+	r.lowPrioSendChan = make(chan Message, 25)
 	r.stopChan = make(chan struct{})
 	r.doneChan = make(chan struct{})
 
@@ -101,15 +103,20 @@ func (r *RelayComm) Stop() {
 	r.stopChan = nil
 	r.doneChan = nil
 	r.sendChan = nil
+	r.lowPrioSendChan = nil
 }
 
-// Send queues a message. Returns error if queue full or not connected
+// Send queues a message, routing stream chunks to a lower-priority channel
 func (r *RelayComm) Send(msg Message) error {
-	if r.sendChan == nil {
+	ch := r.sendChan
+	if strings.HasPrefix(msg.Type, MsgStreamVideoChunk) || strings.HasPrefix(msg.Type, MsgStreamAudioChunk) || strings.HasPrefix(msg.Type, MsgGetRecording) {
+		ch = r.lowPrioSendChan
+	}
+	if ch == nil {
 		return fmt.Errorf("not connected")
 	}
 	select {
-	case r.sendChan <- msg:
+	case ch <- msg:
 		return nil
 	default:
 		return fmt.Errorf("send queue full")
@@ -120,7 +127,7 @@ func (r *RelayComm) Send(msg Message) error {
 func (r *RelayComm) run(relayDomain string) {
 	defer close(r.doneChan)
 
-	delay := initialReconnectDelay
+	delay := time.Second
 	for {
 		select {
 		case <-r.stopChan:
@@ -139,7 +146,7 @@ func (r *RelayComm) run(relayDomain string) {
 			}
 		}
 
-		delay = initialReconnectDelay
+		delay = time.Second
 		updater.MarkRelayConnected()
 		r.handleConnection(conn)
 		conn.Close()
@@ -147,7 +154,7 @@ func (r *RelayComm) run(relayDomain string) {
 		select {
 		case <-r.stopChan:
 			return
-		case <-time.After(initialReconnectDelay):
+		case <-time.After(time.Second):
 		}
 	}
 }
@@ -199,28 +206,57 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 		}
 	}()
 
-	// Main loop handles sends and stop signal
+	// Write helper — on failure, close conn and wait for reader to exit
+	write := func(msg Message) bool {
+		if r.writeMsg(conn, msg) != nil {
+			conn.Close()
+			<-readDone
+			return false
+		}
+		return true
+	}
+
+	// Main loop: always drain sendChan (high priority) before lowPrioSendChan
 	for {
 		select {
 		case <-r.stopChan:
-			conn.Close() // Unblocks reader
+			conn.Close()
 			<-readDone
 			return
 		case <-readDone:
 			return
 		case msg := <-r.sendChan:
-			data, err := cbor.Marshal(msg)
-			if err != nil {
-				log.Printf("RelayComm: Failed to encode message: %v", err)
-				continue
+			if !write(msg) {
+				return
 			}
-			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
-				log.Printf("RelayComm: Send failed: %v", err)
+		case msg := <-r.lowPrioSendChan:
+			// Drain any pending high-priority message first
+			select {
+			case hi := <-r.sendChan:
+				if !write(hi) {
+					return
+				}
+			default:
 			}
-			conn.SetWriteDeadline(time.Time{})
+			if !write(msg) {
+				return
+			}
 		}
 	}
+}
+
+func (r *RelayComm) writeMsg(conn *websocket.Conn, msg Message) error {
+	data, err := cbor.Marshal(msg)
+	if err != nil {
+		log.Printf("RelayComm: Failed to encode message: %v", err)
+		return nil // Don't kill connection for marshal errors
+	}
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		log.Printf("RelayComm: Send failed: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (r *RelayComm) checkRateLimit() bool {

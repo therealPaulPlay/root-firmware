@@ -1,293 +1,245 @@
 package relaycomm
 
 import (
-	"encoding/binary"
-	"fmt"
-	"io"
 	"log"
 	"sync"
 	"time"
 
+	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
 )
 
 type stream struct {
 	ctx        *HandlerContext
-	reader     io.ReadCloser // For video
-	ch         chan []byte   // For audio (direct channel)
+	ch         chan []byte
 	msgType    string
 	endCh      chan struct{}
+	startedAt  time.Time
 	lastActive time.Time
-	onEnd      func()
 	wg         sync.WaitGroup
 }
 
 type streamManager struct {
-	mu      sync.Mutex
-	video   *stream
-	audio   *stream
-	monitor *time.Ticker
+	mu          sync.Mutex
+	muxerExited chan struct{}
+	initSegment []byte
+	video       map[string]*stream
+	audio       map[string]*stream
 }
 
-var streams = &streamManager{}
-
-func (sm *streamManager) start(ctx *HandlerContext, reader io.ReadCloser, ch chan []byte, msgType string, onEnd func(), isVideo bool) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	s := &stream{
-		ctx:        ctx,
-		reader:     reader,
-		ch:         ch,
-		msgType:    msgType,
-		endCh:      make(chan struct{}),
-		lastActive: time.Now(),
-		onEnd:      onEnd,
-	}
-
-	s.wg.Add(1)
-	if isVideo {
-		go streamVideo(s)
-		streams.video = s
-	} else {
-		go streamAudio(s)
-		streams.audio = s
-	}
-
-	sm.startMonitor()
-	log.Printf("RelayComm: Started stream for device %s (video: %v)", ctx.DeviceID, isVideo)
+var streams = &streamManager{
+	video: make(map[string]*stream),
+	audio: make(map[string]*stream),
 }
 
-func (sm *streamManager) end(isVideo bool, errorMsg string) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.endLocked(isVideo, errorMsg)
-}
-
-func (sm *streamManager) endLocked(isVideo bool, errorMsg string) {
-	s := sm.video
-	if !isVideo {
-		s = sm.audio
-	}
-
-	if s != nil {
-		close(s.endCh)
-		if s.reader != nil {
-			s.reader.Close()
-		}
-		s.wg.Wait() // Wait for stream loops to exit
-		if s.onEnd != nil {
-			s.onEnd()
-		}
-
-		if isVideo {
-			sm.video = nil
-		} else {
-			sm.audio = nil
-		}
-
-		// Notify viewer of error after cleanup
-		if errorMsg != "" {
-			SendEncryptedError(s.ctx, s.msgType, ErrStreamEnded, errorMsg)
-		}
-	}
-
-	sm.stopMonitorIfIdle()
-}
-
-func (sm *streamManager) updateActivity() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	now := time.Now()
-	if sm.video != nil {
-		sm.video.lastActive = now
-	}
-	if sm.audio != nil {
-		sm.audio.lastActive = now
-	}
-}
-
-func (sm *streamManager) updateContext(deviceID string, newCtx *HandlerContext) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	if sm.video != nil && sm.video.ctx.DeviceID == deviceID {
-		sm.video.ctx = newCtx
-	}
-	if sm.audio != nil && sm.audio.ctx.DeviceID == deviceID {
-		sm.audio.ctx = newCtx
-	}
-}
-
-func (sm *streamManager) startMonitor() {
-	if sm.monitor != nil {
-		return
-	}
-
-	sm.monitor = time.NewTicker(1 * time.Second)
+func init() {
 	go func() {
-		for range sm.monitor.C {
-			sm.mu.Lock()
-			if sm.video != nil && time.Since(sm.video.lastActive) > 10*time.Second {
-				log.Println("RelayComm: Ending video stream due to inactivity")
-				sm.endLocked(true, "")
+		for range time.Tick(2 * time.Second) {
+			streams.mu.Lock()
+			for id, v := range streams.video {
+				if time.Since(v.lastActive) > 10*time.Second {
+					log.Printf("RelayComm: Ending streams for device %s due to inactivity", id)
+					streams.endVideoLocked(id, "")
+					streams.endAudioLocked(id, "")
+				}
 			}
-			if sm.audio != nil && time.Since(sm.audio.lastActive) > 10*time.Second {
-				log.Println("RelayComm: Ending audio stream due to inactivity")
-				sm.endLocked(false, "")
-			}
-			sm.mu.Unlock()
+			streams.mu.Unlock()
 		}
 	}()
 }
 
-func (sm *streamManager) stopMonitorIfIdle() {
-	if sm.video == nil && sm.audio == nil && sm.monitor != nil {
-		sm.monitor.Stop()
-		sm.monitor = nil
+// Write implements io.Writer — called by the muxer goroutine with complete fMP4 segments
+// Fans out to all viewer channels, caching the first segment as the init segment
+func (sm *streamManager) Write(p []byte) (int, error) {
+	out := make([]byte, len(p))
+	copy(out, p)
+	sm.mu.Lock()
+	if sm.initSegment == nil {
+		sm.initSegment = out
 	}
-}
-
-func readMP4Box(r io.Reader) ([]byte, error) {
-	header := make([]byte, 8)
-	if _, err := io.ReadFull(r, header); err != nil {
-		return nil, err
-	}
-
-	size := binary.BigEndian.Uint32(header[:4])
-	if size < 8 {
-		return nil, io.ErrUnexpectedEOF
-	}
-	if size > 10*1024*1024 {
-		return nil, fmt.Errorf("MP4 box size exceeds safety limit: %d bytes", size)
-	}
-
-	boxData := make([]byte, size)
-	copy(boxData[:8], header)
-	if size > 8 {
-		if _, err := io.ReadFull(r, boxData[8:]); err != nil {
-			return nil, err
-		}
-	}
-
-	return boxData, nil
-}
-
-func streamVideo(s *stream) {
-	defer s.wg.Done()
-	var pendingBox []byte
-	chunkIndex := 0
-
-	for {
+	for _, v := range sm.video {
 		select {
-		case <-s.endCh:
-			return
+		case v.ch <- out:
 		default:
+			log.Println("RelayComm: Dropped video chunk, viewer channel full")
 		}
+	}
+	sm.mu.Unlock()
+	return len(p), nil
+}
 
-		boxData, err := readMP4Box(s.reader)
-		if err != nil {
-			select {
-			case <-s.endCh:
-				return // Stream already ended, error expected -> exit
-			default:
-			}
-			log.Printf("RelayComm: Video stream read failed, ending stream: %v", err)
-			go streams.end(true, "Video stream read failed")
-			return
-		}
+// stopStream signals a stream's sendLoop to exit and waits for it to finish
+func stopStream(s *stream) {
+	close(s.endCh)
+	s.wg.Wait()
+}
 
-		boxType := string(boxData[4:8])
-		if boxType == "ftyp" || boxType == "moof" {
-			pendingBox = boxData
-			continue
-		} else if (boxType == "moov" || boxType == "mdat") && pendingBox != nil {
-			boxData = append(pendingBox, boxData...)
-			pendingBox = nil
+func (sm *streamManager) endVideoLocked(deviceID, errorMsg string) {
+	s, ok := sm.video[deviceID]
+	if !ok {
+		return
+	}
+	delete(sm.video, deviceID)
+	stopStream(s)
+	if errorMsg != "" {
+		SendEncryptedError(s.ctx, s.msgType, ErrStreamEnded, errorMsg)
+	}
+	// Tear down shared muxer when last viewer leaves
+	// Must release mu: muxer goroutine may be in sm.Write() waiting for mu
+	// Set muxerExited=nil before unlocking so concurrent callers see muxer as absent
+	if len(sm.video) == 0 && sm.muxerExited != nil {
+		log.Printf("RelayComm: Last viewer left, tearing down muxer")
+		muxerExited := sm.muxerExited
+		sm.muxerExited = nil
+		sm.mu.Unlock()
+		record.Get().StopVideoStream()
+		<-muxerExited
+		sm.mu.Lock()
+		// Clear stale init — but only if no new muxer started during teardown
+		if sm.muxerExited == nil {
+			sm.initSegment = nil
 		}
-
-		if err := SendEncryptedSuccess(s.ctx, s.msgType, map[string]any{
-			"chunkIndex": chunkIndex,
-			"chunk":      boxData,
-		}); err != nil {
-			log.Printf("RelayComm: Video stream send failed, ending stream: %v", err)
-			go streams.end(true, "Video stream send failed")
-			return
-		}
-		chunkIndex++
 	}
 }
 
-func streamAudio(s *stream) {
+func (sm *streamManager) endAudioLocked(deviceID, errorMsg string) {
+	s, ok := sm.audio[deviceID]
+	if !ok {
+		return
+	}
+	delete(sm.audio, deviceID)
+	stopStream(s)
+	record.Get().StopAudioStream(s.ch)
+	if errorMsg != "" {
+		SendEncryptedError(s.ctx, MsgStreamAudioChunk, ErrStreamEnded, errorMsg)
+	}
+}
+
+// evictOldest kicks the longest-connected device to make room for a new viewer (Must be called with sm.mu held)
+func (sm *streamManager) evictOldest() {
+	var oldestID string
+	var oldest time.Time
+	for id, v := range sm.video {
+		if oldestID == "" || v.startedAt.Before(oldest) {
+			oldestID = id
+			oldest = v.startedAt
+		}
+	}
+	if oldestID == "" {
+		return
+	}
+	sm.endVideoLocked(oldestID, "Stream viewer limit reached")
+	sm.endAudioLocked(oldestID, "Stream viewer limit reached")
+}
+
+func sendLoop(s *stream) {
 	defer s.wg.Done()
 	chunkIndex := 0
-
 	for {
 		select {
 		case <-s.endCh:
 			return
 		case data, ok := <-s.ch:
 			if !ok {
-				select {
-				case <-s.endCh:
-					return // Stream already ended, error expected -> exit
-				default:
-				}
-				log.Println("RelayComm: Audio channel closed, ending stream")
-				go streams.end(false, "Audio channel closed")
 				return
 			}
-
 			if err := SendEncryptedSuccess(s.ctx, s.msgType, map[string]any{
 				"chunkIndex": chunkIndex,
 				"chunk":      data,
 			}); err != nil {
-				log.Printf("RelayComm: Audio stream send failed, ending stream: %v", err)
-				go streams.end(false, "Audio stream send failed")
-				return
+				if chunkIndex == 0 {
+					log.Printf("RelayComm: Failed to send init segment for %s: %v", s.ctx.DeviceID, err)
+					go func() {
+						streams.mu.Lock()
+						// Ensure this is still the most recent stream, if so, end both video and audio
+						if streams.video[s.ctx.DeviceID] == s {
+							streams.endVideoLocked(s.ctx.DeviceID, "WebSocket overwhelmed")
+							streams.endAudioLocked(s.ctx.DeviceID, "WebSocket overwhelmed")
+						}
+						streams.mu.Unlock()
+					}()
+					return
+				}
+				log.Printf("RelayComm: Dropped %s chunk message for %s: %v", s.msgType, s.ctx.DeviceID, err)
+				continue
 			}
 			chunkIndex++
 		}
 	}
 }
 
-// Exported start functions
-func StartVideoStreamForClient(ctx *HandlerContext, reader io.Reader, msgType string) {
-	streams.start(ctx, reader.(io.ReadCloser), nil, msgType, func() {
-		record.Get().StopVideoStream()
-	}, true)
+// Exported functions
+
+func StartVideoStreamForClient(ctx *HandlerContext, msgType string) {
+	streams.mu.Lock()
+	defer streams.mu.Unlock()
+
+	streams.endVideoLocked(ctx.DeviceID, "") // In case a stream is active for this device already, end it
+	if len(streams.video) >= globals.MaxConcurrentStreams {
+		streams.evictOldest()
+	}
+
+	// Start shared muxer on first viewer
+	// Must release mu because StartVideoStream calls SeedKeyframe → Write() which needs mu
+	// Set placeholder before unlocking so concurrent callers see muxer as starting
+	if streams.muxerExited == nil {
+		placeholder := make(chan struct{})
+		streams.muxerExited = placeholder
+		streams.mu.Unlock()
+		done, err := record.Get().StartVideoStream(streams)
+		streams.mu.Lock()
+		if err != nil {
+			streams.muxerExited = nil
+			log.Printf("RelayComm: Failed to start video stream: %v", err)
+			return
+		}
+		streams.muxerExited = done
+	}
+
+	now := time.Now()
+	s := &stream{ctx: ctx, ch: make(chan []byte, 3), msgType: msgType, endCh: make(chan struct{}), startedAt: now, lastActive: now}
+	if streams.initSegment != nil {
+		s.ch <- streams.initSegment
+	}
+	s.wg.Add(1)
+	streams.video[ctx.DeviceID] = s
+	go sendLoop(s)
+	log.Printf("RelayComm: Started video stream for device %s (viewers: %d)", ctx.DeviceID, len(streams.video))
 }
 
 func StartAudioStreamForClient(ctx *HandlerContext, ch chan []byte) {
-	streams.start(ctx, nil, ch, MsgStreamAudioChunk, func() {
-		record.Get().StopAudioStream()
-	}, false)
-}
-
-// Exported end functions
-func EndVideoStream(errorMsg string) {
-	streams.end(true, errorMsg)
-}
-
-func EndAudioStream(errorMsg string) {
-	streams.end(false, errorMsg)
-}
-
-// GetVideoStreamDeviceID returns the device ID of the current video stream viewer, or empty if none
-func GetVideoStreamDeviceID() string {
 	streams.mu.Lock()
 	defer streams.mu.Unlock()
-	if streams.video != nil {
-		return streams.video.ctx.DeviceID
+
+	streams.endAudioLocked(ctx.DeviceID, "") // In case a stream is active for this device already, end it
+
+	now := time.Now()
+	s := &stream{ctx: ctx, ch: ch, msgType: MsgStreamAudioChunk, endCh: make(chan struct{}), startedAt: now, lastActive: now}
+	s.wg.Add(1)
+	streams.audio[ctx.DeviceID] = s
+	go sendLoop(s)
+	log.Printf("RelayComm: Started audio stream for device %s", ctx.DeviceID)
+}
+
+func UpdateStreamActivity(deviceID string) {
+	streams.mu.Lock()
+	defer streams.mu.Unlock()
+	now := time.Now()
+	if v, ok := streams.video[deviceID]; ok {
+		v.lastActive = now
 	}
-	return ""
+	if v, ok := streams.audio[deviceID]; ok {
+		v.lastActive = now
+	}
 }
 
-// Update activity (heartbeat)
-func UpdateStreamActivity() {
-	streams.updateActivity()
-}
-
-// Update context (encryption session etc.)
 func UpdateStreamContext(deviceID string, newCtx *HandlerContext) {
-	streams.updateContext(deviceID, newCtx)
+	streams.mu.Lock()
+	defer streams.mu.Unlock()
+	if v, ok := streams.video[deviceID]; ok {
+		v.ctx = newCtx
+	}
+	if v, ok := streams.audio[deviceID]; ok {
+		v.ctx = newCtx
+	}
 }
