@@ -34,22 +34,20 @@ func main() {
 	logger.Init()
 	log.Println("Starting")
 
-	// Initialize config
-	if err := config.Init(); err != nil {
-		log.Fatalf("Failed to initialize config: %v", err)
-	}
-
 	// Extract embedded assets to /data partition
 	if err := extractAssets(); err != nil {
 		log.Fatalf("Failed to extract assets: %v", err)
 	}
 
-	// Initialize storage
+	// Initialize config and storage, other packages depend on it
+	if err := config.Init(); err != nil {
+		log.Fatalf("Failed to initialize config: %v", err)
+	}
 	if err := storage.Init(); err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
 
-	// Initialize packages where init() cannot return errors
+	// Initialize straightforward packages (not heavy / no errors)
 	devices.Init()
 	notifications.Init()
 	devices.Get().OnRemove(func(deviceID string) {
@@ -58,24 +56,23 @@ func main() {
 		}
 	})
 	metrics.Init()
-	wifi.Init()
-	relaycomm.Init()
-	updater.Init()
 
-	// Initialize recorder
-	if err := record.Init(); err != nil {
-		log.Fatalf("Failed to initialize recorder: %v", err)
-	}
-
-	// Initialize SFX
+	// Initialize SFX, recorder, and ML
 	if err := sfx.Init(); err != nil {
 		log.Printf("Warning: failed to initialize SFX: %v", err)
 	}
-
-	// Initialize ML
+	if err := record.Init(); err != nil {
+		log.Fatalf("Failed to initialize recorder: %v", err)
+	}
 	if err := ml.Init(); err != nil {
 		log.Fatalf("Failed to initialize ML: %v", err)
 	}
+
+	// Initialize connectivity
+	wifi.Init()
+	relaycomm.Init()
+	record.Get().OnMicChanged = relaycomm.SyncAudioStreams
+	updater.Init()
 
 	// Initialize pairing (BLE + helper)
 	if err := pairing.Init(); err != nil {

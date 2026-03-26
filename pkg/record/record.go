@@ -40,6 +40,7 @@ type Recorder struct {
 	audioRing      *lookbackBuffer
 	muxQueue       chan muxJob
 	videoHeartbeat atomic.Bool
+	OnMicChanged   func() // Called after microphone is enabled/disabled
 }
 
 type broadcast struct {
@@ -506,9 +507,9 @@ func (r *Recorder) CaptureViewfinderFrame(x, y int) ([]byte, error) {
 
 func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if err := config.Get().SetKey("microphoneEnabled", enabled); err != nil {
+		r.mu.Unlock()
 		return err
 	}
 
@@ -516,6 +517,7 @@ func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
 		// Start microphone if not already running
 		if r.audioCmd == nil {
 			if err := r.startMicrophone(); err != nil {
+				r.mu.Unlock()
 				log.Printf("Recorder: Failed to start microphone: %v", err)
 				return err
 			}
@@ -525,6 +527,13 @@ func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
 		if r.audioCmd != nil {
 			r.stopMicrophone()
 		}
+	}
+
+	r.mu.Unlock()
+
+	// Notify after releasing lock — callback may call StartAudioStream/StopAudioStream which need r.mu
+	if r.OnMicChanged != nil {
+		r.OnMicChanged()
 	}
 
 	return nil

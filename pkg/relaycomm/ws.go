@@ -16,9 +16,8 @@ import (
 )
 
 const (
-	maxReconnectDelay    = 10 * time.Second
-	dialTimeout          = 8 * time.Second
-	maxMessagesPerSecond = 25
+	maxReconnectDelay = 10 * time.Second
+	dialTimeout       = 8 * time.Second
 )
 
 type Message struct {
@@ -35,9 +34,7 @@ type RelayComm struct {
 	lowPrioSendChan chan Message // Low priority data (stream, recordings..) — only sent when sendChan is empty (lower priority)
 	stopChan        chan struct{}
 	doneChan        chan struct{}
-	rateMu          sync.Mutex
-	rateCount       int
-	rateReset       time.Time
+	rateLimit       rateLimiter
 }
 
 var instance *RelayComm
@@ -47,7 +44,7 @@ func Init() {
 	once.Do(func() {
 		instance = &RelayComm{
 			handlers:  make(map[string]func(Message)),
-			rateReset: time.Now(),
+			rateLimit: newRateLimiter(),
 		}
 		registerHandlers(instance)
 	})
@@ -79,11 +76,6 @@ func (r *RelayComm) Start() {
 		log.Println("RelayComm: Not starting, relay domain has invalid type")
 		return
 	}
-
-	r.rateMu.Lock()
-	r.rateCount = 0
-	r.rateReset = time.Now()
-	r.rateMu.Unlock()
 
 	r.sendChan = make(chan Message, 25) // Keep buffer low, don't overwhelm WS
 	r.lowPrioSendChan = make(chan Message, 25)
@@ -141,12 +133,19 @@ func (r *RelayComm) run(relayDomain string) {
 			case <-r.stopChan:
 				return
 			case <-time.After(delay):
-				delay = min(delay*3/2, maxReconnectDelay)
+				delay = min(delay*3/2, maxReconnectDelay) // Exponential backoff
 				continue
 			}
 		}
 
 		delay = time.Second
+		// Drain messages to avoid sending old messages (potentially with old keys) on the new connection
+		for len(r.sendChan) > 0 {
+			<-r.sendChan
+		}
+		for len(r.lowPrioSendChan) > 0 {
+			<-r.lowPrioSendChan
+		}
 		updater.MarkRelayConnected()
 		r.handleConnection(conn)
 		conn.Close()
@@ -198,7 +197,7 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 				log.Printf("RelayComm: Failed to decode message: %v", err)
 				continue
 			}
-			if r.checkRateLimit() {
+			if r.rateLimit.allow(msg.OriginID) {
 				if handler, ok := r.handlers[msg.Type]; ok {
 					go handler(msg)
 				}
@@ -257,19 +256,4 @@ func (r *RelayComm) writeMsg(conn *websocket.Conn, msg Message) error {
 		return err
 	}
 	return nil
-}
-
-func (r *RelayComm) checkRateLimit() bool {
-	r.rateMu.Lock()
-	defer r.rateMu.Unlock()
-
-	if time.Since(r.rateReset) >= time.Second {
-		r.rateCount = 0
-		r.rateReset = time.Now()
-	}
-	if r.rateCount >= maxMessagesPerSecond {
-		return false
-	}
-	r.rateCount++
-	return true
 }

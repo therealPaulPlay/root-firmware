@@ -378,17 +378,18 @@ func handleRenewKeyAck(msg Message) {
 		return
 	}
 
-	// Update contexts for ongoing operations (streaming, file transfers)
+	// Send success response BEFORE updating stream contexts, so the frontend
+	// switches to the new key before receiving any chunks encrypted with it
 	newCtx := &HandlerContext{
 		DeviceID:          msg.OriginID,
 		RequestID:         msg.RequestID,
 		EncryptionSession: newSession,
 	}
+	SendEncryptedSuccess(newCtx, MsgRenewKeyAck, nil)
+
+	// Now update contexts for ongoing operations (streaming, file transfers)
 	UpdateStreamContext(msg.OriginID, newCtx)
 	UpdateFileTransferContext(msg.OriginID, newCtx)
-
-	// Send success response to confirm commit
-	SendEncryptedSuccess(newCtx, MsgRenewKeyAck, nil)
 	log.Printf("RelayComm: Key renewal committed for device %s", msg.OriginID)
 }
 

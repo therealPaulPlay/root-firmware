@@ -44,40 +44,58 @@ func TestGet_PanicsWithoutInit(t *testing.T) {
 	Get()
 }
 
-func TestRelayComm_CheckRateLimit(t *testing.T) {
-	r := &RelayComm{
-		rateMu:    sync.Mutex{},
-		rateCount: 0,
-		rateReset: time.Now(),
-	}
+func TestRateLimiter_PerDevice(t *testing.T) {
+	rl := newRateLimiter()
 
-	// Should allow up to maxMessagesPerSecond
-	for i := 0; i < maxMessagesPerSecond; i++ {
-		if !r.checkRateLimit() {
-			t.Errorf("checkRateLimit() returned false at message %d, expected true", i+1)
+	// Should allow up to rateBurst for a single device
+	for i := range rateBurst {
+		if !rl.allow("device1") {
+			t.Errorf("allow() returned false at message %d, expected true", i+1)
 		}
 	}
 
-	// Next one should be rate limited
-	if r.checkRateLimit() {
-		t.Error("checkRateLimit() should return false after exceeding limit")
+	// Next one should be rate limited for device1
+	if rl.allow("device1") {
+		t.Error("allow() should return false after device burst exhausted")
+	}
+
+	// Different device should still be allowed
+	if !rl.allow("device2") {
+		t.Error("allow() should allow a different device")
 	}
 }
 
-func TestRelayComm_CheckRateLimit_ResetsAfterSecond(t *testing.T) {
-	r := &RelayComm{
-		rateMu:    sync.Mutex{},
-		rateCount: maxMessagesPerSecond,             // Already at limit
-		rateReset: time.Now().Add(-2 * time.Second), // Reset time is in the past
+func TestRateLimiter_GlobalLimit(t *testing.T) {
+	rl := rateLimiter{
+		buckets:      make(map[string]*tokenBucket),
+		globalBucket: tokenBucket{tokens: 2, last: time.Now()},
+		lastCleanup:  time.Now(),
 	}
 
-	// Should reset counter and allow
-	if !r.checkRateLimit() {
-		t.Error("checkRateLimit() should reset after 1 second and allow messages")
+	// Exhaust global tokens across different devices
+	if !rl.allow("device1") {
+		t.Error("first message should be allowed")
+	}
+	if !rl.allow("device2") {
+		t.Error("second message should be allowed")
+	}
+	if rl.allow("device3") {
+		t.Error("third message should be blocked by global limit")
+	}
+}
+
+func TestRateLimiter_Refill(t *testing.T) {
+	rl := rateLimiter{
+		buckets: make(map[string]*tokenBucket),
+		globalBucket: tokenBucket{
+			tokens: 0,
+			last:   time.Now().Add(-2 * time.Second), // 2s ago → should refill
+		},
+		lastCleanup: time.Now(),
 	}
 
-	if r.rateCount != 1 {
-		t.Errorf("rateCount = %d, want 1 after reset", r.rateCount)
+	if !rl.allow("device1") {
+		t.Error("allow() should allow after refill")
 	}
 }
 
