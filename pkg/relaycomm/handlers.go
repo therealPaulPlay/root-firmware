@@ -45,7 +45,6 @@ const (
 	MsgGetRecordingSound        = "getRecordingSound"
 	MsgSetRecordingSound        = "setRecordingSound"
 	MsgGetHealth                = "getHealth"
-	MsgGetPreview               = "getPreview"
 	MsgStartUpdate              = "startUpdate"
 	MsgRestart                  = "restart"
 	MsgReset                    = "reset"
@@ -257,7 +256,6 @@ func registerHandlers(relay *RelayComm) {
 
 	// System
 	relay.On(MsgGetHealth, useEncryption(MsgGetHealth, handleGetHealth))
-	relay.On(MsgGetPreview, useEncryption(MsgGetPreview, handleGetPreview))
 	relay.On(MsgStartUpdate, useEncryption(MsgStartUpdate, handleStartUpdate))
 	relay.On(MsgRestart, useEncryption(MsgRestart, handleRestart))
 	relay.On(MsgReset, useEncryption(MsgReset, handleReset))
@@ -643,24 +641,6 @@ func handleGetHealth(ctx *HandlerContext, payload []byte) {
 	}
 
 	SendEncryptedSuccess(ctx, MsgGetHealth, health)
-}
-
-func handleGetPreview(ctx *HandlerContext, payload []byte) {
-	img, err := record.Get().CapturePreview(640, 360)
-	if err != nil {
-		SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
-		return
-	}
-
-	jpegData, err := record.PreviewToJPEG(img)
-	if err != nil {
-		SendEncryptedError(ctx, MsgGetPreview, ErrInternalError, err.Error())
-		return
-	}
-
-	SendEncryptedSuccess(ctx, MsgGetPreview, map[string]any{
-		"data": jpegData,
-	})
 }
 
 func handleStartUpdate(ctx *HandlerContext, payload []byte) {
