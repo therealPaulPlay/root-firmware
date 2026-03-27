@@ -1,7 +1,6 @@
 package record
 
 import (
-	"image"
 	"testing"
 )
 
@@ -55,7 +54,27 @@ func TestSplitNALs_TooShort(t *testing.T) {
 	}
 }
 
-// --- lumaLUT / expandLimitedRange tests ---
+// --- scalePlane tests ---
+
+func TestScalePlane_ScalesDown(t *testing.T) {
+	// 4x4 white image scaled to 2x2
+	pix := make([]byte, 16)
+	for i := range pix {
+		pix[i] = 200
+	}
+	result := scalePlane(pix, 4, 4, 4, 2, 2)
+	if result.Rect.Dx() != 2 || result.Rect.Dy() != 2 {
+		t.Errorf("expected 2x2, got %dx%d", result.Rect.Dx(), result.Rect.Dy())
+	}
+	// All pixels should be ~200 after bilinear downscale of uniform input
+	for i, v := range result.Pix {
+		if v < 198 || v > 202 {
+			t.Errorf("pixel[%d] = %d, want ~200", i, v)
+		}
+	}
+}
+
+// --- lumaLUT tests ---
 
 func TestLumaLUT_Range(t *testing.T) {
 	// BT.601 limited range: 16 -> 0, 235 -> 255
@@ -82,28 +101,16 @@ func TestLumaLUT_Range(t *testing.T) {
 	}
 }
 
-func TestExpandLimitedRange(t *testing.T) {
-	img := &image.YCbCr{
-		Y:              []byte{16, 128, 235},
-		Cb:             []byte{128, 128, 128},
-		Cr:             []byte{128, 128, 128},
-		YStride:        3,
-		CStride:        3,
-		Rect:           image.Rect(0, 0, 3, 1),
-		SubsampleRatio: image.YCbCrSubsampleRatio444,
+func TestLumaLUT_ApplyToPixels(t *testing.T) {
+	pixels := []byte{16, 128, 235}
+	for i := range pixels {
+		pixels[i] = lumaLUT[pixels[i]]
 	}
 
-	expandLimitedRange(img)
-
-	if img.Y[0] != 0 {
-		t.Errorf("Y[0] = %d, want 0 (from 16)", img.Y[0])
+	if pixels[0] != 0 {
+		t.Errorf("pixel[0] = %d, want 0 (from 16)", pixels[0])
 	}
-	if img.Y[2] != 255 {
-		t.Errorf("Y[2] = %d, want 255 (from 235)", img.Y[2])
-	}
-
-	// Chroma should be unchanged
-	if img.Cb[0] != 128 || img.Cr[0] != 128 {
-		t.Error("chroma should be unchanged")
+	if pixels[2] != 255 {
+		t.Errorf("pixel[2] = %d, want 255 (from 235)", pixels[2])
 	}
 }

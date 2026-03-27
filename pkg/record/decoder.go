@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	openh264 "github.com/y9o/go-openh264"
+	"golang.org/x/image/draw"
 )
 
 const openh264Library = "libopenh264.so"
@@ -53,6 +54,7 @@ func newDecoder() (*h264Decoder, error) {
 }
 
 // splitNALs splits Annex B H.264 data into individual NAL units (each prefixed with its start code)
+// Required because OpenH264 needs NALs fed individually (SPS/PPS before IDR)
 func splitNALs(data []byte) [][]byte {
 	var nals [][]byte
 	start := -1
@@ -75,48 +77,66 @@ func splitNALs(data []byte) [][]byte {
 	return nals
 }
 
-// decode takes raw H.264 Annex B data (SPS+PPS+IDR) and returns a decoded YCbCr image
-// NAL units are fed individually so the decoder processes parameter sets before the IDR slice
-func (d *h264Decoder) decode(nalData []byte) (*image.YCbCr, error) {
+// scalePlane scales a single image plane, always returning a newly allocated image
+func scalePlane(pix []byte, stride, srcW, srcH, dstW, dstH int) *image.Gray {
+	src := &image.Gray{Pix: pix, Stride: stride, Rect: image.Rect(0, 0, srcW, srcH)}
+	dst := image.NewGray(image.Rect(0, 0, dstW, dstH))
+	if srcW == dstW && srcH == dstH {
+		copy(dst.Pix, src.Pix)
+	} else {
+		draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
+	}
+	return dst
+}
+
+// decodeAndScale decodes an H.264 keyframe (SPS+PPS+IDR) and scales each YCbCr plane
+// independently, avoiding color-space conversion - Applies luma LUT on the scaled Y plane
+func (d *h264Decoder) decodeAndScale(nalData []byte, x, y int) (*image.YCbCr, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	nals := splitNALs(nalData)
-	if len(nals) == 0 {
-		return nil, fmt.Errorf("no NAL units found in input")
-	}
-
-	for _, nal := range nals {
-		var dst [3][]byte
+	for _, nal := range splitNALs(nalData) {
+		var planes [3][]byte
 		var info openh264.SBufferInfo
 
-		ret := d.dec.DecodeFrameNoDelay(nal, len(nal), &dst, &info)
+		ret := d.dec.DecodeFrameNoDelay(nal, len(nal), &planes, &info)
 		if ret&0x1000 != 0 {
 			return nil, fmt.Errorf("DecodeFrameNoDelay fatal error: 0x%x", ret)
 		}
-
-		if info.IBufferStatus == 1 {
-			sys := info.UsrData_sSystemBuffer()
-			return &image.YCbCr{
-				Y:              dst[0],
-				Cb:             dst[1],
-				Cr:             dst[2],
-				YStride:        int(sys.IStride[0]),
-				CStride:        int(sys.IStride[1]),
-				Rect:           image.Rect(0, 0, int(sys.IWidth), int(sys.IHeight)),
-				SubsampleRatio: image.YCbCrSubsampleRatio420,
-			}, nil
+		if info.IBufferStatus != 1 {
+			continue
 		}
+
+		sys := info.UsrData_sSystemBuffer()
+		w, h := int(sys.IWidth), int(sys.IHeight)
+		chromaX, chromaY := (x+1)/2, (y+1)/2
+
+		yDst := scalePlane(planes[0], int(sys.IStride[0]), w, h, x, y)
+		cbDst := scalePlane(planes[1], int(sys.IStride[1]), w/2, h/2, chromaX, chromaY)
+		crDst := scalePlane(planes[2], int(sys.IStride[1]), w/2, h/2, chromaX, chromaY)
+
+		for i := range yDst.Pix {
+			yDst.Pix[i] = lumaLUT[yDst.Pix[i]]
+		}
+
+		return &image.YCbCr{
+			Y:              yDst.Pix,
+			Cb:             cbDst.Pix,
+			Cr:             crDst.Pix,
+			YStride:        yDst.Stride,
+			CStride:        cbDst.Stride,
+			Rect:           image.Rect(0, 0, x, y),
+			SubsampleRatio: image.YCbCrSubsampleRatio420,
+		}, nil
 	}
 
-	return nil, fmt.Errorf("no frame produced after decoding %d NAL units", len(nals))
+	return nil, fmt.Errorf("no frame produced from input")
 }
 
-// LUT for expanding BT.601 limited range luma to full range in-place
+// LUT for expanding BT.601 limited range luma to full range
 // Y: [16,235] → [0,255]. Chroma is left unchanged to preserve the neutral point at 128
 var lumaLUT [256]uint8
 
-// init() functions run before main() in Go
 func init() {
 	for i := range 256 {
 		v := (i - 16) * 255 / 219
@@ -126,12 +146,5 @@ func init() {
 			v = 255
 		}
 		lumaLUT[i] = uint8(v)
-	}
-}
-
-// expandLimitedRange expands luma from BT.601 limited range to full range in-place
-func expandLimitedRange(img *image.YCbCr) {
-	for i := range img.Y {
-		img.Y[i] = lumaLUT[img.Y[i]]
 	}
 }

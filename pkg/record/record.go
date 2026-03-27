@@ -19,7 +19,6 @@ import (
 	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
 
-	"golang.org/x/image/draw"
 )
 
 const maxKeyframeBufferSize = 256 * 1024 // 256KB - must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction
@@ -450,17 +449,8 @@ func (r *Recorder) StopRecording(eventID string, eventType string, preview []byt
 	return duration, nil
 }
 
-// decodeAndScale decodes an H.264 keyframe and scales to the target resolution, returning an image.NRGBA
-func (r *Recorder) decodeAndScale(frame []byte, x, y int) (*image.NRGBA, error) {
-	decoded, err := r.decoder.decode(frame)
-	if err != nil {
-		return nil, err
-	}
-
-	expandLimitedRange(decoded)
-	dst := image.NewNRGBA(image.Rect(0, 0, x, y))
-	draw.BiLinear.Scale(dst, dst.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
-	return dst, nil
+func (r *Recorder) decodeAndScale(frame []byte, x, y int) (*image.YCbCr, error) {
+	return r.decoder.decodeAndScale(frame, x, y)
 }
 
 func (r *Recorder) CapturePreview(x int, y int) (image.Image, error) {
@@ -493,16 +483,11 @@ func (r *Recorder) CaptureViewfinderFrame(x, y int) ([]byte, error) {
 		return nil, fmt.Errorf("no frame available yet")
 	}
 
-	decoded, err := r.decoder.decode(frame)
+	scaled, err := r.decoder.decodeAndScale(frame, x, y)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode viewfinder frame: %w", err)
 	}
-
-	// Scale Y plane directly (luma = grayscale), avoiding full color conversion
-	src := &image.Gray{Pix: decoded.Y, Stride: decoded.YStride, Rect: decoded.Rect}
-	dst := image.NewGray(image.Rect(0, 0, x, y))
-	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
-	return dst.Pix, nil
+	return scaled.Y, nil
 }
 
 func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
