@@ -85,6 +85,7 @@ func (u *Updater) CheckForUpdates() {
 
 	// Skip if update in progress
 	if status == StatusDownloading || status == StatusInstalling {
+		log.Println("Updater: Skipping update check: currently downloading or installing update")
 		return
 	}
 
@@ -175,7 +176,7 @@ func (u *Updater) CheckForUpdates() {
 // Returns false if no update is available or an update is already in progress
 func (u *Updater) StartUpdate() bool {
 	u.mu.Lock()
-	if u.status != StatusUpdateAvailable {
+	if u.status != StatusUpdateAvailable && u.status != StatusError {
 		u.mu.Unlock()
 		return false
 	}
