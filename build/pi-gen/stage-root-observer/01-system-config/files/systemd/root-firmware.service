@@ -8,6 +8,7 @@ User=root
 SupplementaryGroups=video
 WorkingDirectory=/home/observer
 Environment="LD_LIBRARY_PATH=/usr/local/lib"
+ExecStartPre=/bin/sh -c 'rm -rf /data/lost+found/*'
 ExecStartPre=/usr/sbin/rfkill unblock wifi
 ExecStartPre=/usr/sbin/rfkill unblock bluetooth
 ExecStartPre=/usr/bin/nmcli radio wifi on

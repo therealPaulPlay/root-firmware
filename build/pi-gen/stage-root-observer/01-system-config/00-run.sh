@@ -79,6 +79,13 @@ WirelessEnabled=true
 WWANEnabled=true
 NMSTATE
 
+# Disable WiFi power saving (brcmfmac driver can drop connections with it enabled)
+install -d "${ROOTFS_DIR}/etc/NetworkManager/conf.d"
+cat > "${ROOTFS_DIR}/etc/NetworkManager/conf.d/wifi-powersave-off.conf" << 'NMPOWERSAVE'
+[connection]
+wifi.powersave = 2
+NMPOWERSAVE
+
 # Disable cloud-init
 install -d "${ROOTFS_DIR}/etc/cloud"
 touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"
