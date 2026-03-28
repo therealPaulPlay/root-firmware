@@ -91,6 +91,15 @@ JOURNALD
 # Create data directory mount point
 install -d "${ROOTFS_DIR}/data"
 
+# Persist timesync clock on /data so it survives A/B slot switches
+# tmpfiles.d ensures the directory is recreated if /data is wiped (e.g. factory reset)
+install -d -o systemd-timesync -g systemd-timesync "${ROOTFS_DIR}/data/timesync"
+install -d "${ROOTFS_DIR}/var/lib/systemd/timesync"
+ln -sf /data/timesync/clock "${ROOTFS_DIR}/var/lib/systemd/timesync/clock"
+cat > "${ROOTFS_DIR}/etc/tmpfiles.d/timesync-persist.conf" << 'TMPFILES'
+d /data/timesync 0755 systemd-timesync systemd-timesync -
+TMPFILES
+
 # Replace fstab with our custom partition layout
 cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
 /dev/mmcblk0p1  /boot/firmware  vfat    defaults            0  2
