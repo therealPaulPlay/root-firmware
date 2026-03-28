@@ -1,195 +1,115 @@
 #!/bin/bash
-# RAUC bootloader backend for Raspberry Pi
-# Handles A/B slot switching via cmdline.txt modification
+# RAUC bootloader backend for Raspberry Pi using tryboot
 #
-# This script is called by RAUC to manage boot slot selection
-# Commands: get-state, set-state, get-primary, set-primary, get-current
+# Uses Pi firmware's tryboot mechanism for safe A/B switching:
+# - config.txt points to the good slot via cmdline=cmdline_a.txt or cmdline_b.txt
+# - tryboot.txt is created during updates, pointing to the new slot
+# - Rebooting with "0 tryboot" uses tryboot.txt; any crash/power-loss reverts to config.txt
+# - mark-good promotes tryboot.txt -> config.txt
 #
-# Rollback mechanism:
-# - .rauc-good-slot file stores the last confirmed-good slot (A or B)
-# - When RAUC installs, it sets primary but doesn't update good slot
-# - Firmware calls mark-good after health checks pass
-# - Boot watchdog service checks: if current != good and good exists, rollback
+# Boot partition files:
+#   config.txt      - points to good slot
+#   tryboot.txt     - temporary, points to new slot (only exists during update attempt)
+#   cmdline_a.txt   - kernel cmdline with root=/dev/mmcblk0p2
+#   cmdline_b.txt   - kernel cmdline with root=/dev/mmcblk0p3
 
 set -e
 
 BOOT_PARTITION="/boot/firmware"
-CMDLINE_FILE="$BOOT_PARTITION/cmdline.txt"
-GOOD_SLOT_FILE="$BOOT_PARTITION/.rauc-good-slot"
+CONFIG_FILE="$BOOT_PARTITION/config.txt"
+TRYBOOT_FILE="$BOOT_PARTITION/tryboot.txt"
 
-# --- Slot State ---
-
-get_good_slot() {
-    if [ -f "$GOOD_SLOT_FILE" ]; then
-        cat "$GOOD_SLOT_FILE"
-    else
-        echo ""
-    fi
-}
-
-set_good_slot() {
-    local slot="$1"
-    local tmp_file=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
-    printf '%s' "$slot" > "$tmp_file"
-    sync "$tmp_file"
-    mv "$tmp_file" "$GOOD_SLOT_FILE"
-    sync "$BOOT_PARTITION"
-}
-
-# --- cmdline.txt Management ---
-
-validate_cmdline() {
-    if [ ! -f "$CMDLINE_FILE" ]; then
-        echo "Error: $CMDLINE_FILE does not exist" >&2
-        exit 1
-    fi
-}
-
-get_current_slot() {
-    # Read current root partition from /proc/cmdline (what we actually booted)
-    local root_part=$(grep -o 'root=/dev/[^ ]*' /proc/cmdline | cut -d'=' -f2)
-    case "$root_part" in
-        /dev/mmcblk0p2) echo "A" ;;
-        /dev/mmcblk0p3) echo "B" ;;
+# Resolve slot from a config file's cmdline= directive
+config_slot() {
+    local cmdline=$(grep -o 'cmdline=cmdline_[ab]\.txt' "$1" 2>/dev/null | head -1)
+    case "$cmdline" in
+        *_a.txt) echo "A" ;;
+        *_b.txt) echo "B" ;;
         *) echo "unknown" ;;
     esac
 }
 
-get_cmdline_slot() {
-    validate_cmdline
-    # Read configured slot from cmdline.txt (what will boot next)
-    local root_part=$(grep -o 'root=/dev/[^ ]*' "$CMDLINE_FILE" | cut -d'=' -f2)
-    case "$root_part" in
-        /dev/mmcblk0p2) echo "A" ;;
-        /dev/mmcblk0p3) echo "B" ;;
+# Atomically rewrite a config file to point to a different slot's cmdline
+set_config_slot() {
+    local file="$1" slot="$2"
+    local cmdline="cmdline_$(echo "$slot" | tr 'AB' 'ab').txt"
+    local tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
+    sed "s/cmdline=cmdline_[ab]\.txt/cmdline=$cmdline/" "$file" > "$tmp"
+    sync "$tmp"
+    mv "$tmp" "$file"
+    sync "$BOOT_PARTITION"
+}
+
+current_slot() {
+    case "$(grep -o 'root=/dev/mmcblk0p[23]' /proc/cmdline)" in
+        *p2) echo "A" ;;
+        *p3) echo "B" ;;
         *) echo "unknown" ;;
     esac
 }
-
-set_cmdline_slot() {
-    local slot="$1"
-    local new_root
-    case "$slot" in
-        A) new_root="/dev/mmcblk0p2" ;;
-        B) new_root="/dev/mmcblk0p3" ;;
-        *)
-            echo "Error: Invalid slot '$slot', expected A or B" >&2
-            exit 1
-            ;;
-    esac
-
-    # Update cmdline.txt atomically
-    local tmp_file=$(mktemp "$BOOT_PARTITION/cmdline.XXXXXX")
-    sed "s|root=/dev/mmcblk0p[23]|root=$new_root|" "$CMDLINE_FILE" > "$tmp_file"
-    sync "$tmp_file"
-    mv "$tmp_file" "$CMDLINE_FILE"
-    sync "$BOOT_PARTITION"
-
-    # Verify
-    local verify_root=$(grep -o 'root=/dev/[^ ]*' "$CMDLINE_FILE" | cut -d'=' -f2)
-    if [ "$verify_root" != "$new_root" ]; then
-        echo "Error: Failed to update cmdline.txt" >&2
-        exit 1
-    fi
-}
-
-# --- Main Command Handler ---
 
 case "$1" in
     get-state)
-        # Get boot state of a slot (good/bad)
-        slot="$2"
-        good_slot=$(get_good_slot)
-        if [ "$slot" = "$good_slot" ]; then
-            echo "good"
-        else
-            echo "bad"
-        fi
+        good=$(config_slot "$CONFIG_FILE")
+        [ "$2" = "$good" ] && echo "good" || echo "bad"
         ;;
 
     set-state)
-        # Set boot state of a slot (good/bad)
-        slot="$2"
-        state="$3"
-        if [ "$state" = "good" ]; then
-            set_good_slot "$slot"
-        fi
+        [ "$3" = "good" ] && set_config_slot "$CONFIG_FILE" "$2"
         ;;
 
     get-primary)
-        # Get which slot is set as primary (will boot next)
-        get_cmdline_slot
+        if [ -f "$TRYBOOT_FILE" ]; then
+            config_slot "$TRYBOOT_FILE"
+        else
+            config_slot "$CONFIG_FILE"
+        fi
         ;;
 
     set-primary)
-        # Set which slot should boot next (called by RAUC after install)
-        slot="$2"
-        set_cmdline_slot "$slot"
-        # Note: We do NOT update good slot here - firmware must mark-good
-        sync
+        # Create tryboot.txt pointing to the new slot (atomic write via temp file)
+        cmdline="cmdline_$(echo "$2" | tr 'AB' 'ab').txt"
+        tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
+        sed "s/cmdline=cmdline_[ab]\.txt/cmdline=$cmdline/" "$CONFIG_FILE" > "$tmp"
+        sync "$tmp"
+        mv "$tmp" "$TRYBOOT_FILE"
+        sync "$BOOT_PARTITION"
+        echo "Tryboot set to slot $2"
         ;;
 
     get-current)
-        # Get currently booted slot
-        get_current_slot
-        ;;
-
-    # --- Custom commands for boot watchdog ---
-
-    check-rollback)
-        # Called early in boot by watchdog service
-        # If we booted into a non-good slot and it's not our first attempt, rollback
-        current=$(get_current_slot)
-        good=$(get_good_slot)
-
-        if [ "$current" = "unknown" ]; then
-            echo "Cannot determine current slot" >&2
-            exit 1
-        fi
-
-        # If no good slot recorded yet (first boot), mark current as good
-        if [ -z "$good" ]; then
-            echo "First boot - marking slot $current as good"
-            set_good_slot "$current"
-            exit 0
-        fi
-
-        # If current slot is the good slot, all is well
-        if [ "$current" = "$good" ]; then
-            echo "Booted into good slot $current"
-            exit 0
-        fi
-
-        # We're in a non-good slot - check if we've already tried it
-        TRYING_FILE="$BOOT_PARTITION/.rauc-trying-$current"
-
-        if [ -f "$TRYING_FILE" ]; then
-            # We already tried this slot and rebooted - rollback!
-            echo "Slot $current failed, rolling back to $good"
-            rm -f "$TRYING_FILE"
-            set_cmdline_slot "$good"
-            sync
-            reboot -f
-        else
-            # First attempt at this slot - mark that we're trying it
-            touch "$TRYING_FILE"
-            sync "$BOOT_PARTITION"
-            echo "Trying slot $current (good slot is $good)"
-        fi
+        current_slot
         ;;
 
     mark-good)
-        # Called by firmware after successful health checks
-        current=$(get_current_slot)
-        if [ "$current" = "unknown" ]; then
-            echo "Cannot determine current slot" >&2
-            exit 1
+        # Promote tryboot.txt -> config.txt, making the switch permanent
+        current=$(current_slot)
+        [ "$current" = "unknown" ] && { echo "Cannot determine current slot" >&2; exit 1; }
+
+        if [ -f "$TRYBOOT_FILE" ]; then
+            # Atomic copy: write to temp, sync, rename over config.txt
+            tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
+            cp "$TRYBOOT_FILE" "$tmp"
+            sync "$tmp"
+            mv "$tmp" "$CONFIG_FILE"
+            rm -f "$TRYBOOT_FILE"
+            sync "$BOOT_PARTITION"
+        else
+            set_config_slot "$CONFIG_FILE" "$current"
         fi
-        set_good_slot "$current"
-        # Clean up trying marker if it exists
-        rm -f "$BOOT_PARTITION/.rauc-trying-$current"
-        sync "$BOOT_PARTITION"
         echo "Slot $current marked as good"
+        ;;
+
+    check-rollback)
+        # With tryboot, Pi firmware handles rollback automatically
+        # This just logs the current state for diagnostics
+        current=$(current_slot)
+        good=$(config_slot "$CONFIG_FILE")
+        if [ -f "$TRYBOOT_FILE" ]; then
+            echo "Trying slot $current via tryboot (good=$good)"
+        else
+            echo "Booted into slot $current (good=$good)"
+        fi
         ;;
 
     *)

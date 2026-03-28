@@ -1,5 +1,8 @@
 # ROOT boot configuration
 
+# A/B slot selection (cmdline_a.txt or cmdline_b.txt)
+cmdline=cmdline_a.txt
+
 # Enable 64-bit mode
 arm_64bit=1
 

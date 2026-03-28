@@ -233,7 +233,7 @@ func (u *Updater) performUpdate(downloadURL, expectedSHA256 string) {
 	log.Println("Updater: RAUC update successful, rebooting in 2 seconds...")
 
 	time.Sleep(2 * time.Second)
-	if err := exec.Command("reboot").Run(); err != nil {
+	if err := exec.Command("reboot", "0 tryboot").Run(); err != nil {
 		log.Printf("Updater: Failed to reboot: %v", err)
 	}
 }
