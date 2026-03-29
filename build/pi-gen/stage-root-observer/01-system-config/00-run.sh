@@ -103,7 +103,10 @@ install -d "${ROOTFS_DIR}/data"
 
 # Persist timesync clock on /data so it survives A/B slot switches
 # tmpfiles.d ensures the directory is recreated if /data is wiped (e.g. factory reset)
-install -d -o systemd-timesync -g systemd-timesync "${ROOTFS_DIR}/data/timesync"
+install -d "${ROOTFS_DIR}/data/timesync"
+on_chroot << EOF
+chown systemd-timesync:systemd-timesync /data/timesync
+EOF
 install -d "${ROOTFS_DIR}/var/lib/systemd/timesync"
 ln -sf /data/timesync/clock "${ROOTFS_DIR}/var/lib/systemd/timesync/clock"
 cat > "${ROOTFS_DIR}/etc/tmpfiles.d/timesync-persist.conf" << 'TMPFILES'
