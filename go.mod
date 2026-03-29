@@ -4,6 +4,7 @@ go 1.25
 
 require (
 	github.com/Eyevinn/mp4ff v0.51.0
+	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/gen2brain/aac-go v0.0.0-20230119102159-ef1e76509d21
 	github.com/go-ble/ble v0.0.0-20240122180141-8c5522f54333
@@ -20,7 +21,6 @@ require (
 )
 
 require (
-	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/ebitengine/purego v0.6.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect

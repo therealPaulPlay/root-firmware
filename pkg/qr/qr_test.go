@@ -9,17 +9,24 @@ import (
 )
 
 var testQRImage image.Image
+var testBlurImage image.Image
 
 func TestMain(m *testing.M) {
-	data, err := os.ReadFile("testdata/test.jpg")
-	if err != nil {
-		panic("failed to load test QR image: " + err.Error())
-	}
-	testQRImage, _, err = image.Decode(bytes.NewReader(data))
-	if err != nil {
-		panic("failed to decode test QR image: " + err.Error())
-	}
+	testQRImage = loadTestImage("testdata/test.jpg")
+	testBlurImage = loadTestImage("testdata/test_blur.jpg")
 	os.Exit(m.Run())
+}
+
+func loadTestImage(path string) image.Image {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic("failed to load test image " + path + ": " + err.Error())
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		panic("failed to decode test image " + path + ": " + err.Error())
+	}
+	return img
 }
 
 func TestNewScanner(t *testing.T) {
@@ -41,6 +48,20 @@ func TestScan_ValidQRCode(t *testing.T) {
 	}
 
 	expected := "ABC123"
+	if result != expected {
+		t.Errorf("Scan() = %q, want %q", result, expected)
+	}
+}
+
+func TestScan_BlurryQRCode(t *testing.T) {
+	scanner := NewScanner()
+
+	result, err := scanner.Scan(testBlurImage)
+	if err != nil {
+		t.Fatalf("Scan() failed on slightly blurry QR code: %v", err)
+	}
+
+	expected := "82043227"
 	if result != expected {
 		t.Errorf("Scan() = %q, want %q", result, expected)
 	}

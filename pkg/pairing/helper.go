@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"root-firmware/pkg/devices"
-	"root-firmware/pkg/globals"
 	"root-firmware/pkg/qr"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
@@ -94,7 +93,7 @@ func (b *Pairing) ScanQRCode() error {
 	b.mu.Unlock()
 
 	// Capture frame for QR code detection
-	frame, err := record.Get().CapturePreview(globals.CameraWidth, globals.CameraHeight)
+	frame, err := record.Get().CapturePreview(1280, 720)
 	if err != nil {
 		return fmt.Errorf("failed to capture frame: %w", err)
 	}
