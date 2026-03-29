@@ -217,9 +217,13 @@ func SendEncryptedSuccess(ctx *HandlerContext, messageType string, fields map[st
 	return sendEncrypted(ctx, messageType, payload)
 }
 
-// SendEncryptedError sends an encrypted error response with error code
-func SendEncryptedError(ctx *HandlerContext, messageType, errorCode, errorMsg string) error {
-	return sendEncrypted(ctx, messageType, errorPayload(errorCode, errorMsg))
+// SendEncryptedError sends an encrypted error response with error code and optional extra fields
+func SendEncryptedError(ctx *HandlerContext, messageType, errorCode, errorMsg string, fields ...map[string]any) error {
+	payload := errorPayload(errorCode, errorMsg)
+	if len(fields) > 0 {
+		maps.Copy(payload, fields[0])
+	}
+	return sendEncrypted(ctx, messageType, payload)
 }
 
 func registerHandlers(relay *RelayComm) {
@@ -497,27 +501,29 @@ func handleGetThumbnail(ctx *HandlerContext, payload []byte) {
 		return
 	}
 
+	eventIdField := map[string]any{"eventId": req.ID}
+
 	filePath, err := storage.Get().GetThumbnailPath(req.ID)
 	if err != nil {
-		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, err.Error())
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, err.Error(), eventIdField)
 		return
 	}
 
 	productPrivateKey, err := config.Get().GetProductPrivateKey()
 	if err != nil {
-		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to get decryption key: %v", err))
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to get decryption key: %v", err), eventIdField)
 		return
 	}
 
 	reader, _, err := decryptFileToReader(filePath, productPrivateKey)
 	if err != nil {
-		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to decrypt thumbnail: %v", err))
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to decrypt thumbnail: %v", err), eventIdField)
 		return
 	}
 
 	fileData, err := io.ReadAll(reader)
 	if err != nil {
-		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to read thumbnail: %v", err))
+		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, fmt.Sprintf("Failed to read thumbnail: %v", err), eventIdField)
 		return
 	}
 
