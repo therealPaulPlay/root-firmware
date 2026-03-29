@@ -146,7 +146,6 @@ jobs:
           sudo ./build/scripts/repartition-image.sh "$INPUT_IMG" "root-observer-${VERSION}.img"
 
       - name: Extract rootfs and create RAUC bundle
-        if: env.IS_RELEASE == 'true'
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
@@ -181,7 +180,6 @@ jobs:
           gzip -9 "root-observer-${VERSION}-custom.img"
 
       - name: Calculate bundle hash and create metadata
-        if: env.IS_RELEASE == 'true'
         id: bundle-hash
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
@@ -206,7 +204,7 @@ jobs:
             root-observer-*.img.gz
             root-observer-update-*.raucb
             latest.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 1
 
   upload-to-s3:
@@ -242,48 +240,40 @@ jobs:
             "use_https = True" \
             > ~/.s3cfg
 
-      - name: Upload dev images to S3
-        if: env.IS_RELEASE == 'false'
+      - name: Upload images and update bundle to S3
         env:
           S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
-          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/dev/" --recursive --force || true
-          s3cmd put "artifacts/root-observer-${VERSION}-auto-detect.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/dev/root-observer-${VERSION}-auto-detect.img.gz" \
-            --acl-public
-          s3cmd put "artifacts/root-observer-${VERSION}-custom.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/dev/root-observer-${VERSION}-custom.img.gz" \
-            --acl-public
+          if [ "$IS_RELEASE" = "true" ]; then
+            CHANNEL="release"
+          else
+            CHANNEL="dev"
+          fi
 
-      - name: Upload release image and rauc bundle to S3
-        if: env.IS_RELEASE == 'true'
-        env:
-          S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
-        run: |
-          VERSION="${{ needs.build-firmware.outputs.version }}"
+          echo "Uploading to channel: ${CHANNEL}"
 
           echo "Cleaning old files..."
-          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/release/" --recursive --force || true
-          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/updates/release/" --recursive --force || true
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/${CHANNEL}/" --recursive --force || true
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/updates/${CHANNEL}/" --recursive --force || true
 
           echo "Uploading images..."
           s3cmd put "artifacts/root-observer-${VERSION}-auto-detect.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/release/root-observer-${VERSION}-auto-detect.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/${CHANNEL}/root-observer-${VERSION}-auto-detect.img.gz" \
             --acl-public
           s3cmd put "artifacts/root-observer-${VERSION}-custom.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/release/root-observer-${VERSION}-custom.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/images/${CHANNEL}/root-observer-${VERSION}-custom.img.gz" \
             --acl-public
 
           echo "Uploading RAUC bundle..."
           s3cmd put "artifacts/root-observer-update-${VERSION}.raucb" \
-            "s3://${S3_BUCKET}/rootprivacy/updates/release/root-observer-update-${VERSION}.raucb" \
+            "s3://${S3_BUCKET}/rootprivacy/updates/${CHANNEL}/root-observer-update-${VERSION}.raucb" \
             --acl-public
 
           echo "Uploading latest.json..."
           s3cmd put "artifacts/latest.json" \
-            "s3://${S3_BUCKET}/rootprivacy/updates/release/latest.json" \
+            "s3://${S3_BUCKET}/rootprivacy/updates/${CHANNEL}/latest.json" \
             --acl-public --mime-type="application/json"
 
           echo "Upload complete!"

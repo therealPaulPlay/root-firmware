@@ -179,6 +179,66 @@ func TestProgressReader_UnknownTotal(t *testing.T) {
 	}
 }
 
+func TestIsNewerVersion(t *testing.T) {
+	tests := []struct {
+		candidate string
+		current   string
+		want      bool
+	}{
+		// Basic version bumps
+		{"1.0.1", "1.0.0", true},
+		{"1.1.0", "1.0.0", true},
+		{"2.0.0", "1.9.9", true},
+
+		// Same version is not newer
+		{"1.0.0", "1.0.0", false},
+
+		// Older versions are not newer
+		{"1.0.0", "1.0.1", false},
+		{"0.0.11", "0.0.12", false},
+
+		// Pre-release is lower than its release
+		{"0.0.12", "0.0.12-dev.2", true},
+		{"0.0.12", "0.0.12-beta.1", true},
+		{"0.0.12-dev.2", "0.0.12", false},
+		{"0.0.12-beta.1", "0.0.12", false},
+
+		// Same pre-release is not newer
+		{"0.0.12-dev.2", "0.0.12-dev.2", false},
+		{"0.0.12-beta.1", "0.0.12-beta.1", false},
+
+		// Higher pre-release of same base
+		{"0.0.12-dev.3", "0.0.12-dev.2", true},
+		{"0.0.12-beta.2", "0.0.12-beta.1", true},
+		{"0.0.12-dev.2", "0.0.12-dev.3", false},
+
+		// Beta is higher than dev (alphabetical per semver)
+		{"0.0.12-beta.1", "0.0.12-dev.1", false},
+		{"0.0.12-dev.1", "0.0.12-beta.1", true},
+
+		// Release is newer than older pre-release base
+		{"0.0.13", "0.0.12-dev.2", true},
+		{"0.0.13", "0.0.12-beta.1", true},
+
+		// Older release is not newer than higher pre-release base
+		{"0.0.11", "0.0.12-dev.2", false},
+		{"0.0.11", "0.0.12-beta.1", false},
+
+		// Unparseable falls back to inequality
+		{"dev", "0.0.12", true},
+		{"dev", "dev", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.candidate+"_vs_"+tt.current, func(t *testing.T) {
+			got := isNewerVersion(tt.candidate, tt.current)
+			if got != tt.want {
+				t.Errorf("isNewerVersion(%q, %q) = %v, want %v", tt.candidate, tt.current, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestScheduleAutoUpdate(t *testing.T) {
 	cleanup := setupTestUpdater(t)
 	defer cleanup()

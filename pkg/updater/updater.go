@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
+
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
 )
@@ -27,6 +29,8 @@ const (
 	downloadTimeout    = 30 * time.Minute
 	raucBundlePath     = "/data/.update.raucb"
 )
+
+var firmwareEndpointDev = firmwareEndpoint + "/dev"
 
 type UpdateStatus string
 
@@ -100,7 +104,12 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
-	updateURL := "https://" + relayDomainStr + firmwareEndpoint
+	endpoint := firmwareEndpoint
+	if globals.FirmwareVersion == "dev" {
+		endpoint = firmwareEndpointDev
+	}
+
+	updateURL := "https://" + relayDomainStr + endpoint
 	if globals.HardwareModel != "" {
 		updateURL += "?hardware=" + url.PathEscape(globals.HardwareModel)
 	}
@@ -149,7 +158,7 @@ func (u *Updater) CheckForUpdates() {
 		return
 	}
 
-	if info.Version != globals.FirmwareVersion {
+	if isNewerVersion(info.Version, globals.FirmwareVersion) {
 		alreadyScheduled := u.availableVersion == info.Version && !u.scheduledFor.IsZero()
 		u.status = StatusUpdateAvailable
 		u.availableVersion = info.Version
@@ -361,6 +370,22 @@ func (u *Updater) removeScheduledUpdate() {
 	if err := config.Get().SetKey("scheduledUpdateAt", nil); err != nil {
 		log.Printf("Updater: Failed to clear scheduled update config: %v", err)
 	}
+}
+
+// isNewerVersion returns true if candidate is a newer version than current
+// Pre-release versions are lower than their release counterpart per semver,
+// e.g. "0.0.12" is newer than "0.0.12-dev.2"
+// Falls back to simple inequality if either version can't be parsed
+func isNewerVersion(candidate, current string) bool {
+	c, err := semver.NewVersion(candidate)
+	if err != nil {
+		return candidate != current
+	}
+	o, err := semver.NewVersion(current)
+	if err != nil {
+		return candidate != current
+	}
+	return c.GreaterThan(o)
 }
 
 func (u *Updater) setError(msg string) {
