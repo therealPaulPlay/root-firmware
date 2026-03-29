@@ -3,6 +3,7 @@ package updater
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -79,4 +80,24 @@ func confirmSuccessfulBoot() error {
 	}
 	log.Printf("Updater: %s", strings.TrimSpace(string(output)))
 	return nil
+}
+
+// GetCurrentSlot returns the current boot slot ("A" or "B") by reading /proc/cmdline
+func GetCurrentSlot() string {
+	data, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		return "unknown"
+	}
+	for field := range strings.FieldsSeq(string(data)) {
+		if strings.HasPrefix(field, "root=") {
+			// Handles both root=/dev/mmcblk0p2 and root=PARTUUID=...-02
+			switch field[len(field)-1] {
+			case '2':
+				return "A"
+			case '3':
+				return "B"
+			}
+		}
+	}
+	return "unknown"
 }

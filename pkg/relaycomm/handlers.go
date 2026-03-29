@@ -656,6 +656,7 @@ func handleGetUpdateStatus(ctx *HandlerContext, payload []byte) {
 	result := map[string]any{
 		"status":         string(status),
 		"currentVersion": globals.FirmwareVersion,
+		"currentSlot":    updater.GetCurrentSlot(),
 	}
 	if availableVersion != "" {
 		result["availableVersion"] = availableVersion
