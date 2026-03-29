@@ -37,8 +37,8 @@ install -m 755 "${STAGE_DIR}/raspberrypi-firmware-backend" "${ROOTFS_DIR}/usr/li
 install -m 644 files/boot/config.txt "${ROOTFS_DIR}/boot/firmware/config.txt"
 install -m 644 files/boot/cmdline_a.txt "${ROOTFS_DIR}/boot/firmware/cmdline_a.txt"
 install -m 644 files/boot/cmdline_b.txt "${ROOTFS_DIR}/boot/firmware/cmdline_b.txt"
-# Remove default cmdline.txt since we use per-slot cmdline files referenced from config.txt
-rm -f "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
+# Note:the default cmdline.txt is left untouched for pi-gen's export-image stage (otherwise fails)
+# At runtime it's unused because config.txt explicitly sets cmdline=cmdline_a.txt
 
 # Install systemd services
 install -m 644 files/systemd/root-firmware.service "${ROOTFS_DIR}/etc/systemd/system/"
