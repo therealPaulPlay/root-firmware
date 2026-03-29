@@ -255,25 +255,25 @@ jobs:
           echo "Uploading to channel: ${CHANNEL}"
 
           echo "Cleaning old files..."
-          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/images/${CHANNEL}/" --recursive --force || true
-          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/updates/${CHANNEL}/" --recursive --force || true
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/firmware/observer/images/${CHANNEL}/" --recursive --force || true
+          s3cmd rm "s3://${S3_BUCKET}/rootprivacy/firmware/observer/updates/${CHANNEL}/" --recursive --force || true
 
           echo "Uploading images..."
           s3cmd put "artifacts/root-observer-${VERSION}-auto-detect.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/${CHANNEL}/root-observer-${VERSION}-auto-detect.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/firmware/observer/images/${CHANNEL}/root-observer-${VERSION}-auto-detect.img.gz" \
             --acl-public
           s3cmd put "artifacts/root-observer-${VERSION}-custom.img.gz" \
-            "s3://${S3_BUCKET}/rootprivacy/images/${CHANNEL}/root-observer-${VERSION}-custom.img.gz" \
+            "s3://${S3_BUCKET}/rootprivacy/firmware/observer/images/${CHANNEL}/root-observer-${VERSION}-custom.img.gz" \
             --acl-public
 
           echo "Uploading RAUC bundle..."
           s3cmd put "artifacts/root-observer-update-${VERSION}.raucb" \
-            "s3://${S3_BUCKET}/rootprivacy/updates/${CHANNEL}/root-observer-update-${VERSION}.raucb" \
+            "s3://${S3_BUCKET}/rootprivacy/firmware/observer/updates/${CHANNEL}/root-observer-update-${VERSION}.raucb" \
             --acl-public
 
           echo "Uploading latest.json..."
           s3cmd put "artifacts/latest.json" \
-            "s3://${S3_BUCKET}/rootprivacy/updates/${CHANNEL}/latest.json" \
+            "s3://${S3_BUCKET}/rootprivacy/firmware/observer/updates/${CHANNEL}/latest.json" \
             --acl-public --mime-type="application/json"
 
           echo "Upload complete!"
