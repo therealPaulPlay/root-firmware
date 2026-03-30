@@ -58,6 +58,16 @@ func iou(box1, box2 [4]float32) float32 {
 	return inter / union
 }
 
+// hasInitialRelayConnect returns whether the relay has ever connected successfully
+func hasInitialRelayConnect() bool {
+	if val, ok := config.Get().GetKey("initialRelayConnect"); ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
 // IsEventDetectionEnabled returns whether event detection is enabled (default true)
 func IsEventDetectionEnabled() bool {
 	if val, ok := config.Get().GetKey("eventDetectionEnabled"); ok {

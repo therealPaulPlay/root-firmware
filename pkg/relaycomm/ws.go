@@ -147,6 +147,7 @@ func (r *RelayComm) run(relayDomain string) {
 			<-r.lowPrioSendChan
 		}
 		updater.MarkRelayConnected()
+		markInitialRelayConnect()
 		r.handleConnection(conn)
 		conn.Close()
 
@@ -242,6 +243,17 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 			}
 		}
 	}
+}
+
+// Persists that the relay has been reached at least once
+func markInitialRelayConnect() {
+	if val, ok := config.Get().GetKey("initialRelayConnect"); ok {
+		if b, ok := val.(bool); ok && b {
+			return
+		}
+	}
+	log.Println("RelayComm: Marked initial relay connection as established")
+	config.Get().SetKey("initialRelayConnect", true)
 }
 
 func (r *RelayComm) writeMsg(conn *websocket.Conn, msg Message) error {

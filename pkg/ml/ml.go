@@ -100,6 +100,11 @@ func (m *ML) check() {
 	}
 	m.mu.Unlock()
 
+	// Don't record events until the relay has connected at least once
+	if !hasInitialRelayConnect() {
+		return
+	}
+
 	// If event detection is disabled, stop any active recording and return
 	if !IsEventDetectionEnabled() {
 		m.mu.Lock()
