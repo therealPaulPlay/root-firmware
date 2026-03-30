@@ -373,7 +373,6 @@ func handleRenewKeyAck(msg Message) {
 		return
 	}
 
-	log.Printf("RelayComm: Committing new key for device %s", msg.OriginID)
 	if err := devices.Get().RenewKey(msg.OriginID, newPublicKey); err != nil { // NOW commit the new key
 		log.Printf("RelayComm: Failed to commit renewed key for device %s: %v", msg.OriginID, err)
 		sendUnencryptedError(msg.OriginID, msg.RequestID, MsgRenewKeyAck, ErrInternalError, "Failed to commit key")

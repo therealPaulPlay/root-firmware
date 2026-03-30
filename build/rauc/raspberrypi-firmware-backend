@@ -86,6 +86,12 @@ case "$1" in
         current=$(current_slot)
         [ "$current" = "unknown" ] && { echo "Cannot determine current slot" >&2; exit 1; }
 
+        good=$(config_slot "$CONFIG_FILE")
+        if [ "$current" = "$good" ] && [ ! -f "$TRYBOOT_FILE" ]; then
+            echo "Slot $current already good"
+            exit 0
+        fi
+
         if [ -f "$TRYBOOT_FILE" ]; then
             # Atomic copy: write to temp, sync, rename over config.txt
             tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")

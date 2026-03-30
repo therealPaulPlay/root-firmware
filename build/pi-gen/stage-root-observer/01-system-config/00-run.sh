@@ -86,6 +86,12 @@ cat > "${ROOTFS_DIR}/etc/NetworkManager/conf.d/wifi-powersave-off.conf" << 'NMPO
 wifi.powersave = 2
 NMPOWERSAVE
 
+# Disable brcmfmac roaming to work around driver crashes during sustained transfers
+install -d "${ROOTFS_DIR}/etc/modprobe.d"
+cat > "${ROOTFS_DIR}/etc/modprobe.d/brcmfmac.conf" << 'BRCMFMAC'
+options brcmfmac roamoff=1
+BRCMFMAC
+
 # Disable cloud-init
 install -d "${ROOTFS_DIR}/etc/cloud"
 touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"
@@ -102,13 +108,12 @@ JOURNALD
 install -d "${ROOTFS_DIR}/data"
 
 # Persist timesync clock on /data so it survives A/B slot switches
-# tmpfiles.d ensures the directory is recreated if /data is wiped (e.g. factory reset)
+# Uses bind mount because symlinks get overridden by systemd's StateDirectory
 install -d "${ROOTFS_DIR}/data/timesync"
 on_chroot << EOF
 chown systemd-timesync:systemd-timesync /data/timesync
 EOF
 install -d "${ROOTFS_DIR}/var/lib/systemd/timesync"
-ln -sf /data/timesync/clock "${ROOTFS_DIR}/var/lib/systemd/timesync/clock"
 cat > "${ROOTFS_DIR}/etc/tmpfiles.d/timesync-persist.conf" << 'TMPFILES'
 d /data/timesync 0755 systemd-timesync systemd-timesync -
 TMPFILES
@@ -120,6 +125,7 @@ cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
 /dev/mmcblk0p4  /data           ext4    defaults,noatime    0  2
 tmpfs           /tmp            tmpfs   nosuid,nodev        0  0
 tmpfs           /var/tmp        tmpfs   nosuid,nodev        0  0
+/data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount  0  0
 FSTAB
 
 # Set hostname
