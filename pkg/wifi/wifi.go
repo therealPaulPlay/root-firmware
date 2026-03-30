@@ -167,13 +167,15 @@ func (w *WiFi) connectNetwork(ssid, password string) error {
 	return nil
 }
 
-// Wait until Cloudflare DNS (1.1.1.1) can be reached
+// Wait until a public DNS server can be reached
 func (w *WiFi) waitForInternet(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if c, err := net.DialTimeout("tcp", "1.1.1.1:443", time.Second); err == nil {
-			c.Close()
-			return nil
+		for _, host := range []string{"1.1.1.1:443", "8.8.8.8:443"} {
+			if c, err := net.DialTimeout("tcp", host, time.Second); err == nil {
+				c.Close()
+				return nil
+			}
 		}
 		time.Sleep(time.Second)
 	}

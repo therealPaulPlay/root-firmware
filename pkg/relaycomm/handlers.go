@@ -56,6 +56,7 @@ const (
 	MsgSetVersionDev            = "setVersionDev"
 	MsgGetNotifications         = "getNotifications"
 	MsgSetNotifications         = "setNotifications"
+	MsgSetNotificationCooldown  = "setNotificationCooldown"
 )
 
 // Error code constants
@@ -257,6 +258,7 @@ func registerHandlers(relay *RelayComm) {
 	// Notifications
 	relay.On(MsgGetNotifications, useEncryption(MsgGetNotifications, handleGetNotifications))
 	relay.On(MsgSetNotifications, useEncryption(MsgSetNotifications, handleSetNotifications))
+	relay.On(MsgSetNotificationCooldown, useEncryption(MsgSetNotificationCooldown, handleSetNotificationCooldown))
 
 	// System
 	relay.On(MsgGetHealth, useEncryption(MsgGetHealth, handleGetHealth))
@@ -780,8 +782,10 @@ func handleSetVersionDev(ctx *HandlerContext, payload []byte) {
 }
 
 func handleGetNotifications(ctx *HandlerContext, payload []byte) {
+	n := notifications.Get()
 	SendEncryptedSuccess(ctx, MsgGetNotifications, map[string]any{
-		"enabled": notifications.Get().IsEnabled(ctx.DeviceID),
+		"enabled":         n.IsEnabled(ctx.DeviceID),
+		"cooldownMinutes": n.GetCooldownMinutes(),
 	})
 }
 
@@ -820,4 +824,24 @@ func handleSetNotifications(ctx *HandlerContext, payload []byte) {
 			"enabled": false,
 		})
 	}
+}
+
+func handleSetNotificationCooldown(ctx *HandlerContext, payload []byte) {
+	var req struct {
+		CooldownMinutes int `cbor:"cooldownMinutes"`
+	}
+
+	if err := cbor.Unmarshal(payload, &req); err != nil {
+		SendEncryptedError(ctx, MsgSetNotificationCooldown, ErrInvalidPayload, "Invalid payload")
+		return
+	}
+
+	if err := notifications.Get().SetCooldownMinutes(req.CooldownMinutes); err != nil {
+		SendEncryptedError(ctx, MsgSetNotificationCooldown, ErrInvalidPayload, err.Error())
+		return
+	}
+
+	SendEncryptedSuccess(ctx, MsgSetNotificationCooldown, map[string]any{
+		"cooldownMinutes": req.CooldownMinutes,
+	})
 }

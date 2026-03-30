@@ -29,7 +29,8 @@ type NotificationDevice struct {
 }
 
 type Notifications struct {
-	mu sync.Mutex
+	mu             sync.Mutex
+	lastNotifiedAt time.Time
 }
 
 var instance *Notifications
@@ -108,6 +109,27 @@ func (n *Notifications) IsEnabled(deviceID string) bool {
 	return false
 }
 
+// GetCooldownMinutes returns the configured notification cooldown in minutes (0 = off)
+func (n *Notifications) GetCooldownMinutes() int {
+	val, ok := config.Get().GetKey("notificationCooldownMinutes")
+	if !ok {
+		return 0
+	}
+	f, ok := val.(float64)
+	if !ok {
+		return 0
+	}
+	return int(f)
+}
+
+// SetCooldownMinutes sets the notification cooldown in minutes (0 = off, max 30)
+func (n *Notifications) SetCooldownMinutes(minutes int) error {
+	if minutes < 0 || minutes > 30 {
+		return fmt.Errorf("cooldown must be between 0 and 30 minutes")
+	}
+	return config.Get().SetKey("notificationCooldownMinutes", minutes)
+}
+
 // SendEventToAll sends an event notification to all registered devices,
 // resolving each device's ProductAlias for the notification body
 // If preview is non-nil, it is encrypted per-device and uploaded for rich notifications
@@ -117,10 +139,17 @@ func (n *Notifications) SendEventToAll(eventType string, eventID string, preview
 		return
 	}
 
+	cooldown := n.GetCooldownMinutes() // Get before holding notifications lock as it holds another lock internally
+
 	n.mu.Lock()
+	if cooldown > 0 && !n.lastNotifiedAt.IsZero() && time.Since(n.lastNotifiedAt) < time.Duration(cooldown)*time.Minute {
+		n.mu.Unlock()
+		return
+	}
 	src := n.getEntries()
 	entries := make([]NotificationDevice, len(src))
 	copy(entries, src)
+	n.lastNotifiedAt = time.Now()
 	n.mu.Unlock()
 
 	if len(entries) == 0 {

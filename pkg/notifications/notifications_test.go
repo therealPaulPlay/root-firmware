@@ -219,6 +219,40 @@ func TestEnable_MultipleDevices(t *testing.T) {
 	}
 }
 
+func TestCooldownMinutes(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	n := Get()
+
+	// Defaults to 0
+	if v := n.GetCooldownMinutes(); v != 0 {
+		t.Errorf("GetCooldownMinutes() = %d, want 0", v)
+	}
+
+	// Valid values within bounds
+	for _, v := range []int{0, 1, 15, 30} {
+		if err := n.SetCooldownMinutes(v); err != nil {
+			t.Fatalf("SetCooldownMinutes(%d) error = %v", v, err)
+		}
+		if got := n.GetCooldownMinutes(); got != v {
+			t.Errorf("GetCooldownMinutes() = %d, want %d", got, v)
+		}
+	}
+
+	// Out of bounds rejected, previous value preserved
+	n.SetCooldownMinutes(10)
+	if err := n.SetCooldownMinutes(-1); err == nil {
+		t.Error("SetCooldownMinutes(-1) should error")
+	}
+	if err := n.SetCooldownMinutes(31); err == nil {
+		t.Error("SetCooldownMinutes(31) should error")
+	}
+	if got := n.GetCooldownMinutes(); got != 10 {
+		t.Errorf("GetCooldownMinutes() = %d after invalid set, want 10", got)
+	}
+}
+
 func TestDisable_OnlyRemovesTarget(t *testing.T) {
 	cleanup := setupTest(t)
 	defer cleanup()
