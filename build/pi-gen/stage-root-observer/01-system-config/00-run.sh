@@ -96,6 +96,13 @@ BRCMFMAC
 install -d "${ROOTFS_DIR}/etc/cloud"
 touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"
 
+# Configure hardware watchdog — systemd pets it, reboot on 15s timeout
+install -d "${ROOTFS_DIR}/etc/systemd/system.conf.d"
+cat > "${ROOTFS_DIR}/etc/systemd/system.conf.d/watchdog.conf" << 'WATCHDOG'
+[Manager]
+RuntimeWatchdogSec=15
+WATCHDOG
+
 # Configure journald for volatile storage
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
 cat > "${ROOTFS_DIR}/etc/systemd/journald.conf.d/volatile.conf" << 'JOURNALD'
@@ -118,15 +125,52 @@ cat > "${ROOTFS_DIR}/etc/tmpfiles.d/timesync-persist.conf" << 'TMPFILES'
 d /data/timesync 0755 systemd-timesync systemd-timesync -
 TMPFILES
 
+# Point resolv.conf to NM's runtime copy so DNS works on read-only rootfs
+ln -sf /run/NetworkManager/resolv.conf "${ROOTFS_DIR}/etc/resolv.conf"
+
+# Persist NM connection profiles on /data so WiFi reconnects before firmware starts
+install -d "${ROOTFS_DIR}/data/NetworkManager/system-connections"
+
 # Replace fstab with our custom partition layout
+# Rootfs is mounted read-only, /var/lib uses overlayfs so OS services see the
+# full original directory tree but writes go to a tmpfs upper layer (discarded
+# on reboot), /data persists user data
 cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
-/dev/mmcblk0p1  /boot/firmware  vfat    defaults            0  2
-/dev/mmcblk0p2  /               ext4    defaults,noatime    0  1
-/dev/mmcblk0p4  /data           ext4    defaults,noatime    0  2
-tmpfs           /tmp            tmpfs   nosuid,nodev        0  0
-tmpfs           /var/tmp        tmpfs   nosuid,nodev        0  0
-/data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount  0  0
+/dev/mmcblk0p1  /boot/firmware  vfat       defaults                             0  2
+/dev/mmcblk0p2  /               ext4       ro,noatime                           0  1
+/dev/mmcblk0p4  /data           ext4       defaults,noatime                     0  2
+tmpfs           /tmp            tmpfs      nosuid,nodev,size=32M                0  0
+tmpfs           /var/tmp        tmpfs      nosuid,nodev,size=16M                0  0
+tmpfs           /var/log        tmpfs      nosuid,nodev,size=16M                0  0
+overlay         /var/lib        overlay    lowerdir=/var/lib,upperdir=/run/var-lib-upper,workdir=/run/var-lib-work,x-systemd.requires=early-boot-setup.service  0  0
+/data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/var/lib  0  0
+/data/NetworkManager/system-connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=data.mount  0  0
+/data/machine-id  /etc/machine-id  none  bind,nofail,x-systemd.requires=data.mount  0  0
 FSTAB
+
+# Early boot setup: create overlay dirs and initialize machine-id
+# Runs before local-fs.target to avoid circular dependency with systemd-tmpfiles-setup
+# On first boot, generates a unique machine-id on /data and bind-mounts it;
+# on subsequent boots the fstab bind mount handles machine-id
+cat > "${ROOTFS_DIR}/etc/systemd/system/early-boot-setup.service" << 'UNIT'
+[Unit]
+Description=Early boot setup (overlay dirs, machine-id)
+DefaultDependencies=no
+After=data.mount
+Before=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work
+ExecStart=/bin/sh -c '[ -f /data/machine-id ] || { cat /proc/sys/kernel/random/uuid | tr -d "-" > /data/machine-id && mount --bind /data/machine-id /etc/machine-id; }'
+
+[Install]
+WantedBy=local-fs.target
+UNIT
+
+on_chroot << EOF
+systemctl enable early-boot-setup.service
+EOF
 
 # Set hostname
 echo "ROOT-Observer" > "${ROOTFS_DIR}/etc/hostname"
