@@ -18,7 +18,6 @@ import (
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/sfx"
 	"root-firmware/pkg/storage"
-
 )
 
 const maxKeyframeBufferSize = 256 * 1024 // 256KB - must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction
@@ -34,6 +33,7 @@ type Recorder struct {
 	recordPath     string
 	recordStart    time.Time
 	recordLookback bool
+	recordMic      bool // Mic state snapshotted at recording start
 	decoder        *h264Decoder
 	videoRing      *lookbackBuffer
 	audioRing      *lookbackBuffer
@@ -263,10 +263,6 @@ func (r *Recorder) videoWatchdog() {
 }
 
 func (r *Recorder) startMicrophone() error {
-	if !MicEnabled() {
-		return fmt.Errorf("microphone disabled")
-	}
-
 	micDevice := getMicDevice()
 	if micDevice == "" {
 		return fmt.Errorf("no microphone available")
@@ -323,17 +319,6 @@ func (r *Recorder) audioBroadcastLoop(stdout io.ReadCloser) {
 			return
 		}
 	}
-}
-
-func (r *Recorder) stopMicrophone() {
-	if r.audioCmd != nil && r.audioCmd.Process != nil {
-		r.audioCmd.Process.Kill()
-		r.audioCmd.Wait()
-	}
-
-	r.audioBroadcast.closeAll()
-	r.audioCmd = nil
-	log.Println("Recorder: Stopped audio broadcast")
 }
 
 func (r *Recorder) StartVideoStream(w io.Writer) (done chan struct{}, err error) {
@@ -395,6 +380,7 @@ func (r *Recorder) StartRecording(outputPath string, withLookback bool) {
 	r.recordPath = outputPath
 	r.recordStart = time.Now()
 	r.recordLookback = withLookback
+	r.recordMic = MicEnabled()
 	log.Printf("Recorder: Started recording to %s", outputPath)
 }
 
@@ -414,7 +400,13 @@ func (r *Recorder) StopRecording(eventID string, eventType string, preview []byt
 	}
 
 	videoEntries := r.videoRing.flush(age)
-	audioEntries := r.audioRing.flush(age)
+
+	// Only include audio if mic was enabled when recording started
+	var audioEntries []lookbackEntry
+	if r.recordMic {
+		audioEntries = r.audioRing.flush(age)
+	}
+
 	outputPath := r.recordPath
 	r.mu.Unlock()
 
@@ -491,32 +483,11 @@ func (r *Recorder) CaptureViewfinderFrame(x, y int) ([]byte, error) {
 }
 
 func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {
-	r.mu.Lock()
-
 	if err := config.Get().SetKey("microphoneEnabled", enabled); err != nil {
-		r.mu.Unlock()
 		return err
 	}
 
-	if enabled {
-		// Start microphone if not already running
-		if r.audioCmd == nil {
-			if err := r.startMicrophone(); err != nil {
-				r.mu.Unlock()
-				log.Printf("Recorder: Failed to start microphone: %v", err)
-				return err
-			}
-		}
-	} else {
-		// Stop microphone if running
-		if r.audioCmd != nil {
-			r.stopMicrophone()
-		}
-	}
-
-	r.mu.Unlock()
-
-	// Notify after releasing lock — callback may call StartAudioStream/StopAudioStream which need r.mu
+	// Notify — callback syncs audio streams for active viewers
 	if r.OnMicChanged != nil {
 		r.OnMicChanged()
 	}
