@@ -68,6 +68,9 @@ systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
 systemctl disable apt-daily.timer || true
 systemctl disable apt-daily-upgrade.timer || true
+systemctl mask systemd-growfs-root.service || true
+systemctl mask rpi-resize.service || true
+systemctl mask rpi-resize-swap-file.service || true
 EOF
 
 # Configure NetworkManager to have WiFi radio enabled by default
@@ -142,6 +145,8 @@ cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
 tmpfs           /tmp            tmpfs      nosuid,nodev,size=32M                0  0
 tmpfs           /var/tmp        tmpfs      nosuid,nodev,size=16M                0  0
 tmpfs           /var/log        tmpfs      nosuid,nodev,size=16M                0  0
+tmpfs           /var/cache      tmpfs      nosuid,nodev,size=32M                0  0
+tmpfs           /mnt            tmpfs      nosuid,nodev,size=16M                0  0
 overlay         /var/lib        overlay    lowerdir=/var/lib,upperdir=/run/var-lib-upper,workdir=/run/var-lib-work,x-systemd.requires=early-boot-setup.service  0  0
 /data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/var/lib  0  0
 /data/NetworkManager/system-connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=data.mount  0  0
