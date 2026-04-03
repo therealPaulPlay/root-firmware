@@ -128,16 +128,11 @@ cat > "${ROOTFS_DIR}/etc/tmpfiles.d/timesync-persist.conf" << 'TMPFILES'
 d /data/timesync 0755 systemd-timesync systemd-timesync -
 TMPFILES
 
-# Point resolv.conf to NM's runtime copy so DNS works on read-only rootfs
-ln -sf /run/NetworkManager/resolv.conf "${ROOTFS_DIR}/etc/resolv.conf"
-
 # Persist NM connection profiles on /data so WiFi reconnects before firmware starts
 install -d "${ROOTFS_DIR}/data/NetworkManager/system-connections"
 
-# Replace fstab with our custom partition layout
-# Rootfs is mounted read-only, /var/lib uses overlayfs so OS services see the
-# full original directory tree but writes go to a tmpfs upper layer (discarded
-# on reboot), /data persists user data
+# Replace fstab — read-only rootfs with overlayfs on /etc and /var/lib,
+# persistent bind mounts from /data for NM connections, machine-id, and timesync
 cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
 /dev/mmcblk0p1  /boot/firmware  vfat       defaults                             0  2
 /dev/mmcblk0p2  /               ext4       ro,noatime                           0  1
@@ -148,9 +143,10 @@ tmpfs           /var/log        tmpfs      nosuid,nodev,size=16M                
 tmpfs           /var/cache      tmpfs      nosuid,nodev,size=32M                0  0
 tmpfs           /mnt            tmpfs      nosuid,nodev,size=16M                0  0
 overlay         /var/lib        overlay    lowerdir=/var/lib,upperdir=/run/var-lib-upper,workdir=/run/var-lib-work,x-systemd.requires=early-boot-setup.service  0  0
+overlay         /etc            overlay    lowerdir=/etc,upperdir=/run/etc-upper,workdir=/run/etc-work,x-systemd.requires=early-boot-setup.service  0  0
 /data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/var/lib  0  0
-/data/NetworkManager/system-connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=data.mount  0  0
-/data/machine-id  /etc/machine-id  none  bind,nofail,x-systemd.requires=data.mount  0  0
+/data/NetworkManager/system-connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/etc  0  0
+/data/machine-id  /etc/machine-id  none  bind,nofail,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/etc  0  0
 FSTAB
 
 # Early boot setup: create overlay dirs and initialize machine-id
@@ -166,7 +162,8 @@ Before=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work
+ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work /run/etc-upper /run/etc-work
+ExecStart=/bin/mkdir -p /data/NetworkManager/system-connections /data/timesync
 ExecStart=/bin/sh -c '[ -f /data/machine-id ] || { cat /proc/sys/kernel/random/uuid | tr -d "-" > /data/machine-id && mount --bind /data/machine-id /etc/machine-id; }'
 
 [Install]
