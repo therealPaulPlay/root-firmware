@@ -144,34 +144,48 @@ tmpfs           /var/cache      tmpfs      nosuid,nodev,size=32M                
 tmpfs           /mnt            tmpfs      nosuid,nodev,size=16M                0  0
 overlay         /var/lib        overlay    lowerdir=/var/lib,upperdir=/run/var-lib-upper,workdir=/run/var-lib-work,x-systemd.requires=early-boot-setup.service  0  0
 overlay         /etc            overlay    lowerdir=/etc,upperdir=/run/etc-upper,workdir=/run/etc-work,x-systemd.requires=early-boot-setup.service  0  0
+overlay         /home           overlay    lowerdir=/home,upperdir=/run/home-upper,workdir=/run/home-work,x-systemd.requires=early-boot-setup.service  0  0
 /data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/var/lib  0  0
 /data/NetworkManager/system-connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/etc  0  0
-/data/machine-id  /etc/machine-id  none  bind,nofail,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/etc  0  0
 FSTAB
 
-# Early boot setup: create overlay dirs and initialize machine-id
-# Runs before local-fs.target to avoid circular dependency with systemd-tmpfiles-setup
-# On first boot, generates a unique machine-id on /data and bind-mounts it;
-# on subsequent boots the fstab bind mount handles machine-id
+# Create overlay and /data dirs before local-fs.target mounts them
 cat > "${ROOTFS_DIR}/etc/systemd/system/early-boot-setup.service" << 'UNIT'
 [Unit]
-Description=Early boot setup (overlay dirs, machine-id)
+Description=Create overlay and /data directories
 DefaultDependencies=no
 After=data.mount
 Before=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work /run/etc-upper /run/etc-work
+ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work /run/etc-upper /run/etc-work /run/home-upper /run/home-work
 ExecStart=/bin/mkdir -p /data/NetworkManager/system-connections /data/timesync
-ExecStart=/bin/sh -c '[ -f /data/machine-id ] || { cat /proc/sys/kernel/random/uuid | tr -d "-" > /data/machine-id && mount --bind /data/machine-id /etc/machine-id; }'
 
 [Install]
 WantedBy=local-fs.target
 UNIT
 
+# Initialize machine-id: generate on first boot, copy into /etc overlay on every boot
+# Runs after local-fs.target so the /etc overlay is mounted and writable
+cat > "${ROOTFS_DIR}/etc/systemd/system/machine-id-init.service" << 'UNIT'
+[Unit]
+Description=Initialize persistent machine-id
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '[ -f /data/machine-id ] || { cat /proc/sys/kernel/random/uuid | tr -d "-" > /data/machine-id.tmp && sync /data/machine-id.tmp && mv /data/machine-id.tmp /data/machine-id; }'
+ExecStart=/bin/cp /data/machine-id /etc/machine-id
+
+[Install]
+WantedBy=sysinit.target
+UNIT
+
 on_chroot << EOF
 systemctl enable early-boot-setup.service
+systemctl enable machine-id-init.service
 EOF
 
 # Set hostname
