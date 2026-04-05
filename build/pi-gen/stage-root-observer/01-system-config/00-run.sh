@@ -117,22 +117,13 @@ JOURNALD
 # Create data directory mount point
 install -d "${ROOTFS_DIR}/data"
 
-# Persist timesync clock on /data so it survives A/B slot switches
-# Uses bind mount because symlinks get overridden by systemd's StateDirectory
-install -d "${ROOTFS_DIR}/data/timesync"
-on_chroot << EOF
-chown systemd-timesync:systemd-timesync /data/timesync
-EOF
-install -d "${ROOTFS_DIR}/var/lib/systemd/timesync"
+# Ensure /data/timesync has correct ownership for systemd-timesyncd
 cat > "${ROOTFS_DIR}/etc/tmpfiles.d/timesync-persist.conf" << 'TMPFILES'
 d /data/timesync 0755 systemd-timesync systemd-timesync -
 TMPFILES
 
-# Persist NM connection profiles on /data so WiFi reconnects before firmware starts
-install -d "${ROOTFS_DIR}/data/NetworkManager/system-connections"
-
-# Replace fstab — read-only rootfs with overlayfs on /etc and /var/lib,
-# persistent bind mounts from /data for NM connections, machine-id, and timesync
+# Replace fstab — read-only rootfs with overlayfs on /etc, /var/lib, /home,
+# persistent bind mounts from /data for NM connections and timesync
 cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
 /dev/mmcblk0p1  /boot/firmware  vfat       defaults                             0  2
 /dev/mmcblk0p2  /               ext4       ro,noatime                           0  1
@@ -166,26 +157,8 @@ ExecStart=/bin/mkdir -p /data/NetworkManager/system-connections /data/timesync
 WantedBy=local-fs.target
 UNIT
 
-# Initialize machine-id: generate on first boot, copy into /etc overlay on every boot
-# Runs after local-fs.target so the /etc overlay is mounted and writable
-cat > "${ROOTFS_DIR}/etc/systemd/system/machine-id-init.service" << 'UNIT'
-[Unit]
-Description=Initialize persistent machine-id
-After=local-fs.target
-Before=sysinit.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c '[ -f /data/machine-id ] || { cat /proc/sys/kernel/random/uuid | tr -d "-" > /data/machine-id.tmp && sync /data/machine-id.tmp && mv /data/machine-id.tmp /data/machine-id; }'
-ExecStart=/bin/cp /data/machine-id /etc/machine-id
-
-[Install]
-WantedBy=sysinit.target
-UNIT
-
 on_chroot << EOF
 systemctl enable early-boot-setup.service
-systemctl enable machine-id-init.service
 EOF
 
 # Set hostname
