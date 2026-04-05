@@ -321,7 +321,7 @@ func (u *Updater) scheduleAutoUpdate() {
 
 	// Try to recover a persisted schedule (e.g. after power outage)
 	if val, ok := config.Get().GetKey("scheduledUpdateAt"); ok {
-		if ms, ok := val.(float64); ok {
+		if ms, ok := val.(uint64); ok {
 			scheduled = time.UnixMilli(int64(ms))
 		}
 	}

@@ -198,7 +198,7 @@ func initBLE() error {
 		var pairReq struct {
 			DeviceID        string `cbor:"deviceId"`
 			DeviceName      string `cbor:"deviceName"`
-			DevicePublicKey string `cbor:"devicePublicKey"`
+			DevicePublicKey []byte `cbor:"devicePublicKey"`
 		}
 
 		if err := cbor.Unmarshal(req.Data(), &pairReq); err != nil {
@@ -207,14 +207,7 @@ func initBLE() error {
 			return
 		}
 
-		devicePublicKey, err := encryption.DecodeKey(pairReq.DevicePublicKey)
-		if err != nil {
-			log.Printf("BLE: Invalid public key: %v", err)
-			pairingStatus = operationStatus{completed: true, success: false, error: "Invalid public key"}
-			return
-		}
-
-		if err := GetHelper().PairDevice(pairReq.DeviceID, pairReq.DeviceName, devicePublicKey); err != nil {
+		if err := GetHelper().PairDevice(pairReq.DeviceID, pairReq.DeviceName, pairReq.DevicePublicKey); err != nil {
 			log.Printf("BLE: Pairing failed: %v", err)
 			pairingStatus = operationStatus{completed: true, success: false, error: err.Error()}
 			return
@@ -243,12 +236,7 @@ func initBLE() error {
 			writeError(rsp, "Product public key not found")
 			return
 		}
-		publicKeyStr, ok := publicKey.(string)
-		if !ok {
-			writeError(rsp, "Product public key has invalid type")
-			return
-		}
-		if err := writeSuccess(rsp, map[string]any{"publicKey": publicKeyStr}); err != nil {
+		if err := writeSuccess(rsp, map[string]any{"publicKey": publicKey}); err != nil {
 			log.Printf("BLE: Failed to send product public key: %v", err)
 			writeError(rsp, err.Error())
 		}

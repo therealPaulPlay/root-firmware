@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/fxamacker/cbor/v2"
+
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/testutil"
 )
@@ -75,8 +77,8 @@ func TestInit_LoadsExistingConfig(t *testing.T) {
 	if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	configData := `{"id": "test-id-123", "customKey": "customValue"}`
-	if err := os.WriteFile(globals.ConfigPath, []byte(configData), 0644); err != nil {
+	configData, _ := cbor.Marshal(map[string]any{"id": "test-id-123", "customKey": "customValue"})
+	if err := os.WriteFile(globals.ConfigPath, configData, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -101,7 +103,7 @@ func TestInit_HandlesCorruptedConfig(t *testing.T) {
 	if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(globals.ConfigPath, []byte("not valid json{{{"), 0644); err != nil {
+	if err := os.WriteFile(globals.ConfigPath, []byte("not valid cbor{{{"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -153,12 +155,12 @@ func TestSetKey_AndGetKey(t *testing.T) {
 		t.Errorf("GetKey(testString) = %v, %v; want hello, true", val, ok)
 	}
 
-	// Set numeric value (becomes float64 after JSON normalization)
+	// Set numeric value (becomes uint64 after CBOR normalization)
 	if err := cfg.SetKey("testNumber", 42); err != nil {
 		t.Fatalf("SetKey() error = %v", err)
 	}
-	if val, ok := cfg.GetKey("testNumber"); !ok || val != float64(42) {
-		t.Errorf("GetKey(testNumber) = %v (%T), want 42 (float64)", val, val)
+	if val, ok := cfg.GetKey("testNumber"); !ok || val != uint64(42) {
+		t.Errorf("GetKey(testNumber) = %v (%T), want 42 (uint64)", val, val)
 	}
 
 	// Set boolean value
@@ -169,7 +171,7 @@ func TestSetKey_AndGetKey(t *testing.T) {
 		t.Errorf("GetKey(testBool) = %v, want true", val)
 	}
 
-	// Set slice value (becomes []any after JSON normalization)
+	// Set slice value (becomes []any after CBOR normalization)
 	if err := cfg.SetKey("testSlice", []string{"a", "b", "c"}); err != nil {
 		t.Fatalf("SetKey() error = %v", err)
 	}
@@ -270,10 +272,10 @@ func TestGetProductPrivateKey(t *testing.T) {
 func TestGetProductPrivateKey_Errors(t *testing.T) {
 	tests := []struct {
 		name       string
-		configData string
+		configData map[string]any
 	}{
-		{"missing key", `{"id": "test-id"}`},
-		{"invalid type", `{"id": "test-id", "productPrivateKey": 12345}`},
+		{"missing key", map[string]any{"id": "test-id"}},
+		{"invalid type", map[string]any{"id": "test-id", "productPrivateKey": 12345}},
 	}
 
 	for _, tt := range tests {
@@ -284,7 +286,8 @@ func TestGetProductPrivateKey_Errors(t *testing.T) {
 			if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(globals.ConfigPath, []byte(tt.configData), 0644); err != nil {
+			data, _ := cbor.Marshal(tt.configData)
+			if err := os.WriteFile(globals.ConfigPath, data, 0644); err != nil {
 				t.Fatal(err)
 			}
 
@@ -300,7 +303,7 @@ func TestGetProductPrivateKey_Errors(t *testing.T) {
 	}
 }
 
-func TestJsonNormalize(t *testing.T) {
+func TestCborNormalize(t *testing.T) {
 	tests := []struct {
 		name  string
 		input any
@@ -316,11 +319,11 @@ func TestJsonNormalize(t *testing.T) {
 			},
 		},
 		{
-			name:  "int becomes float64",
+			name:  "int becomes uint64",
 			input: 42,
 			check: func(t *testing.T, result any) {
-				if result != float64(42) {
-					t.Errorf("got %v (%T), want 42 (float64)", result, result)
+				if result != uint64(42) {
+					t.Errorf("got %v (%T), want 42 (uint64)", result, result)
 				}
 			},
 		},
@@ -339,12 +342,12 @@ func TestJsonNormalize(t *testing.T) {
 			},
 		},
 		{
-			name:  "map[string]string becomes map[string]any",
+			name:  "map[string]string becomes map[any]any",
 			input: map[string]string{"key": "value"},
 			check: func(t *testing.T, result any) {
-				m, ok := result.(map[string]any)
+				m, ok := result.(map[any]any)
 				if !ok {
-					t.Errorf("got %T, want map[string]any", result)
+					t.Errorf("got %T, want map[any]any", result)
 					return
 				}
 				if m["key"] != "value" {
@@ -356,9 +359,9 @@ func TestJsonNormalize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonNormalize(tt.input)
+			result, err := cborNormalize(tt.input)
 			if err != nil {
-				t.Fatalf("jsonNormalize() error = %v", err)
+				t.Fatalf("cborNormalize() error = %v", err)
 			}
 			tt.check(t, result)
 		})

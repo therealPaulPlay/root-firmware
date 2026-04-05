@@ -269,7 +269,7 @@ func TestScheduleAutoUpdate(t *testing.T) {
 	if !ok {
 		t.Fatal("scheduledUpdateAt should be persisted in config")
 	}
-	if ms, ok := val.(float64); !ok || int64(ms) != scheduled.UnixMilli() {
+	if ms, ok := val.(uint64); !ok || int64(ms) != scheduled.UnixMilli() {
 		t.Errorf("persisted scheduledUpdateAt = %v, want %d", val, scheduled.UnixMilli())
 	}
 

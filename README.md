@@ -135,14 +135,14 @@ ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 | Devices | Manage paired devices. |
 | Encryption | Create encryption keys, encrypt and decrypt values, Diffie-Hellman key exchange helpers. |
 | Globals | Constants that are reused across packages. |
-| Logger | Collect logs and store them in a JSON for easy access. |
+| Logger | Collect logs and store them in a file for easy access. |
 | ML | ONNX-based event detection. Inspired by [Secluso's](https://github.com/secluso/secluso) implementation. |
 | Notifications | Send notifications to the relay server's notification router. |
 | Pairing | Bluetooth Low Energy endpoints for the pairing process. |
 | Record | Record video and audio. Input from camera and mic is constantly read and fanned out to multiple consumers (e.g. stream and/or recording). |
 | Relaycomm | Communicate with the relay server via WebSockets. |
 | SFX | Play sound effects. |
-| Storage | Save recordings and update the event log. |
+| Events | Save recordings, manage event types and update the event log. |
 | Testutil | Utilities used for unit testing. |
 | Updater | Check for, download and install firmware updates utilizing RAUC. |
 | WiFi | Scan for WiFi networks and establish a connection. |

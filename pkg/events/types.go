@@ -6,6 +6,25 @@ import (
 	"root-firmware/pkg/config"
 )
 
+const (
+	TypePerson  = "person"
+	TypePet     = "pet"
+	TypeVehicle = "vehicle"
+	TypeMotion  = "motion"
+)
+
+type EventTypeInfo struct {
+	Value string `cbor:"value"`
+	Label string `cbor:"label"`
+}
+
+var AvailableEventTypes = []EventTypeInfo{
+	{Value: TypePerson, Label: "Person"},
+	{Value: TypePet, Label: "Pet"},
+	{Value: TypeVehicle, Label: "Vehicle"},
+	{Value: TypeMotion, Label: "Other motion"},
+}
+
 // IsEventDetectionEnabled returns whether event detection is enabled (default true)
 func IsEventDetectionEnabled() bool {
 	if val, ok := config.Get().GetKey("eventDetectionEnabled"); ok {

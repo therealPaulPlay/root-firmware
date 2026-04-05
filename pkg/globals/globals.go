@@ -55,19 +55,19 @@ var AssetsPath = DataDir + "/assets"
 var FirmwareDataDir = DataDir + "/.firmware-data"
 
 // Config
-var ConfigPath = FirmwareDataDir + "/config.json"
+var ConfigPath = FirmwareDataDir + "/config.cbor"
 
 // Logs
-var LogsPath = FirmwareDataDir + "/logs.json"
+var LogsPath = FirmwareDataDir + "/logs.cbor"
 
 // Metrics
-var MetricsPath = FirmwareDataDir + "/metrics.json"
+var MetricsPath = FirmwareDataDir + "/metrics.cbor"
 
 // Recordings
 var RecordingsPath = DataDir + "/recordings"
 
 // Event log
-var EventLogPath = RecordingsPath + "/events.json"
+var EventLogPath = RecordingsPath + "/events.cbor"
 
 // RAUC update config
 const RAUCCompatible = "root-observer" // Must match system.conf and bundle manifest

@@ -18,11 +18,10 @@ import (
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/logger"
 	"root-firmware/pkg/metrics"
-	"root-firmware/pkg/ml"
 	"root-firmware/pkg/notifications"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
-	"root-firmware/pkg/storage"
+	"root-firmware/pkg/events"
 	"root-firmware/pkg/updater"
 	"root-firmware/pkg/wifi"
 )
@@ -308,22 +307,15 @@ func handleRenewKey(msg Message) {
 	}
 
 	var req struct {
-		NewPublicKey string `cbor:"newPublicKey"`
+		NewPublicKey []byte `cbor:"newPublicKey"`
 	}
 	if err := cbor.Unmarshal(decrypted, &req); err != nil {
 		sendUnencryptedError(msg.OriginID, msg.RequestID, MsgRenewKey, ErrInvalidPayload, "Invalid payload")
 		return
 	}
 
-	// Decode base64 public key
-	newPublicKey, err := encryption.DecodeKey(req.NewPublicKey)
-	if err != nil {
-		sendUnencryptedError(msg.OriginID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Invalid public key")
-		return
-	}
-
 	// Derive NEW shared secret (but don't commit yet - wait for ACK)
-	newSharedSecret, err := encryption.DeriveSharedSecret(privKey, newPublicKey)
+	newSharedSecret, err := encryption.DeriveSharedSecret(privKey, req.NewPublicKey)
 	if err != nil {
 		sendUnencryptedError(msg.OriginID, msg.RequestID, MsgRenewKey, ErrInvalidKey, "Failed to derive new encryption key")
 		return
@@ -343,7 +335,7 @@ func handleRenewKey(msg Message) {
 	}
 
 	StorePreviousEncryption(msg.OriginID, session)                  // Store current encryption session for grace period
-	BufferPendingKeyRenewal(msg.OriginID, newPublicKey, newSession) // Buffer new key (don't commit yet)
+	BufferPendingKeyRenewal(msg.OriginID, req.NewPublicKey, newSession) // Buffer new key (don't commit yet)
 
 	log.Printf("RelayComm: Key renewal prepared for device %s, waiting for ACK", msg.OriginID)
 	SendEncryptedSuccess(currentCtx, MsgRenewKey, nil) // Send with current (to-be-replaced) encryption
@@ -445,13 +437,38 @@ func handleSetProductAlias(ctx *HandlerContext, payload []byte) {
 }
 
 func handleGetEvents(ctx *HandlerContext, payload []byte) {
-	events, err := storage.Get().GetEventLog()
+	var req struct {
+		Limit        int      `cbor:"limit"`
+		Cursor       int      `cbor:"cursor"`
+		StartTime    int64    `cbor:"startTime"`
+		EndTime      int64    `cbor:"endTime"`
+		EventTypes   []string `cbor:"eventTypes"`
+		UntilEventID string   `cbor:"untilEventId"`
+	}
+
+	if len(payload) > 0 {
+		if err := cbor.Unmarshal(payload, &req); err != nil {
+			SendEncryptedError(ctx, MsgGetEvents, ErrInvalidPayload, "Invalid payload")
+			return
+		}
+	}
+
+	if req.Limit <= 0 {
+		req.Limit = 200
+	}
+
+	eventList, nextCursor, total, err := events.Get().GetEventLogPaginated(
+		req.Limit, req.Cursor, req.StartTime, req.EndTime, req.EventTypes, req.UntilEventID,
+	)
 	if err != nil {
 		SendEncryptedError(ctx, MsgGetEvents, ErrInternalError, err.Error())
 		return
 	}
+
 	SendEncryptedSuccess(ctx, MsgGetEvents, map[string]any{
-		"events": events,
+		"events":     eventList,
+		"nextCursor": nextCursor,
+		"total":      total,
 	})
 }
 
@@ -466,13 +483,13 @@ func handleGetRecording(ctx *HandlerContext, payload []byte) {
 	}
 
 	// Verify paths exist
-	videoPath, err := storage.Get().GetRecordingPath(req.ID)
+	videoPath, err := events.Get().GetRecordingPath(req.ID)
 	if err != nil {
 		SendEncryptedError(ctx, MsgGetRecording, ErrInternalError, err.Error())
 		return
 	}
 
-	audioPath, err := storage.Get().GetAudioPath(req.ID)
+	audioPath, err := events.Get().GetAudioPath(req.ID)
 	hasAudio := err == nil
 
 	// Send immediate success ack
@@ -504,7 +521,7 @@ func handleGetThumbnail(ctx *HandlerContext, payload []byte) {
 
 	eventIdField := map[string]any{"eventId": req.ID}
 
-	filePath, err := storage.Get().GetThumbnailPath(req.ID)
+	filePath, err := events.Get().GetThumbnailPath(req.ID)
 	if err != nil {
 		SendEncryptedError(ctx, MsgGetThumbnail, ErrInternalError, err.Error(), eventIdField)
 		return
@@ -720,8 +737,9 @@ func handleReset(ctx *HandlerContext, payload []byte) {
 
 func handleGetEventDetectionConfig(ctx *HandlerContext, payload []byte) {
 	SendEncryptedSuccess(ctx, MsgGetEventDetectionConfig, map[string]any{
-		"enabled":      ml.IsEventDetectionEnabled(),
-		"enabledTypes": ml.GetEnabledEventTypes(),
+		"enabled":             events.IsEventDetectionEnabled(),
+		"enabledTypes":        events.GetEnabledEventTypes(),
+		"availableEventTypes": events.AvailableEventTypes,
 	})
 }
 

@@ -281,46 +281,6 @@ func TestComputeAAD(t *testing.T) {
 	}
 }
 
-func TestEncodeDecodeKey_Roundtrip(t *testing.T) {
-	original := []byte{0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD}
-
-	encoded := EncodeKey(original)
-	decoded, err := DecodeKey(encoded)
-
-	if err != nil {
-		t.Fatalf("DecodeKey() error = %v", err)
-	}
-	if !bytes.Equal(decoded, original) {
-		t.Errorf("roundtrip failed: got %v, want %v", decoded, original)
-	}
-}
-
-func TestEncodeKey_ProducesBase64(t *testing.T) {
-	key := []byte{0x00, 0x01, 0x02}
-	encoded := EncodeKey(key)
-
-	// Should be valid base64
-	if encoded != "AAEC" {
-		t.Errorf("EncodeKey() = %s, want AAEC", encoded)
-	}
-}
-
-func TestDecodeKey_InvalidBase64(t *testing.T) {
-	_, err := DecodeKey("not valid base64!")
-	if err == nil {
-		t.Error("DecodeKey() should error with invalid base64")
-	}
-}
-
-func TestDecodeKey_EmptyString(t *testing.T) {
-	decoded, err := DecodeKey("")
-	if err != nil {
-		t.Fatalf("DecodeKey(\"\") error = %v", err)
-	}
-	if len(decoded) != 0 {
-		t.Errorf("DecodeKey(\"\") = %v, want empty", decoded)
-	}
-}
 
 func TestFullKeyExchangeAndEncryption(t *testing.T) {
 	// Simulate a full key exchange between two parties

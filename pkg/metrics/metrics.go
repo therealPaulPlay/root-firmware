@@ -1,12 +1,12 @@
 package metrics
 
 import (
-	"encoding/json"
 	"log"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
@@ -23,11 +23,11 @@ const (
 )
 
 type DataPoint struct {
-	Timestamp   float64 `json:"t"` // Unix milliseconds (float64 for compatibility)
-	CPU         float64 `json:"cpu"`
-	Memory      float64 `json:"mem"`
-	Temperature float64 `json:"temp"`
-	Disk        float64 `json:"disk"`
+	Timestamp   int64   `cbor:"t"`
+	CPU         float64 `cbor:"cpu"`
+	Memory      float64 `cbor:"mem"`
+	Temperature float64 `cbor:"temp"`
+	Disk        float64 `cbor:"disk"`
 }
 
 type collector struct {
@@ -76,7 +76,7 @@ func (c *collector) run() {
 			if len(c.points) > maxDataPoints {
 				c.points = c.points[len(c.points)-maxDataPoints:]
 			}
-			cutoffMs := float64(time.Now().UTC().Add(-1 * time.Hour).UnixMilli())
+			cutoffMs := time.Now().UTC().Add(-1 * time.Hour).UnixMilli()
 			start := 0
 			for start < len(c.points) && c.points[start].Timestamp < cutoffMs {
 				start++
@@ -94,7 +94,7 @@ func (c *collector) run() {
 }
 
 func (c *collector) collect() DataPoint {
-	dp := DataPoint{Timestamp: float64(time.Now().UnixMilli())}
+	dp := DataPoint{Timestamp: time.Now().UnixMilli()}
 
 	// CPU: non-blocking delta calculation from /proc/stat
 	if times, err := cpu.Times(false); err == nil && len(times) > 0 {
@@ -141,7 +141,7 @@ func load() []DataPoint {
 		return []DataPoint{}
 	}
 	var points []DataPoint
-	if err := json.Unmarshal(data, &points); err != nil {
+	if err := cbor.Unmarshal(data, &points); err != nil {
 		log.Printf("Metrics: Failed to parse metrics file: %v", err)
 		return []DataPoint{}
 	}
@@ -149,7 +149,7 @@ func load() []DataPoint {
 }
 
 func save(points []DataPoint) {
-	data, err := json.Marshal(points)
+	data, err := cbor.Marshal(points)
 	if err != nil {
 		log.Printf("Metrics: Failed to marshal metrics: %v", err)
 		return

@@ -57,7 +57,7 @@ type DetectionResult struct {
 
 type Event struct {
 	ID        string           `cbor:"id"`
-	Timestamp float64          `cbor:"timestamp"`
+	Timestamp int64            `cbor:"timestamp"`
 	Duration  float64          `cbor:"duration"`
 	EventType string           `cbor:"eventType"`
 	Detection *DetectionResult `cbor:"detection,omitempty"`
@@ -98,16 +98,24 @@ func Init() error {
 func recoverEventLog() error {
 	data, err := os.ReadFile(globals.EventLogPath)
 	if os.IsNotExist(err) {
-		data, _ := cbor.Marshal(EventLog{Events: []Event{}})
-		return fsutil.AtomicWrite(globals.EventLogPath, data, 0644)
+		empty, err := cbor.Marshal(EventLog{Events: []Event{}})
+		if err != nil {
+			return fmt.Errorf("failed to marshal empty event log: %w", err)
+		}
+		return fsutil.AtomicWrite(globals.EventLogPath, empty, 0644)
 	}
 
 	var test EventLog
 	if cbor.Unmarshal(data, &test) != nil {
-		log.Printf("Storage: Corrupted event log, resetting")
-		os.Rename(globals.EventLogPath, globals.EventLogPath+".corrupted")
-		data, _ := cbor.Marshal(EventLog{Events: []Event{}})
-		return fsutil.AtomicWrite(globals.EventLogPath, data, 0644)
+		log.Printf("Events: Corrupted event log, resetting")
+		if err := os.Rename(globals.EventLogPath, globals.EventLogPath+".corrupted"); err != nil {
+			log.Printf("Events: Failed to backup corrupted event log: %v", err)
+		}
+		empty, err := cbor.Marshal(EventLog{Events: []Event{}})
+		if err != nil {
+			return fmt.Errorf("failed to marshal empty event log: %w", err)
+		}
+		return fsutil.AtomicWrite(globals.EventLogPath, empty, 0644)
 	}
 
 	return nil
@@ -117,21 +125,21 @@ func recoverEventLog() error {
 func cleanupOrphanedFiles() {
 	matches, err := filepath.Glob(filepath.Join(globals.RecordingsPath, "temp-*"))
 	if err != nil {
-		log.Printf("Storage: Failed to scan for orphaned files: %v", err)
+		log.Printf("Events: Failed to scan for orphaned files: %v", err)
 		return
 	}
 	for _, f := range matches {
 		if err := os.Remove(f); err != nil {
-			log.Printf("Storage: Failed to remove orphaned file %s: %v", f, err)
+			log.Printf("Events: Failed to remove orphaned file %s: %v", f, err)
 		} else {
-			log.Printf("Storage: Removed orphaned file %s", f)
+			log.Printf("Events: Removed orphaned file %s", f)
 		}
 	}
 }
 
 func Get() *Storage {
 	if instance == nil {
-		panic("storage not initialized - call Init() first")
+		panic("events not initialized - call Init() first")
 	}
 	return instance
 }
@@ -158,7 +166,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	// which is better than orphaned files that can never be cleaned up
 	event := Event{
 		ID:        eventID,
-		Timestamp: float64(time.Now().UnixMilli()),
+		Timestamp: time.Now().UnixMilli(),
 		Duration:  duration,
 		EventType: eventType,
 		Detection: detection,
@@ -192,7 +200,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	if _, err := os.Stat(audioTempPath); err == nil {
 		audioFinalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", eventID))
 		if err := encryptFileToPath(audioTempPath, audioFinalPath, productPrivateKey); err != nil {
-			log.Printf("Storage: Failed to encrypt audio for %s: %v", eventID, err)
+			log.Printf("Events: Failed to encrypt audio for %s: %v", eventID, err)
 		}
 		os.Remove(audioTempPath) // Clean up temp file
 	}
@@ -202,11 +210,11 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", eventID))
 		session, err := encryption.SessionFromKey(productPrivateKey)
 		if err != nil {
-			log.Printf("Storage: Failed to create encryption session for %s: %v", eventID, err)
+			log.Printf("Events: Failed to create encryption session for %s: %v", eventID, err)
 		} else if encryptedPreview, err := session.Encrypt(preview, nil); err != nil {
-			log.Printf("Storage: Failed to encrypt thumbnail for %s: %v", eventID, err)
+			log.Printf("Events: Failed to encrypt thumbnail for %s: %v", eventID, err)
 		} else if err := fsutil.AtomicWrite(thumbnailPath, encryptedPreview, 0644); err != nil {
-			log.Printf("Storage: Failed to save thumbnail for %s: %v", eventID, err)
+			log.Printf("Events: Failed to save thumbnail for %s: %v", eventID, err)
 		}
 	}
 
@@ -214,7 +222,8 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 }
 
 // GetEventLogPaginated returns a page of events (newest first) with optional filtering
-func (s *Storage) GetEventLogPaginated(limit, cursor int, startTime, endTime float64, eventTypes []string) ([]Event, int, int, error) {
+// If untilEventId is set, returns at least limit events but extends to include the target event
+func (s *Storage) GetEventLogPaginated(limit, cursor int, startTime, endTime int64, eventTypes []string, untilEventId string) ([]Event, int, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -223,21 +232,16 @@ func (s *Storage) GetEventLogPaginated(limit, cursor int, startTime, endTime flo
 		return nil, 0, 0, err
 	}
 
-	// Reverse to newest-first
-	all := make([]Event, len(eventLog.Events))
-	for i := range eventLog.Events {
-		all[i] = eventLog.Events[len(eventLog.Events)-1-i]
-	}
-
 	// Build type set for fast lookup
 	typeSet := make(map[string]bool, len(eventTypes))
 	for _, t := range eventTypes {
 		typeSet[t] = true
 	}
 
-	// Filter
+	// Filter in reverse order (newest first)
 	var filtered []Event
-	for _, e := range all {
+	for i := len(eventLog.Events) - 1; i >= 0; i-- {
+		e := eventLog.Events[i]
 		if startTime > 0 && e.Timestamp < startTime {
 			continue
 		}
@@ -252,10 +256,24 @@ func (s *Storage) GetEventLogPaginated(limit, cursor int, startTime, endTime flo
 
 	total := len(filtered)
 
+	if cursor < 0 {
+		cursor = 0
+	}
 	if cursor >= total {
 		return []Event{}, 0, total, nil
 	}
+
+	// At least limit events, but extend to include untilEventId if it exists
 	end := cursor + limit
+	if untilEventId != "" {
+		for i := cursor; i < total; i++ {
+			if filtered[i].ID == untilEventId && i >= end {
+				end = i + 1
+				break
+			}
+		}
+	}
+
 	nextCursor := 0
 	if end < total {
 		nextCursor = end
@@ -320,30 +338,38 @@ func (s *Storage) writeEventLog(eventLog *EventLog) error {
 func (s *Storage) cleanupForRecording(recordingSize int64) error {
 	needed := recordingSize + minFreeSpace
 	maxIterations := 50
-	iterations := 0
 
-	for {
-		iterations++
-		if iterations > maxIterations {
-			return fmt.Errorf("failed to free enough space after %d deletions", maxIterations)
+	// Read event log once upfront
+	eventLog, err := s.readEventLog()
+	if err != nil {
+		return err
+	}
+
+	initialCount := len(eventLog.Events)
+	flush := func() error {
+		if len(eventLog.Events) < initialCount {
+			if err := s.writeEventLog(eventLog); err != nil {
+				log.Printf("Events: Failed to update event log after cleanup: %v", err)
+				return err
+			}
 		}
+		return nil
+	}
 
+	deletions := 0
+	for deletions < maxIterations {
 		free, err := s.getFreeSpace()
 		if err != nil {
+			flush()
 			return err
 		}
 
 		if free >= needed {
-			return nil // Enough space available
-		}
-
-		// Need to delete oldest recording
-		eventLog, err := s.readEventLog()
-		if err != nil {
-			return err
+			return flush()
 		}
 
 		if len(eventLog.Events) == 0 {
+			flush()
 			return fmt.Errorf("insufficient space and no recordings to delete")
 		}
 
@@ -353,27 +379,28 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 		audioPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", oldest.ID))
 		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", oldest.ID))
 
-		// Permanently delete video file (log errors but continue)
-		if err := os.Remove(videoPath); err != nil && !os.IsNotExist(err) {
-			log.Printf("Storage: Failed to delete recording %s: %v", oldest.ID, err)
+		// Ghost entry: video already gone (crash before event log flush) — doesn't free space
+		ghost := false
+		if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+			ghost = true
 		}
 
-		// Permanently delete audio file if it exists (log errors but continue)
-		if err := os.Remove(audioPath); err != nil && !os.IsNotExist(err) {
-			log.Printf("Storage: Failed to delete audio file %s: %v", oldest.ID, err)
+		for _, path := range []string{videoPath, audioPath, thumbnailPath} {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				log.Printf("Events: Failed to delete %s: %v", path, err)
+			}
 		}
 
-		// Permanently delete thumbnail (log errors but continue)
-		if err := os.Remove(thumbnailPath); err != nil && !os.IsNotExist(err) {
-			log.Printf("Storage: Failed to delete thumbnail %s: %v", oldest.ID, err)
-		}
-
-		// Remove from eventLog and save
 		eventLog.Events = eventLog.Events[1:]
-		if err := s.writeEventLog(eventLog); err != nil {
-			log.Printf("Storage: Failed to update event log after deleting %s: %v", oldest.ID, err)
+
+		// Ghost entries don't free space, don't count toward the iteration limit
+		if !ghost {
+			deletions++
 		}
 	}
+
+	flush()
+	return fmt.Errorf("failed to free enough space after %d deletions", maxIterations)
 }
 
 // getFreeSpace returns free space in bytes on data partition

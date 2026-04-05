@@ -1,12 +1,13 @@
 package logger
 
 import (
-	"encoding/json"
 	"io"
 	"log"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
@@ -16,8 +17,8 @@ const maxLogs = 250
 const maxLogMsgSize = 1500 // Max characters per log message
 
 type Entry struct {
-	Timestamp float64 `json:"timestamp"` // Unix milliseconds (float64 for compatibility)
-	Msg       string  `json:"msg"`
+	Timestamp int64 `cbor:"timestamp"`
+	Msg       string  `cbor:"msg"`
 }
 
 type writer struct {
@@ -43,7 +44,7 @@ func (wr *writer) Write(p []byte) (int, error) {
 	}
 
 	wr.logs = append(wr.logs, Entry{
-		Timestamp: float64(time.Now().UnixMilli()),
+		Timestamp: time.Now().UnixMilli(),
 		Msg:       msg,
 	})
 
@@ -70,11 +71,20 @@ func load() []Entry {
 		return []Entry{}
 	}
 	var logs []Entry
-	json.Unmarshal(data, &logs)
+	if err := cbor.Unmarshal(data, &logs); err != nil {
+		log.Printf("Logger: Failed to parse logs file: %v", err)
+		return []Entry{}
+	}
 	return logs
 }
 
 func save(logs []Entry) {
-	data, _ := json.Marshal(logs)
-	fsutil.AtomicWrite(globals.LogsPath, data, 0644)
+	data, err := cbor.Marshal(logs)
+	if err != nil {
+		log.Printf("Logger: Failed to marshal logs: %v", err)
+		return
+	}
+	if err := fsutil.AtomicWrite(globals.LogsPath, data, 0644); err != nil {
+		log.Printf("Logger: Failed to save logs: %v", err)
+	}
 }

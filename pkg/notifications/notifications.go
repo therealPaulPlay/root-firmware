@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
+
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/encryption"
@@ -24,8 +26,8 @@ const (
 
 // NotificationDevice represents a device registered to receive push notifications
 type NotificationDevice struct {
-	DeviceID string `json:"deviceId"` // Must match a paired device ID
-	FCMToken string `json:"fcmToken"` // Firebase Cloud Messaging token
+	DeviceID string `cbor:"deviceId"`
+	FCMToken string `cbor:"fcmToken"`
 }
 
 type Notifications struct {
@@ -115,11 +117,11 @@ func (n *Notifications) GetCooldownMinutes() int {
 	if !ok {
 		return 0
 	}
-	f, ok := val.(float64)
+	v, ok := val.(uint64)
 	if !ok {
 		return 0
 	}
-	return int(f)
+	return int(v)
 }
 
 // SetCooldownMinutes sets the notification cooldown in minutes (0 = off, max 30)
@@ -331,8 +333,15 @@ func (n *Notifications) getEntries() []NotificationDevice {
 		return []NotificationDevice{}
 	}
 
-	data, _ := json.Marshal(val)
+	data, err := cbor.Marshal(val)
+	if err != nil {
+		log.Printf("Notifications: Failed to marshal notification devices: %v", err)
+		return []NotificationDevice{}
+	}
 	var entries []NotificationDevice
-	json.Unmarshal(data, &entries)
+	if err := cbor.Unmarshal(data, &entries); err != nil {
+		log.Printf("Notifications: Failed to unmarshal notification devices: %v", err)
+		return []NotificationDevice{}
+	}
 	return entries
 }

@@ -15,9 +15,9 @@ import (
 )
 
 type Network struct {
-	SSID    string `json:"ssid"`
-	Signal  int    `json:"signal"` // 0-100
-	Secured bool   `json:"secured"`
+	SSID    string `cbor:"ssid"`
+	Signal  int    `cbor:"signal"`
+	Secured bool   `cbor:"secured"`
 }
 
 type WiFi struct {

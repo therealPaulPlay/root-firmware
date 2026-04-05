@@ -13,7 +13,7 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 
 	"root-firmware/pkg/globals"
-	"root-firmware/pkg/storage"
+	"root-firmware/pkg/events"
 )
 
 // muxJob represents a recording that needs to be muxed to MP4/M4A and saved
@@ -25,7 +25,7 @@ type muxJob struct {
 	eventID      string
 	eventType    string
 	preview      []byte
-	detection    *storage.DetectionResult
+	detection    *events.DetectionResult
 }
 
 // muxWorker processes mux jobs serially to avoid CPU contention on the Pi
@@ -36,7 +36,9 @@ func (r *Recorder) muxWorker() {
 			continue
 		}
 		muxAudio(job.audioEntries, job.videoEntries[0].timestamp, job.outputPath)
-		storage.Get().SaveRecording(job.eventID, job.outputPath, job.duration, job.eventType, job.preview, job.detection)
+		if err := events.Get().SaveRecording(job.eventID, job.outputPath, job.duration, job.eventType, job.preview, job.detection); err != nil {
+			log.Printf("Recorder: Failed to save recording %s: %v", job.eventID, err)
+		}
 	}
 }
 

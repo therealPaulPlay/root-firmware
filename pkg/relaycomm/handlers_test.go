@@ -87,8 +87,8 @@ func TestUseEncryption_Success(t *testing.T) {
 	deviceKeypair, _ := encryption.GenerateKeypair()
 
 	// Get product's public key to derive shared secret
-	productPubKeyEncoded, _ := config.Get().GetKey("productPublicKey")
-	productPubKey, _ := encryption.DecodeKey(productPubKeyEncoded.(string))
+	productPubKeyRaw, _ := config.Get().GetKey("productPublicKey")
+	productPubKey := productPubKeyRaw.([]byte)
 
 	// Add device with its public key
 	devices.Get().Add("test-device", "Test Device", deviceKeypair.PublicKey)

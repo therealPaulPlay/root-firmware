@@ -15,7 +15,7 @@ import (
 	"root-firmware/pkg/notifications"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/sfx"
-	"root-firmware/pkg/storage"
+	"root-firmware/pkg/events"
 )
 
 const (
@@ -34,7 +34,7 @@ type ML struct {
 	recordingEvent      string
 	recordingStart      time.Time
 	recordingPreview    []byte
-	recordingDetection  *storage.DetectionResult
+	recordingDetection  *events.DetectionResult
 	recordingSplitAfter time.Duration // wall-clock time until split
 	lastRecordedAt      time.Time
 	mu                  sync.Mutex
@@ -106,7 +106,7 @@ func (m *ML) check() {
 	}
 
 	// If event detection is disabled, stop any active recording and return
-	if !IsEventDetectionEnabled() {
+	if !events.IsEventDetectionEnabled() {
 		m.mu.Lock()
 		m.stopRecordingIfActive("event detection disabled")
 		m.mu.Unlock()
@@ -140,13 +140,13 @@ func (m *ML) check() {
 
 	// Discard detected type if the user has disabled it (e.g. "pet" disabled should not record)
 	eventType := detection.EventType
-	if eventType != "" && !isEventTypeEnabled(eventType, true) {
+	if eventType != "" && !events.IsEventTypeEnabled(eventType, true) {
 		eventType = ""
 	}
 
 	// Fall back to generic motion when nothing was classified & motion event is enabled
-	if eventType == "" && isEventTypeEnabled("motion", false) {
-		eventType = "motion"
+	if eventType == "" && events.IsEventTypeEnabled(events.TypeMotion, false) {
+		eventType = events.TypeMotion
 	}
 
 	// No recordable event — stop any active recording
@@ -185,7 +185,7 @@ func (m *ML) check() {
 	}
 }
 
-func (m *ML) startRecording(eventType string, preview image.Image, detection *storage.DetectionResult, withLookback bool) error {
+func (m *ML) startRecording(eventType string, preview image.Image, detection *events.DetectionResult, withLookback bool) error {
 	tempPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("temp-%d.mp4", time.Now().Unix()))
 
 	id, err := uuid.NewV4()

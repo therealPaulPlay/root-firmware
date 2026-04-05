@@ -21,11 +21,11 @@ func SetupTempGlobals(t *testing.T) func() {
 
 	tempDir := t.TempDir()
 	globals.FirmwareDataDir = filepath.Join(tempDir, ".firmware-data")
-	globals.ConfigPath = filepath.Join(globals.FirmwareDataDir, "config.json")
+	globals.ConfigPath = filepath.Join(globals.FirmwareDataDir, "config.cbor")
 	globals.RecordingsPath = filepath.Join(tempDir, "recordings")
-	globals.EventLogPath = filepath.Join(globals.RecordingsPath, "events.json")
-	globals.LogsPath = filepath.Join(globals.FirmwareDataDir, "logs.json")
-	globals.MetricsPath = filepath.Join(globals.FirmwareDataDir, "metrics.json")
+	globals.EventLogPath = filepath.Join(globals.RecordingsPath, "events.cbor")
+	globals.LogsPath = filepath.Join(globals.FirmwareDataDir, "logs.cbor")
+	globals.MetricsPath = filepath.Join(globals.FirmwareDataDir, "metrics.cbor")
 
 	return func() {
 		globals.FirmwareDataDir = origFirmwareDataDir

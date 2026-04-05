@@ -21,7 +21,7 @@ import (
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/sfx"
-	"root-firmware/pkg/storage"
+	"root-firmware/pkg/events"
 	"root-firmware/pkg/updater"
 	"root-firmware/pkg/wifi"
 )
@@ -43,8 +43,8 @@ func main() {
 	if err := config.Init(); err != nil {
 		log.Fatalf("Failed to initialize config: %v", err)
 	}
-	if err := storage.Init(); err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+	if err := events.Init(); err != nil {
+		log.Fatalf("Failed to initialize events: %v", err)
 	}
 
 	// Initialize straightforward packages (not heavy / no errors)

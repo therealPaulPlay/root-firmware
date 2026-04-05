@@ -1,17 +1,17 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"sync"
 
+	"github.com/fxamacker/cbor/v2"
+	"github.com/gofrs/uuid"
+
 	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
-
-	"github.com/gofrs/uuid"
 )
 
 type Config struct {
@@ -22,7 +22,7 @@ type Config struct {
 var instance *Config
 var once sync.Once
 
-// Init initializes the config system and creates config.json if it doesn't exist
+// Init initializes the config system and creates the config file if it doesn't exist
 func Init() error {
 	var err error
 	once.Do(func() {
@@ -62,10 +62,12 @@ func (c *Config) load() error {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
 
-	if err := json.Unmarshal(data, &c.data); err != nil {
+	if err := cbor.Unmarshal(data, &c.data); err != nil {
 		// Corrupted config - backup and recreate
 		log.Printf("Config: Corrupted config detected, recreating")
-		os.Rename(globals.ConfigPath, globals.ConfigPath+".corrupted")
+		if err := os.Rename(globals.ConfigPath, globals.ConfigPath+".corrupted"); err != nil {
+			log.Printf("Config: Failed to backup corrupted config: %v", err)
+		}
 		c.data = make(map[string]any)
 		return c.createInitialConfig()
 	}
@@ -84,7 +86,6 @@ func (c *Config) createInitialConfig() error {
 	}
 
 	// Generate product keypair for end-to-end encryption with paired devices
-	// Store as base64 encoded strings
 	keypair, err := encryption.GenerateKeypair()
 	if err != nil {
 		return fmt.Errorf("failed to generate product keypair: %w", err)
@@ -93,15 +94,15 @@ func (c *Config) createInitialConfig() error {
 	c.data = map[string]any{
 		"id":                id.String(),
 		"bluetoothName":     "ROOT-Observer-" + generateRandomSuffix(4),
-		"productPrivateKey": encryption.EncodeKey(keypair.PrivateKey),
-		"productPublicKey":  encryption.EncodeKey(keypair.PublicKey),
+		"productPrivateKey": keypair.PrivateKey,
+		"productPublicKey":  keypair.PublicKey,
 	}
 
 	return c.save()
 }
 
 func (c *Config) save() error {
-	data, err := json.MarshalIndent(c.data, "", "  ")
+	data, err := cbor.Marshal(c.data)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -111,8 +112,8 @@ func (c *Config) save() error {
 
 // SetKey sets a config value and persists to disk
 // Pass nil to delete the key
-// Values are JSON-normalized so that GetKey always returns the same types
-// as json.Unmarshal into map[string]any (e.g. []any instead of []string)
+// Values are CBOR-normalized so that GetKey always returns the same types
+// as cbor.Unmarshal into map[string]any (e.g. []any instead of []string)
 func (c *Config) SetKey(key string, value any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -120,7 +121,7 @@ func (c *Config) SetKey(key string, value any) error {
 	if value == nil {
 		delete(c.data, key)
 	} else {
-		normalized, err := jsonNormalize(value)
+		normalized, err := cborNormalize(value)
 		if err != nil {
 			return fmt.Errorf("failed to normalize config value: %w", err)
 		}
@@ -130,15 +131,15 @@ func (c *Config) SetKey(key string, value any) error {
 	return c.save()
 }
 
-// jsonNormalize round-trips a value through JSON so the in-memory type
-// matches what json.Unmarshal would produce
-func jsonNormalize(value any) (any, error) {
-	b, err := json.Marshal(value)
+// cborNormalize round-trips a value through CBOR so the in-memory type
+// matches what cbor.Unmarshal would produce
+func cborNormalize(value any) (any, error) {
+	b, err := cbor.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
 	var normalized any
-	if err := json.Unmarshal(b, &normalized); err != nil {
+	if err := cbor.Unmarshal(b, &normalized); err != nil {
 		return nil, err
 	}
 	return normalized, nil
@@ -156,17 +157,13 @@ func (c *Config) GetKey(key string) (any, bool) {
 
 // GetProductPrivateKey retrieves the camera's private key as raw bytes
 func (c *Config) GetProductPrivateKey() ([]byte, error) {
-	keyEncoded, ok := c.GetKey("productPrivateKey")
+	val, ok := c.GetKey("productPrivateKey")
 	if !ok {
 		return nil, fmt.Errorf("product private key not set")
 	}
-	keyStr, ok := keyEncoded.(string)
+	key, ok := val.([]byte)
 	if !ok {
 		return nil, fmt.Errorf("product private key has invalid type")
-	}
-	key, err := encryption.DecodeKey(keyStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode product private key: %w", err)
 	}
 	return key, nil
 }

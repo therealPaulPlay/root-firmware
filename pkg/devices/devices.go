@@ -1,22 +1,24 @@
 package devices
 
 import (
-	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
 )
 
 type Device struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`         // Device name
-	PublicKey    []byte  `json:"publicKey"`    // Device's public key
-	ProductAlias string  `json:"productAlias"` // User-defined name for the ROOT product (e.g. "Living Room Camera")
-	PairedAt     float64 `json:"pairedAt"`     // Unix milliseconds (float64 for compatibility)
+	ID           string  `cbor:"id"`
+	Name         string  `cbor:"name"`
+	PublicKey    []byte  `cbor:"publicKey"`
+	ProductAlias string  `cbor:"productAlias"`
+	PairedAt     int64   `cbor:"pairedAt"`
 }
 
 type Devices struct {
@@ -88,7 +90,7 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 		Name:         name,
 		PublicKey:    publicKey,
 		ProductAlias: "My ROOT " + strings.ToUpper(globals.ProductModel[:1]) + globals.ProductModel[1:], // Prefix needs to match client-side default prefix
-		PairedAt:     float64(time.Now().UnixMilli()),
+		PairedAt:     time.Now().UnixMilli(),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
@@ -169,8 +171,15 @@ func (d *Devices) getDevices() []Device {
 		return []Device{}
 	}
 
-	data, _ := json.Marshal(val)
+	data, err := cbor.Marshal(val)
+	if err != nil {
+		log.Printf("Devices: Failed to marshal devices: %v", err)
+		return []Device{}
+	}
 	var devices []Device
-	json.Unmarshal(data, &devices)
+	if err := cbor.Unmarshal(data, &devices); err != nil {
+		log.Printf("Devices: Failed to unmarshal devices: %v", err)
+		return []Device{}
+	}
 	return devices
 }

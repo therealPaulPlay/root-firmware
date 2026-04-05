@@ -6,7 +6,6 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"sync"
@@ -125,12 +124,3 @@ func ComputeAAD(msgType, originId, targetId string) []byte {
 	return h[:]
 }
 
-// EncodeKey converts public key to base64
-func EncodeKey(publicKey []byte) string {
-	return base64.StdEncoding.EncodeToString(publicKey)
-}
-
-// DecodeKey converts base64 key to bytes
-func DecodeKey(encoded string) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(encoded)
-}

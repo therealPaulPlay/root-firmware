@@ -1,9 +1,10 @@
 package metrics
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
@@ -46,7 +47,7 @@ func TestLoad_HandlesErrors(t *testing.T) {
 	}{
 		{"missing file", func() {}},
 		{"corrupted file", func() {
-			os.WriteFile(globals.MetricsPath, []byte("not valid json{{{"), 0644)
+			os.WriteFile(globals.MetricsPath, []byte("not valid cbor{{{"), 0644)
 		}},
 	}
 
@@ -73,7 +74,7 @@ func TestLoad_LoadsExistingData(t *testing.T) {
 		{Timestamp: 1000, CPU: 10.5, Memory: 50.0, Temperature: 45.0, Disk: 30.0},
 		{Timestamp: 2000, CPU: 15.0, Memory: 55.0, Temperature: 46.0, Disk: 31.0},
 	}
-	data, _ := json.Marshal(existingPoints)
+	data, _ := cbor.Marshal(existingPoints)
 	os.WriteFile(globals.MetricsPath, data, 0644)
 
 	points := load()
@@ -101,7 +102,7 @@ func TestSave_PersistsData(t *testing.T) {
 	}
 
 	var loaded []DataPoint
-	json.Unmarshal(data, &loaded)
+	cbor.Unmarshal(data, &loaded)
 	if len(loaded) != 1 {
 		t.Fatalf("loaded %d points, want 1", len(loaded))
 	}

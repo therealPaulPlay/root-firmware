@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"root-firmware/pkg/config"
+	"root-firmware/pkg/events"
 	"root-firmware/pkg/testutil"
 )
 
@@ -112,14 +113,14 @@ func TestDecodeLabel(t *testing.T) {
 		classID  int
 		expected string
 	}{
-		{0, "person"},
-		{1, "vehicle"},  // bicycle
-		{2, "vehicle"},  // car
-		{3, "vehicle"},  // motorcycle
-		{5, "vehicle"},  // bus
-		{7, "vehicle"},  // truck
-		{15, "pet"},     // cat
-		{16, "pet"},     // dog
+		{0, events.TypePerson},
+		{1, events.TypeVehicle},  // bicycle
+		{2, events.TypeVehicle},  // car
+		{3, events.TypeVehicle},  // motorcycle
+		{5, events.TypeVehicle},  // bus
+		{7, events.TypeVehicle},  // truck
+		{15, events.TypePet},     // cat
+		{16, events.TypePet},     // dog
 		{99, "other"},
 	}
 
@@ -181,63 +182,6 @@ func TestNMS_KeepsNonOverlapping(t *testing.T) {
 
 	if len(result) != 3 {
 		t.Errorf("nms() kept %d boxes, want 3 (no overlap)", len(result))
-	}
-}
-
-// --- Config-dependent tests ---
-
-func TestIsEventDetectionEnabled(t *testing.T) {
-	cleanup := setupTestML(t)
-	defer cleanup()
-
-	// Default should be true
-	if !IsEventDetectionEnabled() {
-		t.Error("default should be true")
-	}
-
-	// Explicitly disabled
-	config.Get().SetKey("eventDetectionEnabled", false)
-	if IsEventDetectionEnabled() {
-		t.Error("should be false when disabled")
-	}
-}
-
-func TestGetEnabledEventTypes(t *testing.T) {
-	cleanup := setupTestML(t)
-	defer cleanup()
-
-	// Default empty
-	if len(GetEnabledEventTypes()) != 0 {
-		t.Error("default should be empty")
-	}
-
-	// With types set
-	config.Get().SetKey("eventDetectionEnabledTypes", []string{"person", "vehicle"})
-	types := GetEnabledEventTypes()
-	if len(types) != 2 || types[0] != "person" || types[1] != "vehicle" {
-		t.Errorf("GetEnabledEventTypes() = %v", types)
-	}
-}
-
-func TestIsEventTypeEnabled(t *testing.T) {
-	cleanup := setupTestML(t)
-	defer cleanup()
-
-	// No types configured - uses default
-	if !isEventTypeEnabled("person", true) {
-		t.Error("should return defaultIfUnset when no types configured")
-	}
-	if isEventTypeEnabled("person", false) {
-		t.Error("should return defaultIfUnset when no types configured")
-	}
-
-	// With types configured
-	config.Get().SetKey("eventDetectionEnabledTypes", []string{"person"})
-	if !isEventTypeEnabled("person", false) {
-		t.Error("person should be enabled")
-	}
-	if isEventTypeEnabled("vehicle", true) {
-		t.Error("vehicle should not be enabled")
 	}
 }
 

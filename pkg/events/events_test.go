@@ -136,7 +136,7 @@ func TestGetEventLogPaginated_EmptyInitially(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, nextCursor, total, err := Get().GetEventLogPaginated(200, 0, 0, 0, nil)
+	events, nextCursor, total, err := Get().GetEventLogPaginated(200, 0, 0, 0, nil, "")
 	if err != nil {
 		t.Fatalf("GetEventLogPaginated() error = %v", err)
 	}
@@ -170,7 +170,7 @@ func TestGetEventLogPaginated_ReturnsNewestFirst(t *testing.T) {
 	data, _ := cbor.Marshal(log)
 	os.WriteFile(globals.EventLogPath, data, 0644)
 
-	events, _, _, err := Get().GetEventLogPaginated(200, 0, 0, 0, nil)
+	events, _, _, err := Get().GetEventLogPaginated(200, 0, 0, 0, nil, "")
 	if err != nil {
 		t.Fatalf("GetEventLogPaginated() error = %v", err)
 	}
@@ -207,7 +207,7 @@ func TestGetEventLogPaginated_Pagination(t *testing.T) {
 	os.WriteFile(globals.EventLogPath, data, 0644)
 
 	// First page of 2
-	events, nextCursor, total, _ := Get().GetEventLogPaginated(2, 0, 0, 0, nil)
+	events, nextCursor, total, _ := Get().GetEventLogPaginated(2, 0, 0, 0, nil, "")
 	if len(events) != 2 {
 		t.Fatalf("page 1: got %d events, want 2", len(events))
 	}
@@ -222,7 +222,7 @@ func TestGetEventLogPaginated_Pagination(t *testing.T) {
 	}
 
 	// Second page
-	events, nextCursor, _, _ = Get().GetEventLogPaginated(2, nextCursor, 0, 0, nil)
+	events, nextCursor, _, _ = Get().GetEventLogPaginated(2, nextCursor, 0, 0, nil, "")
 	if len(events) != 2 {
 		t.Fatalf("page 2: got %d events, want 2", len(events))
 	}
@@ -234,7 +234,7 @@ func TestGetEventLogPaginated_Pagination(t *testing.T) {
 	}
 
 	// Last page
-	events, nextCursor, _, _ = Get().GetEventLogPaginated(2, nextCursor, 0, 0, nil)
+	events, nextCursor, _, _ = Get().GetEventLogPaginated(2, nextCursor, 0, 0, nil, "")
 	if len(events) != 1 {
 		t.Fatalf("page 3: got %d events, want 1", len(events))
 	}
@@ -253,18 +253,18 @@ func TestGetEventLogPaginated_Filtering(t *testing.T) {
 
 	log := EventLog{
 		Events: []Event{
-			{ID: "1", Timestamp: 1000, EventType: "person"},
-			{ID: "2", Timestamp: 2000, EventType: "motion"},
-			{ID: "3", Timestamp: 3000, EventType: "person"},
-			{ID: "4", Timestamp: 4000, EventType: "pet"},
-			{ID: "5", Timestamp: 5000, EventType: "motion"},
+			{ID: "1", Timestamp: 1000, EventType: TypePerson},
+			{ID: "2", Timestamp: 2000, EventType: TypeMotion},
+			{ID: "3", Timestamp: 3000, EventType: TypePerson},
+			{ID: "4", Timestamp: 4000, EventType: TypePet},
+			{ID: "5", Timestamp: 5000, EventType: TypeMotion},
 		},
 	}
 	data, _ := cbor.Marshal(log)
 	os.WriteFile(globals.EventLogPath, data, 0644)
 
 	// Filter by type
-	events, _, total, _ := Get().GetEventLogPaginated(200, 0, 0, 0, []string{"person"})
+	events, _, total, _ := Get().GetEventLogPaginated(200, 0, 0, 0, []string{TypePerson}, "")
 	if total != 2 {
 		t.Errorf("type filter: total = %d, want 2", total)
 	}
@@ -273,13 +273,13 @@ func TestGetEventLogPaginated_Filtering(t *testing.T) {
 	}
 
 	// Filter by time range
-	events, _, total, _ = Get().GetEventLogPaginated(200, 0, 2000, 4000, nil)
+	events, _, total, _ = Get().GetEventLogPaginated(200, 0, 2000, 4000, nil, "")
 	if total != 3 {
 		t.Errorf("time filter: total = %d, want 3", total)
 	}
 
 	// Combined filter
-	events, _, total, _ = Get().GetEventLogPaginated(200, 0, 2000, 4000, []string{"person"})
+	events, _, total, _ = Get().GetEventLogPaginated(200, 0, 2000, 4000, []string{TypePerson}, "")
 	if total != 1 {
 		t.Errorf("combined filter: total = %d, want 1", total)
 	}
@@ -407,8 +407,8 @@ func TestEventLogReadWrite(t *testing.T) {
 	// Write events
 	log := &EventLog{
 		Events: []Event{
-			{ID: "event-1", Timestamp: 1000, EventType: "person", Duration: 5.5},
-			{ID: "event-2", Timestamp: 2000, EventType: "motion", Duration: 3.2},
+			{ID: "event-1", Timestamp: 1000, EventType: TypePerson, Duration: 5.5},
+			{ID: "event-2", Timestamp: 2000, EventType: TypeMotion, Duration: 3.2},
 		},
 	}
 
@@ -428,8 +428,8 @@ func TestEventLogReadWrite(t *testing.T) {
 	if readLog.Events[0].ID != "event-1" {
 		t.Errorf("events[0].ID = %s, want event-1", readLog.Events[0].ID)
 	}
-	if readLog.Events[1].EventType != "motion" {
-		t.Errorf("events[1].EventType = %s, want motion", readLog.Events[1].EventType)
+	if readLog.Events[1].EventType != TypeMotion {
+		t.Errorf("events[1].EventType = %s, want %s", readLog.Events[1].EventType, TypeMotion)
 	}
 }
 
@@ -463,9 +463,9 @@ func TestGetEnabledEventTypes(t *testing.T) {
 		t.Error("default should be empty")
 	}
 
-	config.Get().SetKey("eventDetectionEnabledTypes", []string{"person", "vehicle"})
+	config.Get().SetKey("eventDetectionEnabledTypes", []string{TypePerson, TypeVehicle})
 	types := GetEnabledEventTypes()
-	if len(types) != 2 || types[0] != "person" || types[1] != "vehicle" {
+	if len(types) != 2 || types[0] != TypePerson || types[1] != TypeVehicle {
 		t.Errorf("GetEnabledEventTypes() = %v", types)
 	}
 }
@@ -479,19 +479,19 @@ func TestIsEventTypeEnabled(t *testing.T) {
 	}
 
 	// No types configured - uses default
-	if !IsEventTypeEnabled("person", true) {
+	if !IsEventTypeEnabled(TypePerson, true) {
 		t.Error("should return defaultIfUnset when no types configured")
 	}
-	if IsEventTypeEnabled("person", false) {
+	if IsEventTypeEnabled(TypePerson, false) {
 		t.Error("should return defaultIfUnset when no types configured")
 	}
 
 	// With types configured
-	config.Get().SetKey("eventDetectionEnabledTypes", []string{"person"})
-	if !IsEventTypeEnabled("person", false) {
+	config.Get().SetKey("eventDetectionEnabledTypes", []string{TypePerson})
+	if !IsEventTypeEnabled(TypePerson, false) {
 		t.Error("person should be enabled")
 	}
-	if IsEventTypeEnabled("vehicle", true) {
+	if IsEventTypeEnabled(TypeVehicle, true) {
 		t.Error("vehicle should not be enabled")
 	}
 }

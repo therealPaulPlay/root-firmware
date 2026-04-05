@@ -17,7 +17,7 @@ import (
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/sfx"
-	"root-firmware/pkg/storage"
+	"root-firmware/pkg/events"
 )
 
 const maxKeyframeBufferSize = 256 * 1024 // 256KB - must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction
@@ -385,7 +385,7 @@ func (r *Recorder) StartRecording(outputPath string, withLookback bool) {
 }
 
 // StopRecording flushes the ring buffer and enqueues an MP4 mux job
-func (r *Recorder) StopRecording(eventID string, eventType string, preview []byte, detection *storage.DetectionResult) (time.Duration, error) {
+func (r *Recorder) StopRecording(eventID string, eventType string, preview []byte, detection *events.DetectionResult) (time.Duration, error) {
 	r.mu.Lock()
 	if !r.recording {
 		r.mu.Unlock()

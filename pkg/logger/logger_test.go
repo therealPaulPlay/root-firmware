@@ -71,9 +71,9 @@ func TestWrite_SetsTimestamp(t *testing.T) {
 
 	Init()
 
-	before := float64(time.Now().UnixMilli())
+	before := time.Now().UnixMilli()
 	log.Print("timestamped message")
-	after := float64(time.Now().UnixMilli())
+	after := time.Now().UnixMilli()
 
 	logs := GetLogs()
 	if len(logs) != 1 {
@@ -176,7 +176,7 @@ func TestLoad_HandlesCorruptedFile(t *testing.T) {
 	defer cleanup()
 
 	// Create corrupted logs file
-	os.WriteFile(globals.LogsPath, []byte("not valid json{{{"), 0644)
+	os.WriteFile(globals.LogsPath, []byte("not valid cbor{{{"), 0644)
 
 	Init()
 
