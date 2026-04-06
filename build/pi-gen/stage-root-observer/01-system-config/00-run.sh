@@ -140,7 +140,8 @@ overlay         /home           overlay    lowerdir=/home,upperdir=/run/home-upp
 /data/NetworkManager/system-connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/etc  0  0
 FSTAB
 
-# Create overlay and /data dirs before local-fs.target mounts them
+# Create overlay dirs, /data dirs, and seed machine-id into /etc overlay upper
+# to prevent systemd from treating every boot as first-boot which runs systemd-sysusers
 cat > "${ROOTFS_DIR}/etc/systemd/system/early-boot-setup.service" << 'UNIT'
 [Unit]
 Description=Create overlay and /data directories
@@ -152,6 +153,8 @@ Before=local-fs.target
 Type=oneshot
 ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work /run/etc-upper /run/etc-work /run/home-upper /run/home-work
 ExecStart=/bin/mkdir -p /data/NetworkManager/system-connections /data/timesync
+ExecStart=/bin/sh -c '[ -f /data/machine-id ] || cat /proc/sys/kernel/random/uuid | tr -d "-" > /data/machine-id'
+ExecStart=/bin/cp /data/machine-id /run/etc-upper/machine-id
 
 [Install]
 WantedBy=local-fs.target

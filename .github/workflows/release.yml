@@ -126,6 +126,8 @@ jobs:
           release: trixie
           hostname: ROOT-Observer
           username: observer
+          password: observer
+          disable-first-boot-user-rename: 1
           compression: none
           locale: en_US.UTF-8
           verbose-output: true

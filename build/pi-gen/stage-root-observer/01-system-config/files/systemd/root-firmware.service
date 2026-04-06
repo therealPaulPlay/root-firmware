@@ -6,13 +6,13 @@ Wants=data.mount
 [Service]
 User=root
 SupplementaryGroups=video
-WorkingDirectory=/home/observer
+WorkingDirectory=/data
 Environment="LD_LIBRARY_PATH=/usr/local/lib"
 ExecStartPre=/bin/sh -c 'rm -rf /data/lost+found/*'
 ExecStartPre=/usr/sbin/rfkill unblock wifi
 ExecStartPre=/usr/sbin/rfkill unblock bluetooth
 ExecStartPre=/usr/bin/nmcli radio wifi on
-ExecStart=/home/observer/root-firmware
+ExecStart=/opt/root-firmware/root-firmware
 Restart=always
 RestartSec=10
 
