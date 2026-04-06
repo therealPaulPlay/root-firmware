@@ -29,7 +29,11 @@ const CameraFramerate = 15      // Frames per second
 const CameraGOPSize = 5         // Frames per GOP (keyframe interval)
 const CameraWidth = 1920        // Horizontal pixels
 const CameraHeight = 1080       // Vertical pixels
-const CameraBitrate = 3_000_000 // Bits ber second
+const CameraBitrate = 3_000_000 // Bits per second
+
+// Viewfinder (BLE pairing preview)
+const ViewfinderWidth = 64
+const ViewfinderHeight = 36
 
 // Audio
 const AudioSampleRate = 48000    // Hz

@@ -2,6 +2,8 @@ package record
 
 import (
 	"testing"
+
+	"golang.org/x/image/draw"
 )
 
 // --- splitNALs tests ---
@@ -54,6 +56,17 @@ func TestSplitNALs_TooShort(t *testing.T) {
 	}
 }
 
+// --- nalStartOffset tests ---
+
+func TestNalStartOffset(t *testing.T) {
+	if off := nalStartOffset([]byte{0x00, 0x00, 0x00, 0x01, 0x67}); off != 4 {
+		t.Errorf("4-byte start code: got %d, want 4", off)
+	}
+	if off := nalStartOffset([]byte{0x00, 0x00, 0x01, 0x67}); off != 3 {
+		t.Errorf("3-byte start code: got %d, want 3", off)
+	}
+}
+
 // --- scalePlane tests ---
 
 func TestScalePlane_ScalesDown(t *testing.T) {
@@ -62,7 +75,7 @@ func TestScalePlane_ScalesDown(t *testing.T) {
 	for i := range pix {
 		pix[i] = 200
 	}
-	result := scalePlane(pix, 4, 4, 4, 2, 2)
+	result := scalePlane(pix, 4, 4, 4, 2, 2, draw.BiLinear)
 	if result.Rect.Dx() != 2 || result.Rect.Dy() != 2 {
 		t.Errorf("expected 2x2, got %dx%d", result.Rect.Dx(), result.Rect.Dy())
 	}

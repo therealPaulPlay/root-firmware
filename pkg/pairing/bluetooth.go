@@ -7,6 +7,8 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-ble/ble"
@@ -52,7 +54,9 @@ var relayStatus operationStatus
 var wifiNetworksCache []wifi.Network
 var wifiNetworksCacheMu sync.Mutex
 var viewfinderChunksCache []map[string]any
+var viewfinderChunksCachedAt time.Time
 var viewfinderChunksCacheMu sync.Mutex
+var viewfinderPreloading atomic.Bool
 
 // writeError writes a CBOR error response to the BLE response writer
 func writeError(rsp ble.ResponseWriter, message string) {
@@ -158,14 +162,15 @@ func initBLE() error {
 		writeSuccess(rsp, nil)
 	}))
 
-	// Viewfinder characteristic (read to get next chunk of 48x48 2-bit preview)
+	// Viewfinder characteristic (read to get next chunk of pre-decoded preview)
 	viewfinderChar := svc.NewCharacteristic(viewfinderCharUUID)
 	viewfinderChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		viewfinderChunksCacheMu.Lock()
-		if len(viewfinderChunksCache) == 0 {
+		if len(viewfinderChunksCache) == 0 || time.Since(viewfinderChunksCachedAt) > 3*time.Second {
+			viewfinderChunksCache = nil
 			viewfinderChunksCacheMu.Unlock()
 
-			frameData, err := record.Get().CaptureViewfinderFrame(viewfinderWidth, viewfinderHeight)
+			frameData, err := record.Get().CaptureViewfinderFrame()
 			if err != nil {
 				writeError(rsp, err.Error())
 				return
@@ -179,16 +184,39 @@ func initBLE() error {
 
 			viewfinderChunksCacheMu.Lock()
 			viewfinderChunksCache = chunks
+			viewfinderChunksCachedAt = time.Now()
 		}
 
 		// Return next chunk
 		chunk := viewfinderChunksCache[0]
 		viewfinderChunksCache = viewfinderChunksCache[1:]
-		chunk["hasMore"] = len(viewfinderChunksCache) > 0
+		hasMore := len(viewfinderChunksCache) > 0
+		chunk["hasMore"] = hasMore
 		viewfinderChunksCacheMu.Unlock()
 
 		if err := writeSuccess(rsp, chunk); err != nil {
 			writeError(rsp, err.Error())
+		}
+
+		// Pre-decode next frame in background so it's ready when client returns
+		if !hasMore && viewfinderPreloading.CompareAndSwap(false, true) {
+			go func() {
+				defer viewfinderPreloading.Store(false)
+				frameData, err := record.Get().CaptureViewfinderFrame()
+				if err != nil {
+					return
+				}
+				chunks, err := GetViewfinderChunks(frameData)
+				if err != nil {
+					return
+				}
+				viewfinderChunksCacheMu.Lock()
+				if len(viewfinderChunksCache) == 0 {
+					viewfinderChunksCache = chunks
+					viewfinderChunksCachedAt = time.Now()
+				}
+				viewfinderChunksCacheMu.Unlock()
+			}()
 		}
 	}))
 

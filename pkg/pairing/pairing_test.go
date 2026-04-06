@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"root-firmware/pkg/config"
+	"root-firmware/pkg/globals"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/testutil"
 )
@@ -73,8 +74,7 @@ func TestGetViewfinderChunks_SmallData(t *testing.T) {
 }
 
 func TestGetViewfinderChunks_FullFrame(t *testing.T) {
-	// Full viewfinder frame
-	data := make([]byte, viewfinderWidth*viewfinderHeight)
+	data := make([]byte, globals.ViewfinderWidth*globals.ViewfinderHeight)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
@@ -96,10 +96,10 @@ func TestGetViewfinderChunks_FullFrame(t *testing.T) {
 	}
 }
 
-func TestGetViewfinderChunks_3BitEncoding(t *testing.T) {
-	// Test that 8-bit values are properly reduced to 3-bit (8 shades)
-	// 0x00 -> 0, 0x20 -> 1, 0x40 -> 2, ..., 0xE0 -> 7
-	data := []byte{0x00, 0xFF} // Min and max values
+func TestGetViewfinderChunks_2BitEncoding(t *testing.T) {
+	// Test that 8-bit values are properly reduced to 2-bit (4 shades)
+	// 0x00 -> 0, 0x40 -> 1, 0x80 -> 2, 0xC0 -> 3
+	data := []byte{0x00, 0xFF, 0x80, 0x40} // 4 pixels = 1 byte
 
 	chunks, err := GetViewfinderChunks(data)
 	if err != nil {
@@ -110,10 +110,10 @@ func TestGetViewfinderChunks_3BitEncoding(t *testing.T) {
 		t.Fatalf("expected 1 chunk, got %d", len(chunks))
 	}
 
-	// 2 pixels * 3 bits = 6 bits = 1 byte (padded)
+	// 4 pixels * 2 bits = 8 bits = 1 byte
 	chunkData := chunks[0]["data"].([]byte)
 	if len(chunkData) != 1 {
-		t.Errorf("expected 1 byte for 2 pixels, got %d", len(chunkData))
+		t.Errorf("expected 1 byte for 4 pixels, got %d", len(chunkData))
 	}
 }
 

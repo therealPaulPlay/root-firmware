@@ -14,10 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/image/draw"
+
 	"root-firmware/pkg/config"
+	"root-firmware/pkg/events"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/sfx"
-	"root-firmware/pkg/events"
 )
 
 const maxKeyframeBufferSize = 256 * 1024 // 256KB - must be big enough to contain full I-frame (SPS+PPS+IDR) for preview extraction
@@ -441,10 +443,6 @@ func (r *Recorder) StopRecording(eventID string, eventType string, preview []byt
 	return duration, nil
 }
 
-func (r *Recorder) decodeAndScale(frame []byte, x, y int) (*image.YCbCr, error) {
-	return r.decoder.decodeAndScale(frame, x, y)
-}
-
 func (r *Recorder) CapturePreview(x int, y int) (image.Image, error) {
 	r.videoBroadcast.frameMu.RLock()
 	frame := r.videoBroadcast.latestFrame
@@ -454,7 +452,7 @@ func (r *Recorder) CapturePreview(x int, y int) (image.Image, error) {
 		return nil, fmt.Errorf("no frame available yet")
 	}
 
-	return r.decodeAndScale(frame, x, y)
+	return r.decoder.decodeAndScale(frame, x, y, draw.BiLinear)
 }
 
 // PreviewToJPEG encodes an image to JPEG
@@ -466,7 +464,7 @@ func PreviewToJPEG(img image.Image) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (r *Recorder) CaptureViewfinderFrame(x, y int) ([]byte, error) {
+func (r *Recorder) CaptureViewfinderFrame() ([]byte, error) {
 	r.videoBroadcast.frameMu.RLock()
 	frame := r.videoBroadcast.latestFrame
 	r.videoBroadcast.frameMu.RUnlock()
@@ -475,7 +473,7 @@ func (r *Recorder) CaptureViewfinderFrame(x, y int) ([]byte, error) {
 		return nil, fmt.Errorf("no frame available yet")
 	}
 
-	scaled, err := r.decoder.decodeAndScale(frame, x, y)
+	scaled, err := r.decoder.decodeAndScale(frame, globals.ViewfinderWidth, globals.ViewfinderHeight, draw.NearestNeighbor)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode viewfinder frame: %w", err)
 	}
