@@ -68,6 +68,9 @@ systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
 systemctl disable apt-daily.timer || true
 systemctl disable apt-daily-upgrade.timer || true
+systemctl mask systemd-growfs-root.service || true
+systemctl mask rpi-resize.service || true
+systemctl mask rpi-resize-swap-file.service || true
 EOF
 
 # Configure NetworkManager to have WiFi radio enabled by default
@@ -96,6 +99,13 @@ BRCMFMAC
 install -d "${ROOTFS_DIR}/etc/cloud"
 touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"
 
+# Configure hardware watchdog — systemd pets it, reboot on 15s timeout
+install -d "${ROOTFS_DIR}/etc/systemd/system.conf.d"
+cat > "${ROOTFS_DIR}/etc/systemd/system.conf.d/watchdog.conf" << 'WATCHDOG'
+[Manager]
+RuntimeWatchdogSec=15
+WATCHDOG
+
 # Configure journald for volatile storage
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
 cat > "${ROOTFS_DIR}/etc/systemd/journald.conf.d/volatile.conf" << 'JOURNALD'
@@ -107,26 +117,49 @@ JOURNALD
 # Create data directory mount point
 install -d "${ROOTFS_DIR}/data"
 
-# Persist timesync clock on /data so it survives A/B slot switches
-# Uses bind mount because symlinks get overridden by systemd's StateDirectory
-install -d "${ROOTFS_DIR}/data/timesync"
-on_chroot << EOF
-chown systemd-timesync:systemd-timesync /data/timesync
-EOF
-install -d "${ROOTFS_DIR}/var/lib/systemd/timesync"
+# Ensure /data/timesync has correct ownership for systemd-timesyncd
 cat > "${ROOTFS_DIR}/etc/tmpfiles.d/timesync-persist.conf" << 'TMPFILES'
 d /data/timesync 0755 systemd-timesync systemd-timesync -
 TMPFILES
 
-# Replace fstab with our custom partition layout
+# Replace fstab — read-only rootfs with overlayfs on /etc, /var/lib, /home,
+# persistent bind mounts from /data for NM connections and timesync
 cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
-/dev/mmcblk0p1  /boot/firmware  vfat    defaults            0  2
-/dev/mmcblk0p2  /               ext4    defaults,noatime    0  1
-/dev/mmcblk0p4  /data           ext4    defaults,noatime    0  2
-tmpfs           /tmp            tmpfs   nosuid,nodev        0  0
-tmpfs           /var/tmp        tmpfs   nosuid,nodev        0  0
-/data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount  0  0
+/dev/mmcblk0p1  /boot/firmware  vfat       defaults                             0  2
+/dev/mmcblk0p2  /               ext4       ro,noatime                           0  1
+/dev/mmcblk0p4  /data           ext4       defaults,noatime                     0  2
+tmpfs           /tmp            tmpfs      nosuid,nodev,size=32M                0  0
+tmpfs           /var/tmp        tmpfs      nosuid,nodev,size=16M                0  0
+tmpfs           /var/log        tmpfs      nosuid,nodev,size=16M                0  0
+tmpfs           /var/cache      tmpfs      nosuid,nodev,size=32M                0  0
+tmpfs           /mnt            tmpfs      nosuid,nodev,size=16M                0  0
+overlay         /var/lib        overlay    lowerdir=/var/lib,upperdir=/run/var-lib-upper,workdir=/run/var-lib-work,x-systemd.requires=early-boot-setup.service  0  0
+overlay         /etc            overlay    lowerdir=/etc,upperdir=/run/etc-upper,workdir=/run/etc-work,x-systemd.requires=early-boot-setup.service  0  0
+overlay         /home           overlay    lowerdir=/home,upperdir=/run/home-upper,workdir=/run/home-work,x-systemd.requires=early-boot-setup.service  0  0
+/data/timesync  /var/lib/systemd/timesync  none  bind,nofail,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/var/lib  0  0
+/data/NetworkManager/system-connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=data.mount,x-systemd.requires-mounts-for=/etc  0  0
 FSTAB
+
+# Create overlay and /data dirs before local-fs.target mounts them
+cat > "${ROOTFS_DIR}/etc/systemd/system/early-boot-setup.service" << 'UNIT'
+[Unit]
+Description=Create overlay and /data directories
+DefaultDependencies=no
+After=data.mount
+Before=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work /run/etc-upper /run/etc-work /run/home-upper /run/home-work
+ExecStart=/bin/mkdir -p /data/NetworkManager/system-connections /data/timesync
+
+[Install]
+WantedBy=local-fs.target
+UNIT
+
+on_chroot << EOF
+systemctl enable early-boot-setup.service
+EOF
 
 # Set hostname
 echo "ROOT-Observer" > "${ROOTFS_DIR}/etc/hostname"

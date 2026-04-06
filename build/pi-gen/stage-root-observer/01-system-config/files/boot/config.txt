@@ -20,3 +20,6 @@ enable_uart=1
 
 # Audio
 dtparam=audio=on
+
+# Hardware watchdog (bcm2835_wdt), reboots on kernel lockup
+dtparam=watchdog=on

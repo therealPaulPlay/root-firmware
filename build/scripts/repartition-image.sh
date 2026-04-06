@@ -35,7 +35,7 @@ fi
 
 # Sizes in MB
 BOOT_SIZE_MB=512
-ROOT_SIZE_MB=4096
+ROOT_SIZE_MB=5120
 DATA_MIN_SIZE_MB=5120
 
 # Calculate total size needed

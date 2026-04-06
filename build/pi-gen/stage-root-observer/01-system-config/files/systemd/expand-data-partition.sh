@@ -4,25 +4,25 @@
 
 set -e
 
-MARKER_FILE="/data/.partition-expanded"
 LOG_TAG="expand-data-partition"
+ROOT_DEV="/dev/mmcblk0"
+DATA_PART="${ROOT_DEV}p4"
 
 log() {
     logger -t "$LOG_TAG" "$1"
     echo "$1"
 }
 
-# Skip if already completed
-if [ -f "$MARKER_FILE" ]; then
+# Check if partition 4 already ends at the disk boundary (within 1MB tolerance)
+DISK_SIZE=$(blockdev --getsize64 "$ROOT_DEV")
+PART_END=$(parted -s "$ROOT_DEV" unit B print | awk '$1 == "4" {print $3}' | tr -d 'B')
+
+if [ -n "$PART_END" ] && [ $((DISK_SIZE - PART_END)) -lt 1048576 ]; then
     log "Data partition already expanded, skipping"
     exit 0
 fi
 
 log "Starting data partition expansion..."
-
-# Get the root device (e.g., /dev/mmcblk0)
-ROOT_DEV="/dev/mmcblk0"
-DATA_PART="${ROOT_DEV}p4"
 
 # Expand partition 4 to fill remaining space
 log "Expanding partition table..."
@@ -38,12 +38,5 @@ if resize2fs "$DATA_PART" 2>&1 | grep -q "Nothing to do"; then
 else
     log "Filesystem resized successfully"
 fi
-
-# Mount to temp location to create marker file (avoid /data to not conflict with systemd data.mount)
-TEMP_MNT=$(mktemp -d)
-mount "$DATA_PART" "$TEMP_MNT"
-touch "$TEMP_MNT/.partition-expanded"
-umount "$TEMP_MNT"
-rmdir "$TEMP_MNT"
 
 log "Data partition expansion complete"
