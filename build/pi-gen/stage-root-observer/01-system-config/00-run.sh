@@ -153,8 +153,7 @@ Before=local-fs.target
 Type=oneshot
 ExecStart=/bin/mkdir -p /run/var-lib-upper /run/var-lib-work /run/etc-upper /run/etc-work /run/home-upper /run/home-work
 ExecStart=/bin/mkdir -p /data/NetworkManager/system-connections /data/timesync
-ExecStart=/bin/sh -c '[ -f /data/machine-id ] || cat /proc/sys/kernel/random/uuid | tr -d "-" > /data/machine-id'
-ExecStart=/bin/cp /data/machine-id /run/etc-upper/machine-id
+ExecStart=/bin/sh -c 'cat /proc/sys/kernel/random/uuid | tr -d "-" > /run/etc-upper/machine-id'
 
 [Install]
 WantedBy=local-fs.target

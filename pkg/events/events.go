@@ -79,7 +79,7 @@ func Init() error {
 		instance = &Storage{}
 	})
 
-	// MkdirAll is safe - it's a no-op if directory exists
+	// Ensure recordings directory exists - it's a no-op if directory exists
 	if err := os.MkdirAll(globals.RecordingsPath, 0755); err != nil {
 		return fmt.Errorf("failed to create recordings directory: %w", err)
 	}

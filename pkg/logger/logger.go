@@ -17,8 +17,8 @@ const maxLogs = 250
 const maxLogMsgSize = 1500 // Max characters per log message
 
 type Entry struct {
-	Timestamp int64 `cbor:"timestamp"`
-	Msg       string  `cbor:"msg"`
+	Timestamp int64  `cbor:"timestamp"`
+	Msg       string `cbor:"msg"`
 }
 
 type writer struct {
@@ -29,6 +29,7 @@ type writer struct {
 var w *writer
 
 func Init() {
+	os.MkdirAll(globals.FirmwareDataDir, 0755) // Ensure firmware data dir exists
 	w = &writer{logs: load()}
 	log.SetOutput(io.MultiWriter(os.Stdout, w))
 	log.SetFlags(0) // Disable default timestamp prefix
@@ -78,13 +79,12 @@ func load() []Entry {
 	return logs
 }
 
+// save persists logs to disk, errors are silently ignored because this is called
+// from within the log writer — using log.Printf here would deadlock on the log mutex
 func save(logs []Entry) {
 	data, err := cbor.Marshal(logs)
 	if err != nil {
-		log.Printf("Logger: Failed to marshal logs: %v", err)
 		return
 	}
-	if err := fsutil.AtomicWrite(globals.LogsPath, data, 0644); err != nil {
-		log.Printf("Logger: Failed to save logs: %v", err)
-	}
+	fsutil.AtomicWrite(globals.LogsPath, data, 0644)
 }

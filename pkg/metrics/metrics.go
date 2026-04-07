@@ -39,6 +39,7 @@ type collector struct {
 var instance *collector
 
 func Init() {
+	os.MkdirAll(globals.FirmwareDataDir, 0755) // Ensure data dir exists
 	instance = &collector{
 		points: load(),
 	}
