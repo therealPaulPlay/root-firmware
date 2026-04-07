@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	minFreeSpace = 3 * 1024 * 1024 * 1024 // 3GB in bytes
+	minFreeSpace = 4 * 1024 * 1024 * 1024 // 4GB in bytes (needed for update bundles, to maintain SD card performance etc.)
 )
 
 // encryptFileToPath reads a file, encrypts it, and writes to a destination path

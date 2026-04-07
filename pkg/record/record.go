@@ -170,7 +170,7 @@ func (r *Recorder) startCamera() error {
 
 	cmd := exec.Command("rpicam-vid",
 		"-t", "0", "-o", "-",
-		"--codec", "h264", "-n", "--inline", "--listen",
+		"--codec", "h264", "-n", "--inline",
 		"--framerate", fmt.Sprintf("%d", globals.CameraFramerate),
 		"--width", fmt.Sprintf("%d", globals.CameraWidth),
 		"--height", fmt.Sprintf("%d", globals.CameraHeight),
