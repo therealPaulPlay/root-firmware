@@ -11,7 +11,7 @@ import (
 var (
 	maxBufferDuration = globals.MaxRecordDuration + globals.LookbackDuration + 5*time.Second // headroom
 	gopsPerSecond     = globals.CameraFramerate / globals.CameraGOPSize
-	audioChunksPerSec = (globals.AudioSampleRate*2 + globals.AudioChunkSize - 1) / globals.AudioChunkSize // S16_LE mono, rounded up
+	audioChunksPerSec = (globals.AudioBytesPerSecond + globals.AudioChunkSize - 1) / globals.AudioChunkSize // rounded up
 	videoRingCapacity = int(maxBufferDuration.Seconds())*gopsPerSecond + 10
 	audioRingCapacity = int(maxBufferDuration.Seconds())*audioChunksPerSec + 10
 )

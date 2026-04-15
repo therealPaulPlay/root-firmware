@@ -3,6 +3,7 @@ package events
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestInit_CreatesDirectoriesAndEventLog(t *testing.T) {
 	}
 
 	// Recordings directory should exist
-	if _, err := os.Stat(globals.RecordingsPath); os.IsNotExist(err) {
+	if _, err := os.Stat(globals.RecordingsDir); os.IsNotExist(err) {
 		t.Error("Init() did not create recordings directory")
 	}
 
@@ -70,7 +71,7 @@ func TestInit_RecoverCorruptedEventLog(t *testing.T) {
 	defer cleanup()
 
 	// Create recordings dir and corrupted event log
-	os.MkdirAll(globals.RecordingsPath, 0755)
+	os.MkdirAll(globals.RecordingsDir, 0755)
 	os.WriteFile(globals.EventLogPath, []byte("not valid cbor{{{"), 0644)
 
 	if err := Init(); err != nil {
@@ -95,22 +96,22 @@ func TestInit_CleansUpOrphanedTempFiles(t *testing.T) {
 	defer cleanup()
 
 	// Create recordings dir with orphaned temp files
-	os.MkdirAll(globals.RecordingsPath, 0755)
-	os.WriteFile(filepath.Join(globals.RecordingsPath, "temp-abc123.mp4"), []byte("orphan"), 0644)
-	os.WriteFile(filepath.Join(globals.RecordingsPath, "temp-def456.mp4"), []byte("orphan"), 0644)
-	os.WriteFile(filepath.Join(globals.RecordingsPath, "real-recording.mp4"), []byte("keep"), 0644)
+	os.MkdirAll(globals.RecordingsDir, 0755)
+	os.WriteFile(filepath.Join(globals.RecordingsDir, "temp-abc123.mp4"), []byte("orphan"), 0644)
+	os.WriteFile(filepath.Join(globals.RecordingsDir, "temp-def456.mp4"), []byte("orphan"), 0644)
+	os.WriteFile(filepath.Join(globals.RecordingsDir, "real-recording.mp4"), []byte("keep"), 0644)
 
 	if err := Init(); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
 	// Temp files should be removed
-	if _, err := os.Stat(filepath.Join(globals.RecordingsPath, "temp-abc123.mp4")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(globals.RecordingsDir, "temp-abc123.mp4")); !os.IsNotExist(err) {
 		t.Error("Init() did not remove orphaned temp file")
 	}
 
 	// Real file should remain
-	if _, err := os.Stat(filepath.Join(globals.RecordingsPath, "real-recording.mp4")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(globals.RecordingsDir, "real-recording.mp4")); os.IsNotExist(err) {
 		t.Error("Init() removed non-temp file")
 	}
 }
@@ -298,7 +299,7 @@ func TestGetRecordingPath_Found(t *testing.T) {
 
 	// Create a recording file
 	recordingID := "test-recording-123"
-	recordingFile := filepath.Join(globals.RecordingsPath, recordingID+".mp4")
+	recordingFile := filepath.Join(globals.RecordingsDir, recordingID+".mp4")
 	os.WriteFile(recordingFile, []byte("video data"), 0644)
 
 	path, err := Get().GetRecordingPath(recordingID)
@@ -333,7 +334,7 @@ func TestGetAudioPath_Found(t *testing.T) {
 	}
 
 	recordingID := "test-recording-123"
-	audioFile := filepath.Join(globals.RecordingsPath, recordingID+"_audio.m4a")
+	audioFile := filepath.Join(globals.RecordingsDir, recordingID+"_audio.m4a")
 	os.WriteFile(audioFile, []byte("audio data"), 0644)
 
 	path, err := Get().GetAudioPath(recordingID)
@@ -368,7 +369,7 @@ func TestGetThumbnailPath_Found(t *testing.T) {
 	}
 
 	recordingID := "test-recording-123"
-	thumbFile := filepath.Join(globals.RecordingsPath, recordingID+".jpg")
+	thumbFile := filepath.Join(globals.RecordingsDir, recordingID+".jpg")
 	os.WriteFile(thumbFile, []byte("image data"), 0644)
 
 	path, err := Get().GetThumbnailPath(recordingID)
@@ -459,8 +460,16 @@ func TestGetEnabledEventTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(GetEnabledEventTypes()) != 0 {
-		t.Error("default should be empty")
+	// No key set — should return defaults
+	defaults := GetEnabledEventTypes()
+	if len(defaults) == 0 {
+		t.Error("default should return DefaultEnabled types")
+	}
+	if slices.Contains(defaults, TypeMotion) {
+		t.Error("motion should not be in defaults")
+	}
+	if !slices.Contains(defaults, TypePerson) {
+		t.Error("person should be in defaults")
 	}
 
 	config.Get().SetKey("eventDetectionEnabledTypes", []string{TypePerson, TypeVehicle})
@@ -478,20 +487,20 @@ func TestIsEventTypeEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// No types configured - uses default
-	if !IsEventTypeEnabled(TypePerson, true) {
-		t.Error("should return defaultIfUnset when no types configured")
+	// No types configured — uses DefaultEnabled from AvailableEventTypes
+	if !IsEventTypeEnabled(TypePerson) {
+		t.Error("person should be enabled by default")
 	}
-	if IsEventTypeEnabled(TypePerson, false) {
-		t.Error("should return defaultIfUnset when no types configured")
+	if IsEventTypeEnabled(TypeMotion) {
+		t.Error("motion should be disabled by default")
 	}
 
 	// With types configured
 	config.Get().SetKey("eventDetectionEnabledTypes", []string{TypePerson})
-	if !IsEventTypeEnabled(TypePerson, false) {
+	if !IsEventTypeEnabled(TypePerson) {
 		t.Error("person should be enabled")
 	}
-	if IsEventTypeEnabled(TypeVehicle, true) {
+	if IsEventTypeEnabled(TypeVehicle) {
 		t.Error("vehicle should not be enabled")
 	}
 }

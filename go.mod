@@ -1,6 +1,8 @@
 module root-firmware
 
-go 1.25
+go 1.25.5
+
+require github.com/therealPaulPlay/go-alert-detector v0.1.0
 
 require (
 	github.com/Eyevinn/mp4ff v0.51.0
