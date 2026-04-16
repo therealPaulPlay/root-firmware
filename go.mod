@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/shirou/gopsutil/v3 v3.24.5
-	github.com/therealPaulPlay/go-alert-detector v0.1.1
+	github.com/therealPaulPlay/go-alert-detector v0.1.2
 	github.com/y9o/go-openh264 v0.2.0
 	github.com/yalue/onnxruntime_go v1.24.0
 	golang.org/x/crypto v0.46.0

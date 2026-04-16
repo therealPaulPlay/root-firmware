@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"log"
 	"sync"
-	"time"
 
 	alertdetector "github.com/therealPaulPlay/go-alert-detector"
 
@@ -63,9 +62,7 @@ func (ad *audioDetector) detect() *events.AudioDetectionResult {
 		return nil
 	}
 
-	start := time.Now()
 	result := ad.detector.Analyze(ad.buffer)
-	log.Printf("ML: Audio — analyzed in %dms", time.Since(start).Milliseconds())
 
 	if result == nil {
 		return nil
