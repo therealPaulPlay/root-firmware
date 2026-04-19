@@ -219,6 +219,7 @@ func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, pro
 	}
 	if imageURL != "" {
 		data["imageUrl"] = imageURL
+		data["imageEncrypted"] = "true"
 	}
 
 	// Data-only message: no top-level "notification" key so Android always
