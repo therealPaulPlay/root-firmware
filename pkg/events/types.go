@@ -11,18 +11,21 @@ const (
 	TypePet     = "pet"
 	TypeVehicle = "vehicle"
 	TypeMotion  = "motion"
+	TypeAlert   = "alert"
 )
 
 type EventTypeInfo struct {
-	Value string `cbor:"value"`
-	Label string `cbor:"label"`
+	Value          string `cbor:"value"`
+	Label          string `cbor:"label"`
+	DefaultEnabled bool   `cbor:"defaultEnabled"`
 }
 
 var AvailableEventTypes = []EventTypeInfo{
-	{Value: TypePerson, Label: "Person"},
-	{Value: TypePet, Label: "Pet"},
-	{Value: TypeVehicle, Label: "Vehicle"},
-	{Value: TypeMotion, Label: "Other motion"},
+	{Value: TypePerson, Label: "Person", DefaultEnabled: true},
+	{Value: TypePet, Label: "Pet", DefaultEnabled: true},
+	{Value: TypeVehicle, Label: "Vehicle", DefaultEnabled: true},
+	{Value: TypeAlert, Label: "Alert", DefaultEnabled: true},
+	{Value: TypeMotion, Label: "Other motion", DefaultEnabled: false},
 }
 
 // IsEventDetectionEnabled returns whether event detection is enabled (default true)
@@ -35,11 +38,18 @@ func IsEventDetectionEnabled() bool {
 	return true
 }
 
-// GetEnabledEventTypes returns the configured event types (empty = no filter set)
+// GetEnabledEventTypes returns the configured event types, or defaults if not set
 func GetEnabledEventTypes() []string {
 	val, ok := config.Get().GetKey("eventDetectionEnabledTypes")
 	if !ok {
-		return []string{}
+		// Key not set, return defaults
+		var types []string
+		for _, t := range AvailableEventTypes {
+			if t.DefaultEnabled {
+				types = append(types, t.Value)
+			}
+		}
+		return types
 	}
 	if arr, ok := val.([]any); ok {
 		types := make([]string, 0, len(arr))
@@ -54,11 +64,6 @@ func GetEnabledEventTypes() []string {
 }
 
 // IsEventTypeEnabled checks if event type should trigger recording
-// defaultIfUnset controls behavior when no types are configured
-func IsEventTypeEnabled(eventType string, defaultIfUnset bool) bool {
-	types := GetEnabledEventTypes()
-	if len(types) == 0 {
-		return defaultIfUnset
-	}
-	return slices.Contains(types, eventType)
+func IsEventTypeEnabled(eventType string) bool {
+	return slices.Contains(GetEnabledEventTypes(), eventType)
 }

@@ -12,20 +12,21 @@ import (
 	mp4aac "github.com/Eyevinn/mp4ff/aac"
 	"github.com/Eyevinn/mp4ff/mp4"
 
-	"root-firmware/pkg/globals"
 	"root-firmware/pkg/events"
+	"root-firmware/pkg/globals"
 )
 
 // muxJob represents a recording that needs to be muxed to MP4/M4A and saved
 type muxJob struct {
-	videoEntries []lookbackEntry
-	audioEntries []lookbackEntry
-	outputPath   string
-	duration     float64
-	eventID      string
-	eventType    string
-	preview      []byte
-	detection    *events.DetectionResult
+	videoEntries   []lookbackEntry
+	audioEntries   []lookbackEntry
+	outputPath     string
+	duration       float64
+	eventID        string
+	eventType      string
+	preview        []byte
+	videoDetection *events.VideoDetectionResult
+	audioDetection *events.AudioDetectionResult
 }
 
 // muxWorker processes mux jobs serially to avoid CPU contention on the Pi
@@ -36,7 +37,7 @@ func (r *Recorder) muxWorker() {
 			continue
 		}
 		muxAudio(job.audioEntries, job.videoEntries[0].timestamp, job.outputPath)
-		if err := events.Get().SaveRecording(job.eventID, job.outputPath, job.duration, job.eventType, job.preview, job.detection); err != nil {
+		if err := events.Get().SaveRecording(job.eventID, job.outputPath, job.duration, job.eventType, job.preview, job.videoDetection, job.audioDetection); err != nil {
 			log.Printf("Recorder: Failed to save recording %s: %v", job.eventID, err)
 		}
 	}
@@ -166,10 +167,10 @@ func muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) 
 	timescale := uint32(globals.AudioSampleRate)
 	samplesPerFrame := uint32(1024) // Standard AAC frame = 1024 samples
 
-	// Build mono AAC descriptor (SetAACDescriptor hardcodes stereo)
+	// Build AAC descriptor (SetAACDescriptor hardcodes stereo)
 	asc := &mp4aac.AudioSpecificConfig{
 		ObjectType:           mp4aac.AAClc,
-		ChannelConfiguration: 1, // Mono
+		ChannelConfiguration: globals.AudioChannels,
 		SamplingFrequency:    globals.AudioSampleRate,
 	}
 	var ascBuf bytes.Buffer
@@ -181,7 +182,7 @@ func muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) 
 	init := mp4.CreateEmptyInit()
 	trak := init.AddEmptyTrack(timescale, "audio", "en")
 	esds := mp4.CreateEsdsBox(ascBuf.Bytes())
-	mp4a := mp4.CreateAudioSampleEntryBox("mp4a", 1, 16, uint16(globals.AudioSampleRate), esds)
+	mp4a := mp4.CreateAudioSampleEntryBox("mp4a", uint16(globals.AudioChannels), uint16(globals.AudioBitsPerSample), uint16(globals.AudioSampleRate), esds)
 	trak.Mdia.Minf.Stbl.Stsd.AddChild(mp4a)
 	if err := init.Encode(f); err != nil {
 		log.Printf("Recorder: Failed to write M4A init: %v", err)

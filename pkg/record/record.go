@@ -277,7 +277,7 @@ func (r *Recorder) startMicrophone() error {
 		"-D", micDevice,
 		"-f", "S16_LE",
 		"-r", fmt.Sprintf("%d", globals.AudioSampleRate),
-		"-c", "1",
+		"-c", fmt.Sprintf("%d", globals.AudioChannels),
 		"-t", "raw",
 	)
 
@@ -387,7 +387,7 @@ func (r *Recorder) StartRecording(outputPath string, withLookback bool) {
 }
 
 // StopRecording flushes the ring buffer and enqueues an MP4 mux job
-func (r *Recorder) StopRecording(eventID string, eventType string, preview []byte, detection *events.DetectionResult) (time.Duration, error) {
+func (r *Recorder) StopRecording(eventID string, eventType string, preview []byte, videoDetection *events.VideoDetectionResult, audioDetection *events.AudioDetectionResult) (time.Duration, error) {
 	r.mu.Lock()
 	if !r.recording {
 		r.mu.Unlock()
@@ -423,14 +423,15 @@ func (r *Recorder) StopRecording(eventID string, eventType string, preview []byt
 	log.Printf("Recorder: Enqueuing mux job (%.2fs) to %s", durationSec, outputPath)
 
 	job := muxJob{
-		videoEntries: videoEntries,
-		audioEntries: audioEntries,
-		outputPath:   outputPath,
-		duration:     durationSec,
-		eventID:      eventID,
-		eventType:    eventType,
-		preview:      preview,
-		detection:    detection,
+		videoEntries:   videoEntries,
+		audioEntries:   audioEntries,
+		outputPath:     outputPath,
+		duration:       durationSec,
+		eventID:        eventID,
+		eventType:      eventType,
+		preview:        preview,
+		videoDetection: videoDetection,
+		audioDetection: audioDetection,
 	}
 
 	select {

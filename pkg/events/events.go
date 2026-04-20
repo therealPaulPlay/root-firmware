@@ -50,17 +50,22 @@ type DetectionBox struct {
 	Y2         float32 `cbor:"y2"`
 }
 
-type DetectionResult struct {
+type VideoDetectionResult struct {
 	Boxes     []DetectionBox `cbor:"boxes"`
 	ModelSize [2]int         `cbor:"modelSize"`
 }
 
+type AudioDetectionResult struct {
+	Label string `cbor:"label"` // "siren" or "alarm"
+}
+
 type Event struct {
-	ID        string           `cbor:"id"`
-	Timestamp int64            `cbor:"timestamp"`
-	Duration  float64          `cbor:"duration"`
-	EventType string           `cbor:"eventType"`
-	Detection *DetectionResult `cbor:"detection,omitempty"`
+	ID             string                `cbor:"id"`
+	Timestamp      int64                 `cbor:"timestamp"`
+	Duration       float64               `cbor:"duration"`
+	EventType      string                `cbor:"eventType"`
+	VideoDetection *VideoDetectionResult `cbor:"videoDetection,omitempty"`
+	AudioDetection *AudioDetectionResult `cbor:"audioDetection,omitempty"`
 }
 
 type EventLog struct {
@@ -79,8 +84,11 @@ func Init() error {
 		instance = &Storage{}
 	})
 
-	// Ensure recordings directory exists - it's a no-op if directory exists
-	if err := os.MkdirAll(globals.RecordingsPath, 0755); err != nil {
+	// Ensure directories exist - no-op if they already exist
+	if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create firmware data directory: %w", err)
+	}
+	if err := os.MkdirAll(globals.RecordingsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create recordings directory: %w", err)
 	}
 
@@ -123,7 +131,7 @@ func recoverEventLog() error {
 
 // cleanupOrphanedFiles removes temp-* files left behind by interrupted mux jobs
 func cleanupOrphanedFiles() {
-	matches, err := filepath.Glob(filepath.Join(globals.RecordingsPath, "temp-*"))
+	matches, err := filepath.Glob(filepath.Join(globals.RecordingsDir, "temp-*"))
 	if err != nil {
 		log.Printf("Events: Failed to scan for orphaned files: %v", err)
 		return
@@ -146,7 +154,7 @@ func Get() *Storage {
 
 // SaveRecording saves a recording with event metadata and preview thumbnail
 // Handles cleanup automatically to ensure minFreeSpace
-func (s *Storage) SaveRecording(eventID string, filePath string, duration float64, eventType string, preview []byte, detection *DetectionResult) error {
+func (s *Storage) SaveRecording(eventID string, filePath string, duration float64, eventType string, preview []byte, videoDetection *VideoDetectionResult, audioDetection *AudioDetectionResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -165,11 +173,12 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	// If we crash immediately after this, the event log will reference non-existent files,
 	// which is better than orphaned files that can never be cleaned up
 	event := Event{
-		ID:        eventID,
-		Timestamp: time.Now().UnixMilli(),
-		Duration:  duration,
-		EventType: eventType,
-		Detection: detection,
+		ID:             eventID,
+		Timestamp:      time.Now().UnixMilli(),
+		Duration:       duration,
+		EventType:      eventType,
+		VideoDetection: videoDetection,
+		AudioDetection: audioDetection,
 	}
 
 	eventLog, err := s.readEventLog()
@@ -189,7 +198,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	}
 
 	// Encrypt and save video from temp to final location
-	finalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", eventID))
+	finalPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.mp4", eventID))
 	if err := encryptFileToPath(filePath, finalPath, productPrivateKey); err != nil {
 		return fmt.Errorf("failed to encrypt recording: %w", err)
 	}
@@ -198,7 +207,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	// Encrypt and save audio file if it exists
 	audioTempPath := filePath[:len(filePath)-4] + "_audio.m4a"
 	if _, err := os.Stat(audioTempPath); err == nil {
-		audioFinalPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", eventID))
+		audioFinalPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s_audio.m4a", eventID))
 		if err := encryptFileToPath(audioTempPath, audioFinalPath, productPrivateKey); err != nil {
 			log.Printf("Events: Failed to encrypt audio for %s: %v", eventID, err)
 		}
@@ -207,7 +216,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 
 	// Encrypt and save preview as thumbnail
 	if preview != nil {
-		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", eventID))
+		thumbnailPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.jpg", eventID))
 		session, err := encryption.SessionFromKey(productPrivateKey)
 		if err != nil {
 			log.Printf("Events: Failed to create encryption session for %s: %v", eventID, err)
@@ -286,7 +295,7 @@ func (s *Storage) GetEventLogPaginated(limit, cursor int, startTime, endTime int
 
 // GetRecordingPath returns the file path for a recording by ID
 func (s *Storage) GetRecordingPath(id string) (string, error) {
-	filePath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", id))
+	filePath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.mp4", id))
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("recording not found: %s", id)
 	}
@@ -295,7 +304,7 @@ func (s *Storage) GetRecordingPath(id string) (string, error) {
 
 // GetAudioPath returns the file path for an audio recording by ID
 func (s *Storage) GetAudioPath(id string) (string, error) {
-	filePath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", id))
+	filePath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s_audio.m4a", id))
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("audio not found: %s", id)
 	}
@@ -304,7 +313,7 @@ func (s *Storage) GetAudioPath(id string) (string, error) {
 
 // GetThumbnailPath returns the file path for a thumbnail by ID
 func (s *Storage) GetThumbnailPath(id string) (string, error) {
-	filePath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", id))
+	filePath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.jpg", id))
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("thumbnail not found: %s", id)
 	}
@@ -375,9 +384,9 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 
 		// Remove oldest event (first in array)
 		oldest := eventLog.Events[0]
-		videoPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.mp4", oldest.ID))
-		audioPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s_audio.m4a", oldest.ID))
-		thumbnailPath := filepath.Join(globals.RecordingsPath, fmt.Sprintf("%s.jpg", oldest.ID))
+		videoPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.mp4", oldest.ID))
+		audioPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s_audio.m4a", oldest.ID))
+		thumbnailPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.jpg", oldest.ID))
 
 		// Ghost entry: video already gone (crash before event log flush) — doesn't free space
 		ghost := false
@@ -406,7 +415,7 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 // getFreeSpace returns free space in bytes on data partition
 func (s *Storage) getFreeSpace() (int64, error) {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(globals.RecordingsPath, &stat); err != nil {
+	if err := syscall.Statfs(globals.RecordingsDir, &stat); err != nil {
 		return 0, fmt.Errorf("failed to get filesystem stats: %w", err)
 	}
 

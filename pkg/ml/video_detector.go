@@ -13,17 +13,17 @@ import (
 const (
 	modelWidth  = 416
 	modelHeight = 416
-	confThresh  = 0.35 // 0.35-0.45 suggested for people, lower is more sensitve
+	confThresh  = 0.40 // 0.35-0.45 suggested for people, lower is more sensitve (0.35-0.39 falsely detects many black objects)
 	nmsThresh   = 0.5
 	numClasses  = 80   // COCO classes (classifiers)
 	numAnchors  = 3598 // Anchor count from model
 	outputSize  = 112  // 80 classes + 32 bbox distribution values (4 * 8)
 )
 
-type Detection struct {
+type VideoDetection struct {
 	EventType string // "person", "pet" etc.
 	Count     int
-	Result    *events.DetectionResult // per-box detections with model size context
+	Result    *events.VideoDetectionResult // per-box detections with model size context
 }
 
 // decodeLabel maps COCO class IDs to event types
@@ -40,14 +40,16 @@ func decodeLabel(classID int) string {
 	}
 }
 
-type objectDetector struct {
+type videoDetector struct {
 	session *ort.DynamicAdvancedSession
 }
 
-func newObjectDetector(modelPath string) (*objectDetector, error) {
-	if err := ort.InitializeEnvironment(); err != nil {
-		log.Printf("ML: Failed to initialize ONNX environment: %v", err)
-		return nil, err
+func newVideoDetector(modelPath string) (*videoDetector, error) {
+	if !ort.IsInitialized() {
+		if err := ort.InitializeEnvironment(); err != nil {
+			log.Printf("ML: Failed to initialize ONNX environment: %v", err)
+			return nil, err
+		}
 	}
 
 	opts, err := ort.NewSessionOptions()
@@ -67,10 +69,10 @@ func newObjectDetector(modelPath string) (*objectDetector, error) {
 		return nil, err
 	}
 
-	return &objectDetector{session: session}, nil
+	return &videoDetector{session: session}, nil
 }
 
-func (d *objectDetector) detect(img image.Image) (*Detection, error) {
+func (d *videoDetector) detect(img image.Image) (*VideoDetection, error) {
 	inputTensor := d.preprocess(img)
 	defer inputTensor.Destroy()
 
@@ -89,7 +91,7 @@ func (d *objectDetector) detect(img image.Image) (*Detection, error) {
 	return d.postprocess(outputTensor), nil
 }
 
-func (d *objectDetector) preprocess(img image.Image) ort.Value {
+func (d *videoDetector) preprocess(img image.Image) ort.Value {
 	bounds := img.Bounds()
 	srcWidth := bounds.Dx()
 	srcHeight := bounds.Dy()
@@ -144,7 +146,7 @@ func (d *objectDetector) preprocess(img image.Image) ort.Value {
 	return tensor
 }
 
-func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detection {
+func (d *videoDetector) postprocess(outputTensor *ort.Tensor[float32]) *VideoDetection {
 	outputData := outputTensor.GetData()
 
 	// Output shape: [1, 3598, 112] = 80 class scores + 32 bbox distribution bins (4 edges × 8 bins)
@@ -217,7 +219,7 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	}
 
 	if len(boxes) == 0 {
-		return &Detection{EventType: "", Count: 0}
+		return &VideoDetection{EventType: "", Count: 0}
 	}
 
 	// Apply NMS across all classes — non-target detections suppress overlapping
@@ -234,7 +236,7 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 	}
 
 	if len(targetKept) == 0 {
-		return &Detection{EventType: "", Count: 0}
+		return &VideoDetection{EventType: "", Count: 0}
 	}
 
 	// Build box results for visualization
@@ -254,10 +256,10 @@ func (d *objectDetector) postprocess(outputTensor *ort.Tensor[float32]) *Detecti
 
 	log.Printf("ML: Detected %s (score=%.4f, count=%d after NMS)", eventType, scores[targetKept[0]], len(kept))
 
-	return &Detection{
+	return &VideoDetection{
 		EventType: eventType,
 		Count:     len(targetKept),
-		Result: &events.DetectionResult{
+		Result: &events.VideoDetectionResult{
 			Boxes:     detectionBoxes,
 			ModelSize: [2]int{modelWidth, modelHeight},
 		},

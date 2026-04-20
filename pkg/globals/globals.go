@@ -36,7 +36,10 @@ const ViewfinderWidth = 64
 const ViewfinderHeight = 36
 
 // Audio
-const AudioSampleRate = 48000    // Hz
+const AudioSampleRate = 48000 // Hz
+const AudioChannels = 1       // Mono
+const AudioBitsPerSample = 16 // S16_LE
+const AudioBytesPerSecond = AudioSampleRate * AudioChannels * (AudioBitsPerSample / 8)
 const AudioChunkSize = 48 * 1024 // Bytes per audio chunk (~500ms at 48kHz mono S16_LE)
 
 // Streaming
@@ -68,10 +71,10 @@ var LogsPath = FirmwareDataDir + "/logs.cbor"
 var MetricsPath = FirmwareDataDir + "/metrics.cbor"
 
 // Recordings
-var RecordingsPath = DataDir + "/recordings"
+var RecordingsDir = DataDir + "/recordings"
 
 // Event log
-var EventLogPath = RecordingsPath + "/events.cbor"
+var EventLogPath = FirmwareDataDir + "/events.cbor"
 
 // RAUC update config
 const RAUCCompatible = "root-observer" // Must match system.conf and bundle manifest
