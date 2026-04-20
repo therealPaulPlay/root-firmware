@@ -23,7 +23,10 @@ const (
 	cooldownDuration = 6 * time.Second // Wait after recording stops
 )
 
-var modelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
+var (
+	videoModelPath = filepath.Join(globals.AssetsPath, "models", "nanodet-plus-m_416.onnx")
+	audioModelPath = filepath.Join(globals.AssetsPath, "models", "alert_detector.onnx")
+)
 
 type ML struct {
 	stopChan                chan struct{}
@@ -48,7 +51,7 @@ var once sync.Once
 func Init() error {
 	var err error
 	once.Do(func() {
-		objDet, loadErr := newVideoDetector(modelPath)
+		objDet, loadErr := newVideoDetector(videoModelPath)
 		if loadErr != nil {
 			err = fmt.Errorf("failed to load ML model: %w", loadErr)
 			return
@@ -56,7 +59,7 @@ func Init() error {
 		instance = &ML{
 			objectDetector: objDet,
 			motionDetector: newMotionDetector(),
-			alertDetector:  newAudioDetector(),
+			alertDetector:  newAudioDetector(audioModelPath),
 			stopChan:       make(chan struct{}),
 		}
 		go instance.loop()
@@ -116,11 +119,8 @@ func (m *ML) check() {
 		return
 	}
 
-	// Check audio alert before visual pipeline (triggers independently of motion)
-	var audioDetectionResult *events.AudioDetectionResult
-	if events.IsEventTypeEnabled(events.TypeAlert) {
-		audioDetectionResult = m.alertDetector.detect()
-	}
+	// Check audio alert before visual pipeline
+	audioDetectionResult := m.alertDetector.detect()
 
 	// Capture frame
 	frame, err := record.Get().CapturePreview(640, 360)
@@ -156,7 +156,7 @@ func (m *ML) check() {
 
 	// Audio alert triggers independently of visual detection
 	// Video events take precedence over audio events
-	if eventType == "" && audioDetectionResult != nil {
+	if eventType == "" && audioDetectionResult != nil && events.IsEventTypeEnabled(events.TypeAlert) {
 		eventType = events.TypeAlert
 	}
 
@@ -174,7 +174,7 @@ func (m *ML) check() {
 		videoDetectionResult = videoDetection.Result
 	}
 
-	log.Printf("ML: New %s event", eventType)
+	log.Printf("ML: Detected %s event", eventType)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

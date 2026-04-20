@@ -13,7 +13,7 @@ import (
 const (
 	modelWidth  = 416
 	modelHeight = 416
-	confThresh  = 0.35 // 0.35-0.45 suggested for people, lower is more sensitve
+	confThresh  = 0.40 // 0.35-0.45 suggested for people, lower is more sensitve (0.35-0.39 falsely detects many black objects)
 	nmsThresh   = 0.5
 	numClasses  = 80   // COCO classes (classifiers)
 	numAnchors  = 3598 // Anchor count from model
@@ -45,9 +45,11 @@ type videoDetector struct {
 }
 
 func newVideoDetector(modelPath string) (*videoDetector, error) {
-	if err := ort.InitializeEnvironment(); err != nil {
-		log.Printf("ML: Failed to initialize ONNX environment: %v", err)
-		return nil, err
+	if !ort.IsInitialized() {
+		if err := ort.InitializeEnvironment(); err != nil {
+			log.Printf("ML: Failed to initialize ONNX environment: %v", err)
+			return nil, err
+		}
 	}
 
 	opts, err := ort.NewSessionOptions()
