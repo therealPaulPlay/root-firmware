@@ -66,4 +66,3 @@ func hasInitialRelayConnect() bool {
 	}
 	return false
 }
-

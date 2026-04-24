@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
-	"root-firmware/pkg/encryption"
 )
 
 const (
@@ -273,15 +273,9 @@ func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, pro
 // uploadEncryptedPreview encrypts the preview for a specific device and uploads it to the relay
 // Returns the image URL, or empty string on failure
 func (n *Notifications) uploadEncryptedPreview(relayDomain string, productPrivateKey, devicePublicKey, preview []byte) string {
-	sharedSecret, err := encryption.DeriveSharedSecret(productPrivateKey, devicePublicKey)
+	session, err := rootproto.DeriveSession(productPrivateKey, devicePublicKey)
 	if err != nil {
-		log.Printf("Notifications: Failed to derive shared secret: %v", err)
-		return ""
-	}
-
-	session, err := encryption.SessionFromKey(sharedSecret)
-	if err != nil {
-		log.Printf("Notifications: Failed to create encryption session: %v", err)
+		log.Printf("Notifications: Failed to derive session: %v", err)
 		return ""
 	}
 

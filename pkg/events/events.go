@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
 	"root-firmware/pkg/config"
-	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
 )
@@ -23,7 +23,7 @@ const (
 
 // encryptFileToPath reads a file, encrypts it, and writes to a destination path
 func encryptFileToPath(srcPath, dstPath string, key []byte) error {
-	session, err := encryption.SessionFromKey(key)
+	session, err := rootproto.SessionFromKey(key)
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	// Encrypt and save preview as thumbnail
 	if preview != nil {
 		thumbnailPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.jpg", eventID))
-		session, err := encryption.SessionFromKey(productPrivateKey)
+		session, err := rootproto.SessionFromKey(productPrivateKey)
 		if err != nil {
 			log.Printf("Events: Failed to create encryption session for %s: %v", eventID, err)
 		} else if encryptedPreview, err := session.Encrypt(preview, nil); err != nil {

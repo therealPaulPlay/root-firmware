@@ -5,7 +5,7 @@ import "root-firmware/pkg/globals"
 // GetViewfinderChunks returns chunked 2-bit grayscale bitmap from raw grayscale data
 func GetViewfinderChunks(grayData []byte) ([]map[string]any, error) {
 	width, height := globals.ViewfinderWidth, globals.ViewfinderHeight
-	
+
 	// Convert to 2-bit grayscale (4 shades) — 4 pixels per byte
 	bitLen := (len(grayData) + 3) / 4
 	bitData := make([]byte, bitLen)

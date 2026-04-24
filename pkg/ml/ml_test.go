@@ -114,13 +114,13 @@ func TestDecodeLabel(t *testing.T) {
 		expected string
 	}{
 		{0, events.TypePerson},
-		{1, events.TypeVehicle},  // bicycle
-		{2, events.TypeVehicle},  // car
-		{3, events.TypeVehicle},  // motorcycle
-		{5, events.TypeVehicle},  // bus
-		{7, events.TypeVehicle},  // truck
-		{15, events.TypePet},     // cat
-		{16, events.TypePet},     // dog
+		{1, events.TypeVehicle}, // bicycle
+		{2, events.TypeVehicle}, // car
+		{3, events.TypeVehicle}, // motorcycle
+		{5, events.TypeVehicle}, // bus
+		{7, events.TypeVehicle}, // truck
+		{15, events.TypePet},    // cat
+		{16, events.TypePet},    // dog
 		{99, "other"},
 	}
 
@@ -242,4 +242,3 @@ func TestMotionDetector_DifferentFramesDetectMotion(t *testing.T) {
 		t.Error("different frames should detect motion")
 	}
 }
-

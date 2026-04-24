@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"root-firmware/pkg/config"
-	"root-firmware/pkg/globals"
 	"root-firmware/pkg/devices"
+	"root-firmware/pkg/globals"
 	"root-firmware/pkg/testutil"
 )
 

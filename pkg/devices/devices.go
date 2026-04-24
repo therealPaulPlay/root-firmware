@@ -14,11 +14,11 @@ import (
 )
 
 type Device struct {
-	ID           string  `cbor:"id"`
-	Name         string  `cbor:"name"`
-	PublicKey    []byte  `cbor:"publicKey"`
-	ProductAlias string  `cbor:"productAlias"`
-	PairedAt     int64   `cbor:"pairedAt"`
+	ID           string `cbor:"id"`
+	Name         string `cbor:"name"`
+	PublicKey    []byte `cbor:"publicKey"`
+	ProductAlias string `cbor:"productAlias"`
+	PairedAt     int64  `cbor:"pairedAt"`
 }
 
 type Devices struct {

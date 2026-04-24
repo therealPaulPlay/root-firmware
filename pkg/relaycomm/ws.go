@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
-	"root-firmware/pkg/config"
-	"root-firmware/pkg/updater"
-
-	"github.com/fxamacker/cbor/v2"
 	"github.com/gorilla/websocket"
+	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+
+	"root-firmware/pkg/config"
+	"root-firmware/pkg/devices"
+	"root-firmware/pkg/updater"
 )
 
 const (
@@ -20,34 +20,43 @@ const (
 	dialTimeout       = 8 * time.Second
 )
 
-type Message struct {
-	Type      string `cbor:"type"`
-	OriginID  string `cbor:"originId"`
-	TargetID  string `cbor:"targetId"`
-	RequestID string `cbor:"requestId"`
-	Payload   []byte `cbor:"payload,omitempty"`
-}
-
 type RelayComm struct {
-	handlers        map[string]func(Message)
-	sendChan        chan Message // Most messages (prioritized)
-	lowPrioSendChan chan Message // Low priority data (stream, recordings..) — only sent when sendChan is empty (lower priority)
+	server          *rootproto.Server
+	sendChan        chan []byte
+	lowPrioSendChan chan []byte
 	stopChan        chan struct{}
 	doneChan        chan struct{}
-	rateLimit       rateLimiter
 }
 
 var instance *RelayComm
 var once sync.Once
 
-func Init() {
+func Init() error {
+	var err error
 	once.Do(func() {
-		instance = &RelayComm{
-			handlers:  make(map[string]func(Message)),
-			rateLimit: newRateLimiter(),
+		instance = &RelayComm{}
+		// Product ID from config becomes the server's selfID on the wire
+		productID, _ := config.Get().GetKey("id")
+		productIDStr, _ := productID.(string)
+		instance.server, err = rootproto.NewServer(productIDStr, rootproto.KeyStore{
+			GetPrivateKey: func() ([]byte, error) { return config.Get().GetProductPrivateKey() },
+			GetClientPublicKey: func(clientID string) ([]byte, bool) {
+				device, ok := devices.Get().GetByID(clientID)
+				if !ok {
+					return nil, false
+				}
+				return device.PublicKey, true
+			},
+			CommitClientPublicKey: func(clientID string, newPublicKey []byte) error {
+				return devices.Get().RenewKey(clientID, newPublicKey)
+			},
+		}, persistentReplayStore())
+		if err != nil {
+			return
 		}
-		registerHandlers(instance)
+		registerHandlers(instance.server)
 	})
+	return err
 }
 
 func Get() *RelayComm {
@@ -57,12 +66,44 @@ func Get() *RelayComm {
 	return instance
 }
 
-func (r *RelayComm) On(messageType string, handler func(Message)) {
-	r.handlers[messageType] = handler
+// ClearClient drops all per-client state (cached session and replay history)
+func (r *RelayComm) ClearClient(clientID string) error {
+	return r.server.ClearClient(clientID)
+}
+
+// lowPrioWriteFn returns a WriteFn that routes outbound envelope bytes through the
+// low-priority send channel, used for server-initiated pushes (stream/file chunks)
+func lowPrioWriteFn() rootproto.WriteFn {
+	return func(bytes []byte) error {
+		return Get().enqueueLowPrio(bytes)
+	}
+}
+
+func (r *RelayComm) enqueueHighPrio(bytes []byte) error {
+	if r.sendChan == nil {
+		return fmt.Errorf("not connected")
+	}
+	select {
+	case r.sendChan <- bytes:
+		return nil
+	default:
+		return fmt.Errorf("send queue full")
+	}
+}
+
+func (r *RelayComm) enqueueLowPrio(bytes []byte) error {
+	if r.lowPrioSendChan == nil {
+		return fmt.Errorf("not connected")
+	}
+	select {
+	case r.lowPrioSendChan <- bytes:
+		return nil
+	default:
+		return fmt.Errorf("send queue full")
+	}
 }
 
 // Start connects to relay server. If already running, restarts with current config
-// Does nothing if relay domain is not configured
 func (r *RelayComm) Start() {
 	r.Stop()
 
@@ -77,8 +118,8 @@ func (r *RelayComm) Start() {
 		return
 	}
 
-	r.sendChan = make(chan Message, 25) // Keep buffer low, don't overwhelm WS
-	r.lowPrioSendChan = make(chan Message, 25)
+	r.sendChan = make(chan []byte, 25) // Keep buffer low, don't overwhelm WS
+	r.lowPrioSendChan = make(chan []byte, 25)
 	r.stopChan = make(chan struct{})
 	r.doneChan = make(chan struct{})
 
@@ -98,24 +139,6 @@ func (r *RelayComm) Stop() {
 	r.lowPrioSendChan = nil
 }
 
-// Send queues a message, routing stream chunks to a lower-priority channel
-func (r *RelayComm) Send(msg Message) error {
-	ch := r.sendChan
-	if strings.HasPrefix(msg.Type, MsgStreamVideoChunk) || strings.HasPrefix(msg.Type, MsgStreamAudioChunk) || strings.HasPrefix(msg.Type, MsgGetRecording) {
-		ch = r.lowPrioSendChan
-	}
-	if ch == nil {
-		return fmt.Errorf("not connected")
-	}
-	select {
-	case ch <- msg:
-		return nil
-	default:
-		return fmt.Errorf("send queue full")
-	}
-}
-
-// run is the main loop - single goroutine that owns the connection
 func (r *RelayComm) run(relayDomain string) {
 	defer close(r.doneChan)
 
@@ -133,13 +156,13 @@ func (r *RelayComm) run(relayDomain string) {
 			case <-r.stopChan:
 				return
 			case <-time.After(delay):
-				delay = min(delay*3/2, maxReconnectDelay) // Exponential backoff
+				delay = min(delay*3/2, maxReconnectDelay)
 				continue
 			}
 		}
 
 		delay = time.Second
-		// Drain messages to avoid sending old messages (potentially with old keys) on the new connection
+		// Drain pending writes to avoid sending old bytes (potentially with old keys) on the new connection
 		for len(r.sendChan) > 0 {
 			<-r.sendChan
 		}
@@ -181,9 +204,13 @@ func (r *RelayComm) dial(relayDomain string) *websocket.Conn {
 	return conn
 }
 
-// handleConnection manages a single connection - reads and writes until closed or stopped
 func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 	readDone := make(chan struct{})
+
+	// WriteFn for request replies (high-priority path)
+	replyWriteFn := func(bytes []byte) error {
+		return r.enqueueHighPrio(bytes)
+	}
 
 	// Reader goroutine
 	go func() {
@@ -193,22 +220,15 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 			if err != nil {
 				return
 			}
-			var msg Message
-			if err := cbor.Unmarshal(data, &msg); err != nil {
-				log.Printf("RelayComm: Failed to decode message: %v", err)
-				continue
-			}
-			if r.rateLimit.allow(msg.OriginID) {
-				if handler, ok := r.handlers[msg.Type]; ok {
-					go handler(msg)
-				}
+			if err := r.server.Receive(data, replyWriteFn); err != nil {
+				log.Printf("RelayComm: Receive failed: %v", err)
 			}
 		}
 	}()
 
 	// Write helper — on failure, close conn and wait for reader to exit
-	write := func(msg Message) bool {
-		if r.writeMsg(conn, msg) != nil {
+	write := func(bytes []byte) bool {
+		if r.writeBytes(conn, bytes) != nil {
 			conn.Close()
 			<-readDone
 			return false
@@ -225,11 +245,11 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 			return
 		case <-readDone:
 			return
-		case msg := <-r.sendChan:
-			if !write(msg) {
+		case bytes := <-r.sendChan:
+			if !write(bytes) {
 				return
 			}
-		case msg := <-r.lowPrioSendChan:
+		case bytes := <-r.lowPrioSendChan:
 			// Drain any pending high-priority message first
 			select {
 			case hi := <-r.sendChan:
@@ -238,14 +258,14 @@ func (r *RelayComm) handleConnection(conn *websocket.Conn) {
 				}
 			default:
 			}
-			if !write(msg) {
+			if !write(bytes) {
 				return
 			}
 		}
 	}
 }
 
-// Persists that the relay has been reached at least once
+// markInitialRelayConnect persists that the relay has been reached at least once
 func markInitialRelayConnect() {
 	if val, ok := config.Get().GetKey("initialRelayConnect"); ok {
 		if b, ok := val.(bool); ok && b {
@@ -256,12 +276,7 @@ func markInitialRelayConnect() {
 	config.Get().SetKey("initialRelayConnect", true)
 }
 
-func (r *RelayComm) writeMsg(conn *websocket.Conn, msg Message) error {
-	data, err := cbor.Marshal(msg)
-	if err != nil {
-		log.Printf("RelayComm: Failed to encode message: %v", err)
-		return nil // Don't kill connection for marshal errors
-	}
+func (r *RelayComm) writeBytes(conn *websocket.Conn, data []byte) error {
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
 		log.Printf("RelayComm: Send failed: %v", err)

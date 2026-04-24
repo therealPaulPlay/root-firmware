@@ -3,7 +3,6 @@ package relaycomm
 import (
 	"log"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"root-firmware/pkg/globals"
@@ -11,7 +10,7 @@ import (
 )
 
 type stream struct {
-	ctx        atomic.Pointer[HandlerContext]
+	clientID   string
 	ch         chan []byte
 	msgType    string
 	endCh      chan struct{}
@@ -83,7 +82,7 @@ func (sm *streamManager) endVideoLocked(deviceID, errorMsg string) {
 	delete(sm.video, deviceID)
 	stopStream(s)
 	if errorMsg != "" {
-		SendEncryptedError(s.ctx.Load(), s.msgType, ErrStreamEnded, errorMsg)
+		pushStreamError(s.clientID, s.msgType, errorMsg)
 	}
 	// Tear down shared muxer when last viewer leaves
 	// Must release mu: muxer goroutine may be in sm.Write() waiting for mu
@@ -112,7 +111,7 @@ func (sm *streamManager) endAudioLocked(deviceID, errorMsg string) {
 	stopStream(s)
 	record.Get().StopAudioStream(s.ch)
 	if errorMsg != "" {
-		SendEncryptedError(s.ctx.Load(), MsgStreamAudioChunk, ErrStreamEnded, errorMsg)
+		pushStreamError(s.clientID, MsgStreamAudioChunk, errorMsg)
 	}
 }
 
@@ -144,25 +143,21 @@ func sendLoop(s *stream) {
 			if !ok {
 				return
 			}
-			ctx := s.ctx.Load()
-			if err := SendEncryptedSuccess(ctx, s.msgType, map[string]any{
-				"chunkIndex": chunkIndex,
-				"chunk":      data,
-			}); err != nil {
+			if err := pushStreamChunk(s.clientID, s.msgType, chunkIndex, data); err != nil {
 				if chunkIndex == 0 {
-					log.Printf("RelayComm: Failed to send init segment for %s: %v", ctx.DeviceID, err)
+					log.Printf("RelayComm: Failed to send init segment for %s: %v", s.clientID, err)
 					go func() {
 						streams.mu.Lock()
 						// Ensure this is still the most recent stream, if so, end both video and audio
-						if streams.video[ctx.DeviceID] == s {
-							streams.endVideoLocked(ctx.DeviceID, "WebSocket overwhelmed")
-							streams.endAudioLocked(ctx.DeviceID, "WebSocket overwhelmed")
+						if streams.video[s.clientID] == s {
+							streams.endVideoLocked(s.clientID, "WebSocket overwhelmed")
+							streams.endAudioLocked(s.clientID, "WebSocket overwhelmed")
 						}
 						streams.mu.Unlock()
 					}()
 					return
 				}
-				log.Printf("RelayComm: Dropped %s chunk message for %s: %v", s.msgType, ctx.DeviceID, err)
+				log.Printf("RelayComm: Dropped %s chunk message for %s: %v", s.msgType, s.clientID, err)
 				continue
 			}
 			chunkIndex++
@@ -170,13 +165,26 @@ func sendLoop(s *stream) {
 	}
 }
 
-// Exported functions
+func pushStreamChunk(clientID, msgType string, chunkIndex int, data []byte) error {
+	return Get().server.Push(clientID, msgType, map[string]any{
+		"success":    true,
+		"chunkIndex": chunkIndex,
+		"chunk":      data,
+	}, lowPrioWriteFn())
+}
 
-func StartVideoStreamForClient(ctx *HandlerContext, msgType string) {
+func pushStreamError(clientID, msgType, errorMsg string) {
+	_ = Get().server.Push(clientID, msgType, map[string]any{
+		"success": false,
+		"error":   errorMsg,
+	}, lowPrioWriteFn())
+}
+
+func StartVideoStreamForClient(clientID, msgType string) {
 	streams.mu.Lock()
 	defer streams.mu.Unlock()
 
-	streams.endVideoLocked(ctx.DeviceID, "") // In case a stream is active for this device already, end it
+	streams.endVideoLocked(clientID, "") // End any existing stream for this client if active
 	if len(streams.video) >= globals.MaxConcurrentStreams {
 		streams.evictOldest()
 	}
@@ -199,30 +207,28 @@ func StartVideoStreamForClient(ctx *HandlerContext, msgType string) {
 	}
 
 	now := time.Now()
-	s := &stream{ch: make(chan []byte, 3), msgType: msgType, endCh: make(chan struct{}), startedAt: now, lastActive: now}
-	s.ctx.Store(ctx)
+	s := &stream{clientID: clientID, ch: make(chan []byte, 3), msgType: msgType, endCh: make(chan struct{}), startedAt: now, lastActive: now}
 	if streams.initSegment != nil {
 		s.ch <- streams.initSegment
 	}
 	s.wg.Add(1)
-	streams.video[ctx.DeviceID] = s
+	streams.video[clientID] = s
 	go sendLoop(s)
-	log.Printf("RelayComm: Started video stream for device %s (viewers: %d)", ctx.DeviceID, len(streams.video))
+	log.Printf("RelayComm: Started video stream for device %s (viewers: %d)", clientID, len(streams.video))
 }
 
-func StartAudioStreamForClient(ctx *HandlerContext, ch chan []byte) {
+func StartAudioStreamForClient(clientID string, ch chan []byte) {
 	streams.mu.Lock()
 	defer streams.mu.Unlock()
 
-	streams.endAudioLocked(ctx.DeviceID, "") // In case a stream is active for this device already, end it
+	streams.endAudioLocked(clientID, "")
 
 	now := time.Now()
-	s := &stream{ch: ch, msgType: MsgStreamAudioChunk, endCh: make(chan struct{}), startedAt: now, lastActive: now}
-	s.ctx.Store(ctx)
+	s := &stream{clientID: clientID, ch: ch, msgType: MsgStreamAudioChunk, endCh: make(chan struct{}), startedAt: now, lastActive: now}
 	s.wg.Add(1)
-	streams.audio[ctx.DeviceID] = s
+	streams.audio[clientID] = s
 	go sendLoop(s)
-	log.Printf("RelayComm: Started audio stream for device %s", ctx.DeviceID)
+	log.Printf("RelayComm: Started audio stream for device %s", clientID)
 }
 
 // SyncAudioStreams starts or stops audio for all active video viewers based on current mic state
@@ -231,49 +237,37 @@ func SyncAudioStreams() {
 	defer streams.mu.Unlock()
 
 	if record.MicEnabled() {
-		for deviceID, v := range streams.video {
-			if _, hasAudio := streams.audio[deviceID]; hasAudio {
+		for clientID := range streams.video {
+			if _, hasAudio := streams.audio[clientID]; hasAudio {
 				continue
 			}
 			ch, err := record.Get().StartAudioStream()
 			if err != nil {
-				log.Printf("RelayComm: Failed to start audio stream for %s: %v", deviceID, err)
+				log.Printf("RelayComm: Failed to start audio stream for %s: %v", clientID, err)
 				continue
 			}
 			now := time.Now()
-			s := &stream{ch: ch, msgType: MsgStreamAudioChunk, endCh: make(chan struct{}), startedAt: now, lastActive: now}
-			s.ctx.Store(v.ctx.Load())
+			s := &stream{clientID: clientID, ch: ch, msgType: MsgStreamAudioChunk, endCh: make(chan struct{}), startedAt: now, lastActive: now}
 			s.wg.Add(1)
-			streams.audio[deviceID] = s
+			streams.audio[clientID] = s
 			go sendLoop(s)
-			log.Printf("RelayComm: Started audio stream for device %s (mic enabled)", deviceID)
+			log.Printf("RelayComm: Started audio stream for device %s (mic enabled)", clientID)
 		}
 	} else {
-		for deviceID := range streams.audio {
-			streams.endAudioLocked(deviceID, "")
+		for clientID := range streams.audio {
+			streams.endAudioLocked(clientID, "")
 		}
 	}
 }
 
-func UpdateStreamActivity(deviceID string) {
+func UpdateStreamActivity(clientID string) {
 	streams.mu.Lock()
 	defer streams.mu.Unlock()
 	now := time.Now()
-	if v, ok := streams.video[deviceID]; ok {
+	if v, ok := streams.video[clientID]; ok {
 		v.lastActive = now
 	}
-	if v, ok := streams.audio[deviceID]; ok {
+	if v, ok := streams.audio[clientID]; ok {
 		v.lastActive = now
-	}
-}
-
-func UpdateStreamContext(deviceID string, newCtx *HandlerContext) {
-	streams.mu.Lock()
-	defer streams.mu.Unlock()
-	if v, ok := streams.video[deviceID]; ok {
-		v.ctx.Store(newCtx)
-	}
-	if v, ok := streams.audio[deviceID]; ok {
-		v.ctx.Store(newCtx)
 	}
 }

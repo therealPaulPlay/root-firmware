@@ -88,7 +88,6 @@ func TestInitSegmentResetBetweenSessions(t *testing.T) {
 	}
 }
 
-
 func TestWriteCopiesData(t *testing.T) {
 	sm := newTestManager()
 	s := newTestStream()

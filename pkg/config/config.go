@@ -9,7 +9,8 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gofrs/uuid"
 
-	"root-firmware/pkg/encryption"
+	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+
 	"root-firmware/pkg/fsutil"
 	"root-firmware/pkg/globals"
 )
@@ -86,7 +87,7 @@ func (c *Config) createInitialConfig() error {
 	}
 
 	// Generate product keypair for end-to-end encryption with paired devices
-	keypair, err := encryption.GenerateKeypair()
+	keypair, err := rootproto.GenerateKeypair()
 	if err != nil {
 		return fmt.Errorf("failed to generate product keypair: %w", err)
 	}

@@ -13,10 +13,10 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-ble/ble"
 	"github.com/go-ble/ble/linux"
+	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
-	"root-firmware/pkg/encryption"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/relaycomm"
@@ -464,14 +464,9 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to get product private key: %w", err)
 	}
 
-	sharedSecret, err := encryption.DeriveSharedSecret(privKey, device.PublicKey)
+	session, err := rootproto.DeriveSession(privKey, device.PublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to derive shared secret: %w", err)
-	}
-
-	session, err := encryption.SessionFromKey(sharedSecret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
+		return nil, fmt.Errorf("failed to derive session: %w", err)
 	}
 
 	decrypted, err := session.Decrypt(msg.Payload, nil)

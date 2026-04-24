@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/Eyevinn/mp4ff v0.51.0
 	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/fxamacker/cbor/v2 v2.9.0
+	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/gen2brain/aac-go v0.0.0-20230119102159-ef1e76509d21
 	github.com/go-ble/ble v0.0.0-20240122180141-8c5522f54333
 	github.com/gofrs/uuid v4.4.0+incompatible
@@ -13,9 +13,9 @@ require (
 	github.com/gunter-q12/resample v1.0.0
 	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/shirou/gopsutil/v3 v3.24.5
+	github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.1.4
 	github.com/y9o/go-openh264 v0.2.0
 	github.com/yalue/onnxruntime_go v1.24.0
-	golang.org/x/crypto v0.46.0
 	golang.org/x/image v0.35.0
 	periph.io/x/conn/v3 v3.7.2
 	periph.io/x/host/v3 v3.8.5
@@ -36,6 +36,7 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect

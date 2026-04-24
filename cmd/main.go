@@ -12,6 +12,7 @@ import (
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
+	"root-firmware/pkg/events"
 	"root-firmware/pkg/globals"
 	"root-firmware/pkg/logger"
 	"root-firmware/pkg/metrics"
@@ -21,7 +22,6 @@ import (
 	"root-firmware/pkg/record"
 	"root-firmware/pkg/relaycomm"
 	"root-firmware/pkg/sfx"
-	"root-firmware/pkg/events"
 	"root-firmware/pkg/updater"
 	"root-firmware/pkg/wifi"
 )
@@ -54,6 +54,9 @@ func main() {
 		if err := notifications.Get().Disable(deviceID); err != nil {
 			log.Printf("Failed to disable notifications for removed device %s: %v", deviceID, err)
 		}
+		if err := relaycomm.Get().ClearClient(deviceID); err != nil {
+			log.Printf("Failed to clear client state for removed device %s: %v", deviceID, err)
+		}
 	})
 	metrics.Init()
 
@@ -70,7 +73,9 @@ func main() {
 
 	// Initialize connectivity
 	wifi.Init()
-	relaycomm.Init()
+	if err := relaycomm.Init(); err != nil {
+		log.Fatalf("Failed to initialize relaycomm: %v", err)
+	}
 	record.Get().OnMicChanged = relaycomm.SyncAudioStreams
 	updater.Init()
 

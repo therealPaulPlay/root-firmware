@@ -42,8 +42,8 @@ func TestGetPoints_BeforeInit(t *testing.T) {
 
 func TestLoad_HandlesErrors(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func()
+		name  string
+		setup func()
 	}{
 		{"missing file", func() {}},
 		{"corrupted file", func() {

@@ -141,4 +141,3 @@ func TestAtomicWrite_OriginalUnchangedOnRenameFailure(t *testing.T) {
 		t.Error("original directory was replaced")
 	}
 }
-

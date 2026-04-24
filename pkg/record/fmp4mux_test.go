@@ -116,11 +116,11 @@ func TestSeedDropsOrphanFrames(t *testing.T) {
 
 	var buf bytes.Buffer
 	m := newFMP4Muxer(&buf)
-	m.SeedKeyframe(makeTestGOP(5))   // emits init only (ftyp+moov), no fragment
-	m.Write(orphans.Bytes())         // orphan P-frames, no IDR
-	m.Write(makeTestGOP(5))          // flushes the orphans (dropped — no IDR)
-	m.Write(makeTestGOP(5))          // flushes the proper GOP
-	m.Flush()                        // flushes the last GOP
+	m.SeedKeyframe(makeTestGOP(5)) // emits init only (ftyp+moov), no fragment
+	m.Write(orphans.Bytes())       // orphan P-frames, no IDR
+	m.Write(makeTestGOP(5))        // flushes the orphans (dropped — no IDR)
+	m.Write(makeTestGOP(5))        // flushes the proper GOP
+	m.Flush()                      // flushes the last GOP
 
 	// Seed emits only init (no moof), orphans are dropped, so 2 moof boxes total
 	data := buf.Bytes()

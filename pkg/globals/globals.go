@@ -76,5 +76,8 @@ var RecordingsDir = DataDir + "/recordings"
 // Event log
 var EventLogPath = FirmwareDataDir + "/events.cbor"
 
+// Replay protection state
+var ReplayStatePath = FirmwareDataDir + "/replay.cbor"
+
 // RAUC update config
 const RAUCCompatible = "root-observer" // Must match system.conf and bundle manifest
