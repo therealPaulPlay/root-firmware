@@ -8,9 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"root-firmware/pkg/config"
 	"root-firmware/pkg/events"
-	"root-firmware/pkg/testutil"
 )
 
 var testImage1 image.Image
@@ -36,23 +34,6 @@ func TestMain(m *testing.M) {
 	}
 
 	os.Exit(m.Run())
-}
-
-func setupTestML(t *testing.T) func() {
-	t.Helper()
-
-	config.ResetForTesting()
-
-	cleanupGlobals := testutil.SetupTempGlobals(t)
-
-	if err := config.Init(); err != nil {
-		t.Fatalf("config.Init() error = %v", err)
-	}
-
-	return func() {
-		cleanupGlobals()
-		config.ResetForTesting()
-	}
 }
 
 // --- IOU tests ---

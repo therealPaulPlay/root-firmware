@@ -13,7 +13,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-ble/ble"
 	"github.com/go-ble/ble/linux"
-	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
@@ -45,8 +45,6 @@ type operationStatus struct {
 	success   bool
 	error     string
 }
-
-var bleDevice ble.Device
 
 var pairingStatus operationStatus
 var wifiStatus operationStatus
@@ -106,7 +104,6 @@ func initBLE() error {
 	if err != nil {
 		return fmt.Errorf("failed to create BLE device: %w", err)
 	}
-	bleDevice = d
 
 	// Set as default device
 	ble.SetDefaultDevice(d)
@@ -475,14 +472,4 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 	}
 
 	return decrypted, nil
-}
-
-func GetBLE() ble.Device {
-	return bleDevice
-}
-
-func StopBLE() {
-	if bleDevice != nil {
-		bleDevice.Stop()
-	}
 }
