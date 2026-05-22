@@ -13,7 +13,7 @@ require (
 	github.com/gunter-q12/resample v1.0.0
 	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/shirou/gopsutil/v3 v3.24.5
-	github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.1.7
+	github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.1.8
 	github.com/y9o/go-openh264 v0.2.0
 	github.com/yalue/onnxruntime_go v1.24.0
 	golang.org/x/image v0.35.0
