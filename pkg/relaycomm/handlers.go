@@ -250,12 +250,7 @@ func handleStartStream(clientID string, payload []byte, respond rootproto.Respon
 
 	StartVideoStreamForClient(clientID, MsgStreamVideoChunk)
 	if record.MicEnabled() {
-		audioStream, err := record.Get().StartAudioStream()
-		if err != nil {
-			log.Printf("RelayComm: Failed to start audio stream: %v", err)
-		} else {
-			StartAudioStreamForClient(clientID, audioStream)
-		}
+		StartAudioStreamForClient(clientID)
 	}
 
 	return nil

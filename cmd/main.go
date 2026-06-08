@@ -50,14 +50,6 @@ func main() {
 	// Initialize straightforward packages (not heavy / no errors)
 	devices.Init()
 	notifications.Init()
-	devices.Get().OnRemove(func(deviceID string) {
-		if err := notifications.Get().Disable(deviceID); err != nil {
-			log.Printf("Failed to disable notifications for removed device %s: %v", deviceID, err)
-		}
-		if err := relaycomm.Get().ClearClient(deviceID); err != nil {
-			log.Printf("Failed to clear client state for removed device %s: %v", deviceID, err)
-		}
-	})
 	metrics.Init()
 
 	// Initialize SFX, recorder, and ML
@@ -71,12 +63,22 @@ func main() {
 		log.Fatalf("Failed to initialize ML: %v", err)
 	}
 
+	// Register callbacks
+	devices.Get().OnRemove(func(deviceID string) {
+		if err := notifications.Get().Disable(deviceID); err != nil {
+			log.Printf("Failed to disable notifications for removed device %s: %v", deviceID, err)
+		}
+		if err := relaycomm.Get().ClearClient(deviceID); err != nil {
+			log.Printf("Failed to clear client state for removed device %s: %v", deviceID, err)
+		}
+	})
+	record.Get().OnMicChanged = relaycomm.SyncAudioStreams
+
 	// Initialize connectivity
 	wifi.Init()
 	if err := relaycomm.Init(); err != nil {
 		log.Fatalf("Failed to initialize relaycomm: %v", err)
 	}
-	record.Get().OnMicChanged = relaycomm.SyncAudioStreams
 	updater.Init()
 
 	// Initialize pairing (BLE + helper)

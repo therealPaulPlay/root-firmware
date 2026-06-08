@@ -66,7 +66,7 @@ func newAudioDetector(modelPath string) *audioDetector {
 	}
 	ad.session = session
 
-	audioCh, err := record.Get().StartAudioStream()
+	audioCh, err := record.Get().SubscribeAudio()
 	if err != nil {
 		log.Printf("ML: Audio detection unavailable (no microphone)")
 		return ad

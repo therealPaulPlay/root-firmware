@@ -7,10 +7,10 @@ import (
 
 func newTestStream() *stream {
 	s := &stream{
-		ch:    make(chan []byte, 3),
-		endCh: make(chan struct{}),
+		ch:     make(chan []byte, 3),
+		stopCh: make(chan struct{}),
 	}
-	s.wg.Go(func() { <-s.endCh })
+	s.wg.Go(func() { <-s.stopCh })
 	return s
 }
 
@@ -25,7 +25,7 @@ func TestWriteFansOutToViewers(t *testing.T) {
 	sm := newTestManager()
 	s1 := newTestStream()
 	s2 := newTestStream()
-	defer func() { close(s1.endCh); close(s2.endCh) }()
+	defer func() { close(s1.stopCh); close(s2.stopCh) }()
 
 	sm.video["a"] = s1
 	sm.video["b"] = s2
@@ -52,7 +52,7 @@ func TestWriteCachesInitSegment(t *testing.T) {
 func TestWriteDropsWhenChannelFull(t *testing.T) {
 	sm := newTestManager()
 	s := newTestStream()
-	defer close(s.endCh)
+	defer close(s.stopCh)
 
 	sm.video["a"] = s
 	sm.Write([]byte("1"))
@@ -91,7 +91,7 @@ func TestInitSegmentResetBetweenSessions(t *testing.T) {
 func TestWriteCopiesData(t *testing.T) {
 	sm := newTestManager()
 	s := newTestStream()
-	defer close(s.endCh)
+	defer close(s.stopCh)
 
 	sm.video["a"] = s
 	data := []byte("hello")

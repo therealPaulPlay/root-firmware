@@ -13,7 +13,7 @@ type stream struct {
 	clientID   string
 	ch         chan []byte
 	msgType    string
-	endCh      chan struct{}
+	stopCh     chan struct{}
 	startedAt  time.Time
 	lastActive time.Time
 	wg         sync.WaitGroup
@@ -21,7 +21,7 @@ type stream struct {
 
 type streamManager struct {
 	mu          sync.Mutex
-	muxerExited chan struct{}
+	muxerDoneCh chan struct{}
 	initSegment []byte
 	video       map[string]*stream
 	audio       map[string]*stream
@@ -38,9 +38,9 @@ func init() {
 			streams.mu.Lock()
 			for id, v := range streams.video {
 				if time.Since(v.lastActive) > 10*time.Second {
-					log.Printf("RelayComm: Ending streams for device %s due to inactivity", id)
-					streams.endVideoLocked(id, "")
-					streams.endAudioLocked(id, "")
+					log.Printf("RelayComm: Stopping streams for device %s due to inactivity", id)
+					streams.stopVideoLocked(id, "")
+					streams.stopAudioLocked(id, "")
 				}
 			}
 			streams.mu.Unlock()
@@ -48,8 +48,8 @@ func init() {
 	}()
 }
 
-// Write implements io.Writer — called by the muxer goroutine with complete fMP4 segments
-// Fans out to all viewer channels, caching the first segment as the init segment
+// Write is the muxer's io.Writer sink, fanning each fMP4 segment out to every viewer
+// The first segment is the init segment, cached to bootstrap late joiners
 func (sm *streamManager) Write(p []byte) (int, error) {
 	out := make([]byte, len(p))
 	copy(out, p)
@@ -70,11 +70,11 @@ func (sm *streamManager) Write(p []byte) (int, error) {
 
 // stopStream signals a stream's sendLoop to exit and waits for it to finish
 func stopStream(s *stream) {
-	close(s.endCh)
+	close(s.stopCh)
 	s.wg.Wait()
 }
 
-func (sm *streamManager) endVideoLocked(deviceID, errorMsg string) {
+func (sm *streamManager) stopVideoLocked(deviceID, errorMsg string) {
 	s, ok := sm.video[deviceID]
 	if !ok {
 		return
@@ -84,32 +84,31 @@ func (sm *streamManager) endVideoLocked(deviceID, errorMsg string) {
 	if errorMsg != "" {
 		pushStreamError(s.clientID, s.msgType, errorMsg)
 	}
-	// Tear down shared muxer when last viewer leaves
-	// Must release mu: muxer goroutine may be in sm.Write() waiting for mu
-	// Set muxerExited=nil before unlocking so concurrent callers see muxer as absent
-	if len(sm.video) == 0 && sm.muxerExited != nil {
-		log.Printf("RelayComm: Last viewer left, tearing down muxer")
-		muxerExited := sm.muxerExited
-		sm.muxerExited = nil
+	// Last viewer left, release the shared video subscription
+	// Clear muxerDoneCh and unlock first so a concurrent start sees none and sm.Write can still take mu
+	if len(sm.video) == 0 && sm.muxerDoneCh != nil {
+		log.Printf("RelayComm: Last viewer left, releasing video subscription")
+		muxerDoneCh := sm.muxerDoneCh
+		sm.muxerDoneCh = nil
 		sm.mu.Unlock()
-		record.Get().StopVideoStream()
-		<-muxerExited
+		record.Get().UnsubscribeVideo()
+		<-muxerDoneCh
 		sm.mu.Lock()
-		// Clear stale init — but only if no new muxer started during teardown
-		if sm.muxerExited == nil {
+		// Clear stale init (only if no new subscription started during teardown)
+		if sm.muxerDoneCh == nil {
 			sm.initSegment = nil
 		}
 	}
 }
 
-func (sm *streamManager) endAudioLocked(deviceID, errorMsg string) {
+func (sm *streamManager) stopAudioLocked(deviceID, errorMsg string) {
 	s, ok := sm.audio[deviceID]
 	if !ok {
 		return
 	}
 	delete(sm.audio, deviceID)
 	stopStream(s)
-	record.Get().StopAudioStream(s.ch)
+	record.Get().UnsubscribeAudio(s.ch)
 	if errorMsg != "" {
 		pushStreamError(s.clientID, MsgStreamAudioChunk, errorMsg)
 	}
@@ -128,8 +127,8 @@ func (sm *streamManager) evictOldest() {
 	if oldestID == "" {
 		return
 	}
-	sm.endVideoLocked(oldestID, "Stream viewer limit reached")
-	sm.endAudioLocked(oldestID, "Stream viewer limit reached")
+	sm.stopVideoLocked(oldestID, "Stream viewer limit reached")
+	sm.stopAudioLocked(oldestID, "Stream viewer limit reached")
 }
 
 func sendLoop(s *stream) {
@@ -137,7 +136,7 @@ func sendLoop(s *stream) {
 	chunkIndex := 0
 	for {
 		select {
-		case <-s.endCh:
+		case <-s.stopCh:
 			return
 		case data, ok := <-s.ch:
 			if !ok {
@@ -150,8 +149,8 @@ func sendLoop(s *stream) {
 						streams.mu.Lock()
 						// Ensure this is still the most recent stream, if so, end both video and audio
 						if streams.video[s.clientID] == s {
-							streams.endVideoLocked(s.clientID, "WebSocket overwhelmed")
-							streams.endAudioLocked(s.clientID, "WebSocket overwhelmed")
+							streams.stopVideoLocked(s.clientID, "WebSocket overwhelmed")
+							streams.stopAudioLocked(s.clientID, "WebSocket overwhelmed")
 						}
 						streams.mu.Unlock()
 					}()
@@ -184,30 +183,29 @@ func StartVideoStreamForClient(clientID, msgType string) {
 	streams.mu.Lock()
 	defer streams.mu.Unlock()
 
-	streams.endVideoLocked(clientID, "") // End any existing stream for this client if active
+	streams.stopVideoLocked(clientID, "") // Stop any existing stream for this client if active
 	if len(streams.video) >= globals.MaxConcurrentStreams {
 		streams.evictOldest()
 	}
 
-	// Start shared muxer on first viewer
-	// Must release mu because StartVideoStream calls SeedKeyframe → Write() which needs mu
-	// Set placeholder before unlocking so concurrent callers see muxer as starting
-	if streams.muxerExited == nil {
+	// First viewer starts the shared subscription, set the placeholder so concurrent starts back off
+	// Unlock while subscribing since SubscribeVideo seeds a keyframe through Write which needs mu
+	if streams.muxerDoneCh == nil {
 		placeholder := make(chan struct{})
-		streams.muxerExited = placeholder
+		streams.muxerDoneCh = placeholder
 		streams.mu.Unlock()
-		done, err := record.Get().StartVideoStream(streams)
+		done, err := record.Get().SubscribeVideo(streams)
 		streams.mu.Lock()
 		if err != nil {
-			streams.muxerExited = nil
+			streams.muxerDoneCh = nil
 			log.Printf("RelayComm: Failed to start video stream: %v", err)
 			return
 		}
-		streams.muxerExited = done
+		streams.muxerDoneCh = done
 	}
 
 	now := time.Now()
-	s := &stream{clientID: clientID, ch: make(chan []byte, 3), msgType: msgType, endCh: make(chan struct{}), startedAt: now, lastActive: now}
+	s := &stream{clientID: clientID, ch: make(chan []byte, 3), msgType: msgType, stopCh: make(chan struct{}), startedAt: now, lastActive: now}
 	if streams.initSegment != nil {
 		s.ch <- streams.initSegment
 	}
@@ -217,16 +215,27 @@ func StartVideoStreamForClient(clientID, msgType string) {
 	log.Printf("RelayComm: Started video stream for device %s (viewers: %d)", clientID, len(streams.video))
 }
 
-func StartAudioStreamForClient(clientID string, ch chan []byte) {
+func StartAudioStreamForClient(clientID string) {
 	streams.mu.Lock()
 	defer streams.mu.Unlock()
+	streams.startAudioLocked(clientID)
+}
 
-	streams.endAudioLocked(clientID, "")
+// startAudioLocked opens a recorder audio channel for the client and registers the stream
+// Must be called with sm.mu held
+func (sm *streamManager) startAudioLocked(clientID string) {
+	sm.stopAudioLocked(clientID, "")
+
+	ch, err := record.Get().SubscribeAudio()
+	if err != nil {
+		log.Printf("RelayComm: Failed to start audio stream for %s: %v", clientID, err)
+		return
+	}
 
 	now := time.Now()
-	s := &stream{clientID: clientID, ch: ch, msgType: MsgStreamAudioChunk, endCh: make(chan struct{}), startedAt: now, lastActive: now}
+	s := &stream{clientID: clientID, ch: ch, msgType: MsgStreamAudioChunk, stopCh: make(chan struct{}), startedAt: now, lastActive: now}
 	s.wg.Add(1)
-	streams.audio[clientID] = s
+	sm.audio[clientID] = s
 	go sendLoop(s)
 	log.Printf("RelayComm: Started audio stream for device %s", clientID)
 }
@@ -241,21 +250,11 @@ func SyncAudioStreams() {
 			if _, hasAudio := streams.audio[clientID]; hasAudio {
 				continue
 			}
-			ch, err := record.Get().StartAudioStream()
-			if err != nil {
-				log.Printf("RelayComm: Failed to start audio stream for %s: %v", clientID, err)
-				continue
-			}
-			now := time.Now()
-			s := &stream{clientID: clientID, ch: ch, msgType: MsgStreamAudioChunk, endCh: make(chan struct{}), startedAt: now, lastActive: now}
-			s.wg.Add(1)
-			streams.audio[clientID] = s
-			go sendLoop(s)
-			log.Printf("RelayComm: Started audio stream for device %s (mic enabled)", clientID)
+			streams.startAudioLocked(clientID)
 		}
 	} else {
 		for clientID := range streams.audio {
-			streams.endAudioLocked(clientID, "")
+			streams.stopAudioLocked(clientID, "")
 		}
 	}
 }
