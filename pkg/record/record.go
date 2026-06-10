@@ -2,6 +2,7 @@ package record
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -444,13 +445,15 @@ func (r *Recorder) StopRecording(eventID string, eventType string, preview []byt
 	return duration, nil
 }
 
+var ErrNoFrame = errors.New("no frame available yet") // Expected briefly after boot
+
 func (r *Recorder) CapturePreview(x int, y int) (image.Image, error) {
 	r.videoBroadcast.frameMu.RLock()
 	frame := r.videoBroadcast.latestFrame
 	r.videoBroadcast.frameMu.RUnlock()
 
 	if len(frame) == 0 {
-		return nil, fmt.Errorf("no frame available yet")
+		return nil, ErrNoFrame
 	}
 
 	return r.decoder.decodeAndScale(frame, x, y, draw.BiLinear)
@@ -471,7 +474,7 @@ func (r *Recorder) CaptureViewfinderFrame() ([]byte, error) {
 	r.videoBroadcast.frameMu.RUnlock()
 
 	if len(frame) == 0 {
-		return nil, fmt.Errorf("no frame available yet")
+		return nil, ErrNoFrame
 	}
 
 	scaled, err := r.decoder.decodeAndScale(frame, globals.ViewfinderWidth, globals.ViewfinderHeight, draw.NearestNeighbor)

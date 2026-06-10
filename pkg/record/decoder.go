@@ -141,7 +141,7 @@ func (d *h264Decoder) decodeAndScale(nalData []byte, x, y int, scaler draw.Scale
 		}, nil
 	}
 
-	return nil, fmt.Errorf("no frame produced from input")
+	return nil, ErrNoFrame
 }
 
 // LUT for expanding BT.601 limited range luma [16,235] to full range [0,255]

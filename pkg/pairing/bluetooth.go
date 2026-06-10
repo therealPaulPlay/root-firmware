@@ -2,6 +2,7 @@ package pairing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"maps"
@@ -169,7 +170,11 @@ func initBLE() error {
 
 			frameData, err := record.Get().CaptureViewfinderFrame()
 			if err != nil {
-				writeError(rsp, err.Error())
+				if errors.Is(err, record.ErrNoFrame) {
+					writeSuccess(rsp, map[string]any{"retry": true}) // No decodable frame yet, tell client to retry
+				} else {
+					writeError(rsp, err.Error())
+				}
 				return
 			}
 
