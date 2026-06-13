@@ -39,8 +39,8 @@ func init() {
 			for id, v := range streams.video {
 				if time.Since(v.lastActive) > 10*time.Second {
 					log.Printf("RelayComm: Stopping streams for device %s due to inactivity", id)
-					streams.stopVideoLocked(id, "")
-					streams.stopAudioLocked(id, "")
+					streams.stopVideoLocked(id, "", false)
+					streams.stopAudioLocked(id, "", false)
 				}
 			}
 			streams.mu.Unlock()
@@ -74,7 +74,7 @@ func stopStream(s *stream) {
 	s.wg.Wait()
 }
 
-func (sm *streamManager) stopVideoLocked(deviceID, errorMsg string) {
+func (sm *streamManager) stopVideoLocked(deviceID, errorMsg string, restart bool) {
 	s, ok := sm.video[deviceID]
 	if !ok {
 		return
@@ -82,7 +82,7 @@ func (sm *streamManager) stopVideoLocked(deviceID, errorMsg string) {
 	delete(sm.video, deviceID)
 	stopStream(s)
 	if errorMsg != "" {
-		pushStreamError(s.clientID, s.msgType, errorMsg)
+		pushStreamError(s.clientID, s.msgType, errorMsg, restart)
 	}
 	// Last viewer left, release the shared video subscription
 	// Clear muxerDoneCh and unlock first so a concurrent start sees none and sm.Write can still take mu
@@ -101,7 +101,7 @@ func (sm *streamManager) stopVideoLocked(deviceID, errorMsg string) {
 	}
 }
 
-func (sm *streamManager) stopAudioLocked(deviceID, errorMsg string) {
+func (sm *streamManager) stopAudioLocked(deviceID, errorMsg string, restart bool) {
 	s, ok := sm.audio[deviceID]
 	if !ok {
 		return
@@ -110,7 +110,7 @@ func (sm *streamManager) stopAudioLocked(deviceID, errorMsg string) {
 	stopStream(s)
 	record.Get().UnsubscribeAudio(s.ch)
 	if errorMsg != "" {
-		pushStreamError(s.clientID, MsgStreamAudioChunk, errorMsg)
+		pushStreamError(s.clientID, MsgStreamAudioChunk, errorMsg, restart)
 	}
 }
 
@@ -127,8 +127,8 @@ func (sm *streamManager) evictOldest() {
 	if oldestID == "" {
 		return
 	}
-	sm.stopVideoLocked(oldestID, "Stream viewer limit reached")
-	sm.stopAudioLocked(oldestID, "Stream viewer limit reached")
+	sm.stopVideoLocked(oldestID, "Stream viewer limit reached", false)
+	sm.stopAudioLocked(oldestID, "Stream viewer limit reached", false)
 }
 
 func sendLoop(s *stream) {
@@ -149,8 +149,8 @@ func sendLoop(s *stream) {
 						streams.mu.Lock()
 						// Ensure this is still the most recent stream, if so, end both video and audio
 						if streams.video[s.clientID] == s {
-							streams.stopVideoLocked(s.clientID, "WebSocket overwhelmed")
-							streams.stopAudioLocked(s.clientID, "WebSocket overwhelmed")
+							streams.stopVideoLocked(s.clientID, "WebSocket overwhelmed", false)
+							streams.stopAudioLocked(s.clientID, "WebSocket overwhelmed", false)
 						}
 						streams.mu.Unlock()
 					}()
@@ -172,18 +172,19 @@ func pushStreamChunk(clientID, msgType string, chunkIndex int, data []byte) erro
 	}, lowPrioWriteFn())
 }
 
-func pushStreamError(clientID, msgType, errorMsg string) {
+func pushStreamError(clientID, msgType, errorMsg string, restart bool) {
 	_ = Get().server.Push(clientID, msgType, map[string]any{
 		"success": false,
 		"error":   errorMsg,
+		"restart": restart,
 	}, lowPrioWriteFn())
 }
 
-func StartVideoStreamForClient(clientID, msgType string) {
+func StartVideoStreamForClient(clientID, msgType string) bool {
 	streams.mu.Lock()
 	defer streams.mu.Unlock()
 
-	streams.stopVideoLocked(clientID, "") // Stop any existing stream for this client if active
+	streams.stopVideoLocked(clientID, "", false) // Stop any existing stream for this client if active
 	if len(streams.video) >= globals.MaxConcurrentStreams {
 		streams.evictOldest()
 	}
@@ -199,7 +200,7 @@ func StartVideoStreamForClient(clientID, msgType string) {
 		if err != nil {
 			streams.muxerDoneCh = nil
 			log.Printf("RelayComm: Failed to start video stream: %v", err)
-			return
+			return false // False means video stream not started
 		}
 		streams.muxerDoneCh = done
 	}
@@ -213,6 +214,7 @@ func StartVideoStreamForClient(clientID, msgType string) {
 	streams.video[clientID] = s
 	go sendLoop(s)
 	log.Printf("RelayComm: Started video stream for device %s (viewers: %d)", clientID, len(streams.video))
+	return true
 }
 
 func StartAudioStreamForClient(clientID string) {
@@ -224,7 +226,7 @@ func StartAudioStreamForClient(clientID string) {
 // startAudioLocked opens a recorder audio channel for the client and registers the stream
 // Must be called with sm.mu held
 func (sm *streamManager) startAudioLocked(clientID string) {
-	sm.stopAudioLocked(clientID, "")
+	sm.stopAudioLocked(clientID, "", false)
 
 	ch, err := record.Get().SubscribeAudio()
 	if err != nil {
@@ -254,7 +256,7 @@ func SyncAudioStreams() {
 		}
 	} else {
 		for clientID := range streams.audio {
-			streams.stopAudioLocked(clientID, "")
+			streams.stopAudioLocked(clientID, "", false)
 		}
 	}
 }

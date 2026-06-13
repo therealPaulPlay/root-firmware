@@ -125,6 +125,7 @@ func Init() error {
 			initErr = fmt.Errorf("failed to start camera: %w", err)
 			return
 		}
+		go instance.videoWatchdog()
 
 		if err := instance.startMicrophone(); err != nil {
 			log.Printf("Recorder: Failed to start microphone: %v", err)
@@ -144,6 +145,15 @@ func MicEnabled() bool {
 	val, ok := config.Get().GetKey("microphoneEnabled")
 	if !ok {
 		return true
+	}
+	b, ok := val.(bool)
+	return ok && b
+}
+
+func FlipEnabled() bool {
+	val, ok := config.Get().GetKey("flipCamera")
+	if !ok {
+		return false
 	}
 	b, ok := val.(bool)
 	return ok && b
@@ -169,7 +179,7 @@ func (r *Recorder) startCamera() error {
 	exec.Command("pkill", "-9", "rpicam-vid").Run()
 	time.Sleep(200 * time.Millisecond)
 
-	cmd := exec.Command("rpicam-vid",
+	args := []string{
 		"-t", "0", "-o", "-",
 		"--codec", "h264", "-n", "--inline",
 		"--framerate", fmt.Sprintf("%d", globals.CameraFramerate),
@@ -177,7 +187,11 @@ func (r *Recorder) startCamera() error {
 		"--height", fmt.Sprintf("%d", globals.CameraHeight),
 		"-b", fmt.Sprintf("%d", globals.CameraBitrate),
 		"-g", fmt.Sprintf("%d", globals.CameraGOPSize),
-	)
+	}
+	if FlipEnabled() {
+		args = append(args, "--rotation", "180")
+	}
+	cmd := exec.Command("rpicam-vid", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -189,13 +203,30 @@ func (r *Recorder) startCamera() error {
 	}
 
 	r.videoCmd = cmd
-	go r.videoBroadcastLoop(stdout)
-	go r.videoWatchdog()
+	go r.videoBroadcastLoop(stdout, cmd)
 	log.Println("Recorder: Camera (video broadcast) started")
 	return nil
 }
 
-func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
+// restartCamera stops rpicam-vid and starts it again (needed for rpicam-vid argument changes)
+func (r *Recorder) restartCamera() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.videoCmd != nil && r.videoCmd.Process != nil {
+		r.videoCmd.Process.Kill()
+		r.videoCmd.Wait()
+	}
+
+	// Drop the stale frame so previews and ML skip (ErrNoFrame)
+	r.videoBroadcast.frameMu.Lock()
+	r.videoBroadcast.latestFrame = nil
+	r.videoBroadcast.frameMu.Unlock()
+
+	return r.startCamera()
+}
+
+func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser, cmd *exec.Cmd) {
 	defer stdout.Close()
 
 	buffer := make([]byte, 64*1024)
@@ -208,12 +239,14 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 			data := buffer[:n]
 
 			// Detect SPS NAL (type 7) to start keyframe capture
+			gopStart := 0
 			for i := 0; i < len(data)-4; i++ {
 				// Check for NAL start code: 0x00 0x00 0x00 0x01
 				if data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1 && i+4 < len(data) {
 					if data[i+4]&0x1F == 7 { // SPS - start of keyframe
-						// Previous GOP is complete — save for preview and lookback
-						if capturingKeyframe && keyframeBuffer.Len() > 0 {
+						// Previous GOP is complete (including its final bytes before this SPS) — save for preview and lookback
+						if capturingKeyframe {
+							keyframeBuffer.Write(data[:i])
 							gopData := append([]byte(nil), keyframeBuffer.Bytes()...)
 							r.videoBroadcast.frameMu.Lock()
 							r.videoBroadcast.latestFrame = gopData
@@ -222,13 +255,14 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 						}
 						keyframeBuffer.Reset()
 						capturingKeyframe = true
+						gopStart = i
 						break
 					}
 				}
 			}
 
 			if capturingKeyframe {
-				keyframeBuffer.Write(data)
+				keyframeBuffer.Write(data[gopStart:])
 				// Safety: cap buffer size to prevent unbounded memory growth
 				if keyframeBuffer.Len() > maxKeyframeBufferSize {
 					r.videoBroadcast.frameMu.Lock()
@@ -243,6 +277,14 @@ func (r *Recorder) videoBroadcastLoop(stdout io.ReadCloser) {
 		}
 
 		if err != nil {
+			// Intentional restart (there's a newer running cmd, just return)
+			r.mu.RLock()
+			replaced := r.videoCmd != cmd
+			r.mu.RUnlock()
+			if replaced {
+				return
+			}
+
 			log.Printf("Recorder: Video broadcast failed: %v", err)
 			r.videoBroadcast.closeAll()
 			sfx.Get().PlayCameraFailure()
@@ -482,6 +524,16 @@ func (r *Recorder) CaptureViewfinderFrame() ([]byte, error) {
 		return nil, fmt.Errorf("failed to decode viewfinder frame: %w", err)
 	}
 	return scaled.Y, nil
+}
+
+func (r *Recorder) SetCameraFlip(flip bool) error {
+	if FlipEnabled() == flip {
+		return nil
+	}
+	if err := config.Get().SetKey("flipCamera", flip); err != nil {
+		return err
+	}
+	return r.restartCamera()
 }
 
 func (r *Recorder) SetMicrophoneEnabled(enabled bool) error {

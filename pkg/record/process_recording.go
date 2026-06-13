@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"time"
 
 	aac "github.com/gen2brain/aac-go"
@@ -36,7 +37,7 @@ func (r *Recorder) muxWorker() {
 			log.Printf("Recorder: Skipping save for %s due to mux failure", job.outputPath)
 			continue
 		}
-		muxAudio(job.audioEntries, job.videoEntries[0].timestamp, job.outputPath)
+		muxAudio(job.audioEntries, job.videoEntries, job.outputPath)
 		if err := events.Get().SaveRecording(job.eventID, job.outputPath, job.duration, job.eventType, job.preview, job.videoDetection, job.audioDetection); err != nil {
 			log.Printf("Recorder: Failed to save recording %s: %v", job.eventID, err)
 		}
@@ -73,7 +74,7 @@ func muxVideo(entries []lookbackEntry, outputPath string, duration float64) erro
 }
 
 // muxAudio encodes PCM audio entries to AAC and wraps in an M4A container
-func muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) {
+func muxAudio(entries []lookbackEntry, videoEntries []lookbackEntry, outputPath string) {
 	if len(entries) == 0 {
 		return
 	}
@@ -81,8 +82,18 @@ func muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) 
 	// Audio and video chunks overlap differently before their timestamps,
 	// so align the first audio chunk's start to the video's effective start
 	gopInterval := time.Second * time.Duration(globals.CameraGOPSize) / time.Duration(globals.CameraFramerate)
+	videoStart := videoEntries[0].timestamp
 	videoActualStart := videoStart.Add(-gopInterval)
 	bytesPerSec := float64(globals.AudioSampleRate * 2)
+
+	// The video timeline may contain gaps, audio recorded during a video gap is cut
+	type timeRange struct{ start, end time.Time }
+	var gaps []timeRange
+	for i := 1; i < len(videoEntries); i++ {
+		if extra := videoEntries[i].timestamp.Sub(videoEntries[i-1].timestamp) - gopInterval; extra > 2*gopInterval {
+			gaps = append(gaps, timeRange{videoEntries[i-1].timestamp, videoEntries[i-1].timestamp.Add(extra)})
+		}
+	}
 
 	var pcm bytes.Buffer
 	var prev lookbackEntry
@@ -91,8 +102,8 @@ func muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) 
 			prev = e
 			continue
 		}
+		chunkDur := time.Duration(len(e.data)) * time.Second / time.Duration(globals.AudioSampleRate*2)
 		if pcm.Len() == 0 {
-			chunkDur := time.Duration(len(e.data)) * time.Second / time.Duration(globals.AudioSampleRate*2)
 			audioStart := e.timestamp.Add(-chunkDur)
 			lead := videoActualStart.Sub(audioStart)
 			if lead > 0 {
@@ -110,7 +121,20 @@ func muxAudio(entries []lookbackEntry, videoStart time.Time, outputPath string) 
 				}
 			}
 		}
-		pcm.Write(e.data)
+
+		// Cut the portion of the chunk that falls into a video gap so A/V stays in sync
+		data := e.data
+		chunkStart := e.timestamp.Add(-chunkDur)
+		for _, g := range slices.Backward(gaps) { // Descending order keeps offsets valid if a chunk overlaps two gaps
+			from, to := g.start.Sub(chunkStart), g.end.Sub(chunkStart)
+			if to <= 0 || from >= chunkDur {
+				continue
+			}
+			fromBytes := max(0, int(from.Seconds()*bytesPerSec)&^1)
+			toBytes := min(len(data), int(to.Seconds()*bytesPerSec)&^1)
+			data = slices.Concat(data[:fromBytes], data[toBytes:])
+		}
+		pcm.Write(data)
 	}
 	if pcm.Len() == 0 {
 		return

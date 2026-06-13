@@ -6,6 +6,7 @@ import (
 	"log"
 	"maps"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,6 +43,8 @@ const (
 	MsgSetMicrophone            = "setMicrophone"
 	MsgGetRecordingSound        = "getRecordingSound"
 	MsgSetRecordingSound        = "setRecordingSound"
+	MsgGetCameraFlip            = "getCameraFlip"
+	MsgSetCameraFlip            = "setCameraFlip"
 	MsgGetHealth                = "getHealth"
 	MsgStartUpdate              = "startUpdate"
 	MsgRestart                  = "restart"
@@ -89,6 +92,8 @@ func registerHandlers(s *rootproto.Server) {
 	s.OnRequest(MsgSetMicrophone, handleSetMicrophone)
 	s.OnRequest(MsgGetRecordingSound, handleGetRecordingSound)
 	s.OnRequest(MsgSetRecordingSound, handleSetRecordingSound)
+	s.OnRequest(MsgGetCameraFlip, handleGetCameraFlip)
+	s.OnRequest(MsgSetCameraFlip, handleSetCameraFlip)
 	s.OnRequest(MsgGetEventDetectionConfig, handleGetEventDetectionConfig)
 	s.OnRequest(MsgSetEventDetectionEnabled, handleSetEventDetectionEnabled)
 	s.OnRequest(MsgSetEventDetectionTypes, handleSetEventDetectionTypes)
@@ -248,8 +253,8 @@ func handleStartStream(clientID string, payload []byte, respond rootproto.Respon
 		return nil
 	}
 
-	StartVideoStreamForClient(clientID, MsgStreamVideoChunk)
-	if record.MicEnabled() {
+	// Only start audio if video started to prevent orphaned audio streams
+	if StartVideoStreamForClient(clientID, MsgStreamVideoChunk) && record.MicEnabled() {
 		StartAudioStreamForClient(clientID)
 	}
 
@@ -297,6 +302,33 @@ func handleSetRecordingSound(clientID string, payload []byte, respond rootproto.
 		return errorReply("Invalid payload")
 	}
 	if err := config.Get().SetKey("playRecordingSound", req.Enabled); err != nil {
+		return errorReply(err.Error())
+	}
+	return successReply(map[string]any{"enabled": req.Enabled})
+}
+
+func handleGetCameraFlip(clientID string, payload []byte, respond rootproto.RespondFn) any {
+	return successReply(map[string]any{"enabled": record.FlipEnabled()})
+}
+
+func handleSetCameraFlip(clientID string, payload []byte, respond rootproto.RespondFn) any {
+	var req struct {
+		Enabled bool `cbor:"enabled"`
+	}
+	if err := cbor.Unmarshal(payload, &req); err != nil {
+		return errorReply("Invalid payload")
+	}
+	// Stop viewer streams before the camera restarts underneath them (their muxer can't survive the cut)
+	// The restart flag set to true tells clients that they should initiate a new stream
+	if record.FlipEnabled() != req.Enabled {
+		streams.mu.Lock()
+		for _, id := range slices.Collect(maps.Keys(streams.video)) {
+			streams.stopVideoLocked(id, "Camera restarting", true)
+			streams.stopAudioLocked(id, "Camera restarting", true)
+		}
+		streams.mu.Unlock()
+	}
+	if err := record.Get().SetCameraFlip(req.Enabled); err != nil {
 		return errorReply(err.Error())
 	}
 	return successReply(map[string]any{"enabled": req.Enabled})
