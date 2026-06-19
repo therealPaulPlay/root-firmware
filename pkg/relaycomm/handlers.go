@@ -221,11 +221,11 @@ func handleGetThumbnail(clientID string, payload []byte, respond rootproto.Respo
 	if err != nil {
 		return errorReply(err.Error(), eventIdField)
 	}
-	productPrivateKey, err := config.Get().GetProductPrivateKey()
+	fileEncryptionKey, err := config.Get().GetFileEncryptionKeyAES256()
 	if err != nil {
 		return errorReply(fmt.Sprintf("Failed to get decryption key: %v", err), eventIdField)
 	}
-	reader, _, err := decryptFileToReader(filePath, productPrivateKey)
+	reader, _, err := decryptFileToReader(filePath, fileEncryptionKey)
 	if err != nil {
 		return errorReply(fmt.Sprintf("Failed to decrypt thumbnail: %v", err), eventIdField)
 	}

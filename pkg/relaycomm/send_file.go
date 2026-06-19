@@ -14,7 +14,7 @@ import (
 
 // decryptFileToReader decrypts a file and returns a reader for the plaintext content
 func decryptFileToReader(filePath string, key []byte) (io.Reader, int64, error) {
-	session, err := rootproto.SessionFromKey(key)
+	session, err := rootproto.SessionFromKeyAES256GCM(key)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -38,13 +38,13 @@ func SendFileInChunksAsync(clientID, filePath, fileType string, metadata map[str
 		const chunkSize = 1 * 1024 * 1024                 // 1MB chunks
 		const delayBetweenChunks = 250 * time.Millisecond // 4/s rate limit = ~4MB/sec throughput
 
-		productPrivateKey, err := config.Get().GetProductPrivateKey()
+		fileEncryptionKey, err := config.Get().GetFileEncryptionKeyAES256()
 		if err != nil {
 			pushFileError(clientID, fmt.Sprintf("Failed to get decryption key: %v", err))
 			return
 		}
 
-		reader, fileSize, err := decryptFileToReader(filePath, productPrivateKey)
+		reader, fileSize, err := decryptFileToReader(filePath, fileEncryptionKey)
 		if err != nil {
 			pushFileError(clientID, fmt.Sprintf("Failed to decrypt file: %v", err))
 			return

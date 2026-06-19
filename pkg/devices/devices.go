@@ -14,11 +14,12 @@ import (
 )
 
 type Device struct {
-	ID           string `cbor:"id"`
-	Name         string `cbor:"name"`
-	PublicKey    []byte `cbor:"publicKey"`
-	ProductAlias string `cbor:"productAlias"`
-	PairedAt     int64  `cbor:"pairedAt"`
+	ID            string `cbor:"id"`
+	Name          string `cbor:"name"`
+	PublicKey     []byte `cbor:"publicKey"`
+	PublicKeyType string `cbor:"publicKeyType"`
+	ProductAlias  string `cbor:"productAlias"`
+	PairedAt      int64  `cbor:"pairedAt"`
 }
 
 type Devices struct {
@@ -70,7 +71,7 @@ func (d *Devices) GetByID(id string) (*Device, bool) {
 }
 
 // Add adds a new device or updates existing one
-func (d *Devices) Add(id, name string, publicKey []byte) error {
+func (d *Devices) Add(id, name string, publicKey []byte, publicKeyType string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -86,18 +87,19 @@ func (d *Devices) Add(id, name string, publicKey []byte) error {
 
 	// Add new device
 	filtered = append(filtered, Device{
-		ID:           id,
-		Name:         name,
-		PublicKey:    publicKey,
-		ProductAlias: "My ROOT " + strings.ToUpper(globals.ProductModel[:1]) + globals.ProductModel[1:], // Prefix needs to match client-side default prefix
-		PairedAt:     time.Now().UnixMilli(),
+		ID:            id,
+		Name:          name,
+		PublicKey:     publicKey,
+		PublicKeyType: publicKeyType,
+		ProductAlias:  "My ROOT " + strings.ToUpper(globals.ProductModel[:1]) + globals.ProductModel[1:], // Prefix needs to match client-side default prefix
+		PairedAt:      time.Now().UnixMilli(),
 	})
 
 	return config.Get().SetKey("connectedDevices", filtered)
 }
 
-// RenewKey updates the device's public key
-func (d *Devices) RenewKey(id string, publicKey []byte) error {
+// RenewKey updates the device's public key and its type
+func (d *Devices) RenewKey(id string, publicKey []byte, publicKeyType string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -107,6 +109,7 @@ func (d *Devices) RenewKey(id string, publicKey []byte) error {
 	for i, dev := range devices {
 		if dev.ID == id {
 			devices[i].PublicKey = publicKey
+			devices[i].PublicKeyType = publicKeyType
 			return config.Get().SetKey("connectedDevices", devices)
 		}
 	}

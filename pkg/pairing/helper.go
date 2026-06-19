@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/qr"
 	"root-firmware/pkg/record"
@@ -164,8 +166,8 @@ func (b *Pairing) PairDevice(deviceID, deviceName string, devicePublicKey []byte
 		return fmt.Errorf("code not verified or expired")
 	}
 
-	// Add device with its public key
-	if err := devices.Get().Add(deviceID, deviceName, devicePublicKey); err != nil {
+	// Add device with its public key (currently pairing is always P-256, subject to change once post-quantum crypto has matured)
+	if err := devices.Get().Add(deviceID, deviceName, devicePublicKey, rootproto.KeyTypeP256); err != nil {
 		return fmt.Errorf("failed to add device: %w", err)
 	}
 

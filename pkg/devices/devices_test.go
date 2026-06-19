@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 
+	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/testutil"
 )
@@ -62,7 +64,7 @@ func TestAdd_NewDevice(t *testing.T) {
 	d := Get()
 	pubKey := []byte{0x01, 0x02, 0x03, 0x04}
 
-	err := d.Add("device-123", "Test Device", pubKey)
+	err := d.Add("device-123", "Test Device", pubKey, rootproto.KeyTypeP256)
 	if err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
@@ -97,11 +99,11 @@ func TestAdd_ReplacesExistingDevice(t *testing.T) {
 	d := Get()
 
 	// Add initial device
-	d.Add("device-123", "Original Name", []byte{0x01})
+	d.Add("device-123", "Original Name", []byte{0x01}, rootproto.KeyTypeP256)
 
 	// Add same device ID with new data
 	newKey := []byte{0x02, 0x03}
-	err := d.Add("device-123", "New Name", newKey)
+	err := d.Add("device-123", "New Name", newKey, rootproto.KeyTypeP256)
 	if err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
@@ -126,9 +128,9 @@ func TestAdd_MultipleDevices(t *testing.T) {
 
 	d := Get()
 
-	d.Add("device-1", "Device One", []byte{0x01})
-	d.Add("device-2", "Device Two", []byte{0x02})
-	d.Add("device-3", "Device Three", []byte{0x03})
+	d.Add("device-1", "Device One", []byte{0x01}, rootproto.KeyTypeP256)
+	d.Add("device-2", "Device Two", []byte{0x02}, rootproto.KeyTypeP256)
+	d.Add("device-3", "Device Three", []byte{0x03}, rootproto.KeyTypeP256)
 
 	devices := d.GetAll()
 	if len(devices) != 3 {
@@ -141,7 +143,7 @@ func TestGetByID_Found(t *testing.T) {
 	defer cleanup()
 
 	d := Get()
-	d.Add("device-123", "Test Device", []byte{0x01, 0x02})
+	d.Add("device-123", "Test Device", []byte{0x01, 0x02}, rootproto.KeyTypeP256)
 
 	dev, found := d.GetByID("device-123")
 	if !found {
@@ -160,7 +162,7 @@ func TestGetByID_NotFound(t *testing.T) {
 	defer cleanup()
 
 	d := Get()
-	d.Add("device-123", "Test Device", []byte{0x01})
+	d.Add("device-123", "Test Device", []byte{0x01}, rootproto.KeyTypeP256)
 
 	dev, found := d.GetByID("nonexistent")
 	if found {
@@ -176,10 +178,10 @@ func TestRenewKey_Success(t *testing.T) {
 	defer cleanup()
 
 	d := Get()
-	d.Add("device-123", "Test Device", []byte{0x01, 0x02})
+	d.Add("device-123", "Test Device", []byte{0x01, 0x02}, rootproto.KeyTypeP256)
 
 	newKey := []byte{0x03, 0x04, 0x05}
-	err := d.RenewKey("device-123", newKey)
+	err := d.RenewKey("device-123", newKey, rootproto.KeyTypeP256)
 	if err != nil {
 		t.Fatalf("RenewKey() error = %v", err)
 	}
@@ -196,7 +198,7 @@ func TestRenewKey_DeviceNotFound(t *testing.T) {
 
 	d := Get()
 
-	err := d.RenewKey("nonexistent", []byte{0x01})
+	err := d.RenewKey("nonexistent", []byte{0x01}, rootproto.KeyTypeP256)
 	if err == nil {
 		t.Error("RenewKey() should error for nonexistent device")
 	}
@@ -207,7 +209,7 @@ func TestSetProductAlias_Success(t *testing.T) {
 	defer cleanup()
 
 	d := Get()
-	d.Add("device-123", "Test Device", []byte{0x01})
+	d.Add("device-123", "Test Device", []byte{0x01}, rootproto.KeyTypeP256)
 
 	err := d.SetProductAlias("device-123", "Living Room Camera")
 	if err != nil {
@@ -239,7 +241,7 @@ func TestSetProductAlias_Errors(t *testing.T) {
 
 			d := Get()
 			if tt.setupDevice {
-				d.Add("device-123", "Test Device", []byte{0x01})
+				d.Add("device-123", "Test Device", []byte{0x01}, rootproto.KeyTypeP256)
 			}
 
 			err := d.SetProductAlias(tt.deviceID, tt.alias)
@@ -255,8 +257,8 @@ func TestRemove_Success(t *testing.T) {
 	defer cleanup()
 
 	d := Get()
-	d.Add("device-1", "Device One", []byte{0x01})
-	d.Add("device-2", "Device Two", []byte{0x02})
+	d.Add("device-1", "Device One", []byte{0x01}, rootproto.KeyTypeP256)
+	d.Add("device-2", "Device Two", []byte{0x02}, rootproto.KeyTypeP256)
 
 	err := d.Remove("device-1")
 	if err != nil {
@@ -277,7 +279,7 @@ func TestRemove_NonexistentDevice(t *testing.T) {
 	defer cleanup()
 
 	d := Get()
-	d.Add("device-1", "Device One", []byte{0x01})
+	d.Add("device-1", "Device One", []byte{0x01}, rootproto.KeyTypeP256)
 
 	// Removing nonexistent device should not error (idempotent)
 	err := d.Remove("nonexistent")

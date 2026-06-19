@@ -133,7 +133,7 @@ func initBLE() error {
 		}
 	}))
 
-	// Get Code characteristic (read to get pairing code)
+	// Get code characteristic (read to get pairing code)
 	getCodeChar := svc.NewCharacteristic(getCodeCharUUID)
 	getCodeChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		// Clear viewfinder cache when starting new pairing session
@@ -222,7 +222,7 @@ func initBLE() error {
 		}
 	}))
 
-	// Pair Device characteristic (write to pair, read to get result)
+	// Pair device characteristic (write to pair, read to get result)
 	pairChar := svc.NewCharacteristic(pairCharUUID)
 	pairChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		var pairReq struct {
@@ -258,11 +258,11 @@ func initBLE() error {
 		writeSuccess(rsp, nil)
 	}))
 
-	// Get Product Public Key characteristic (read-only)
+	// Get product public key characteristic (read-only)
 	productPublicKeyChar := svc.NewCharacteristic(productPublicKeyCharUUID)
 	productPublicKeyChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
-		publicKey, ok := config.Get().GetKey("productPublicKey")
-		if !ok {
+		publicKey, err := config.Get().GetProductPublicKeyP256()
+		if err != nil {
 			writeError(rsp, "Product public key not found")
 			return
 		}
@@ -272,7 +272,7 @@ func initBLE() error {
 		}
 	}))
 
-	// Get WiFi Networks characteristic - returns one network per read
+	// Get wifi networks characteristic - returns one network per read
 	// Empty cache triggers scan, subsequent reads return next network
 	// Reading after hasMore:false triggers new scan
 	wifiNetworksChar := svc.NewCharacteristic(wifiNetworksCharUUID)
@@ -309,7 +309,7 @@ func initBLE() error {
 		}
 	}))
 
-	// Get WiFi Status characteristic (read-only)
+	// Get wifi status characteristic (read-only)
 	wifiStatusChar := svc.NewCharacteristic(wifiStatusCharUUID)
 	wifiStatusChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		if err := writeSuccess(rsp, map[string]any{
@@ -319,7 +319,7 @@ func initBLE() error {
 		}
 	}))
 
-	// Set WiFi characteristic (write to start connection, read to poll status)
+	// Set wifi characteristic (write to start connection, read to poll status)
 	wifiConnectChar := svc.NewCharacteristic(wifiConnectCharUUID)
 	wifiConnectChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		decrypted, err := decryptAndVerify(req.Data())
@@ -364,7 +364,7 @@ func initBLE() error {
 		writeSuccess(rsp, nil)
 	}))
 
-	// Get Relay status characteristic (read-only)
+	// Get relay status characteristic (read-only)
 	relayStatusChar := svc.NewCharacteristic(relayStatusCharUUID)
 	relayStatusChar.HandleRead(ble.ReadHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		relayDomain, _ := config.Get().GetKey("relayDomain")
@@ -375,7 +375,7 @@ func initBLE() error {
 		}
 	}))
 
-	// Set Relay characteristic (write to configure, read to get result)
+	// Set relay characteristic (write to configure, read to get result)
 	relaySetChar := svc.NewCharacteristic(relaySetCharUUID)
 	relaySetChar.HandleWrite(ble.WriteHandlerFunc(func(req ble.Request, rsp ble.ResponseWriter) {
 		decrypted, err := decryptAndVerify(req.Data())
@@ -461,12 +461,12 @@ func decryptAndVerify(data []byte) ([]byte, error) {
 	}
 
 	// Get product private key
-	privKey, err := config.Get().GetProductPrivateKey()
+	privKey, err := config.Get().GetProductPrivateKeyP256()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get product private key: %w", err)
 	}
 
-	session, err := rootproto.DeriveSession(privKey, device.PublicKey)
+	session, err := rootproto.DeriveSessionP256(privKey, device.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive session: %w", err)
 	}

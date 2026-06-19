@@ -39,16 +39,27 @@ func Init() error {
 		productID, _ := config.Get().GetKey("id")
 		productIDStr, _ := productID.(string)
 		instance.server, err = rootproto.NewServer(productIDStr, rootproto.KeyStore{
-			GetPrivateKey: func() ([]byte, error) { return config.Get().GetProductPrivateKey() },
-			GetClientPublicKey: func(clientID string) ([]byte, bool) {
+			GetPrivateKey: func(keyType string) *rootproto.PrivateKey {
+				switch keyType {
+				case rootproto.KeyTypeP256:
+					key, err := config.Get().GetProductPrivateKeyP256()
+					if err != nil {
+						return nil
+					}
+					return &rootproto.PrivateKey{Key: key, KeyType: rootproto.KeyTypeP256}
+				default:
+					return nil
+				}
+			},
+			GetClientPublicKey: func(clientID string) *rootproto.PublicKey {
 				device, ok := devices.Get().GetByID(clientID)
 				if !ok {
-					return nil, false
+					return nil
 				}
-				return device.PublicKey, true
+				return &rootproto.PublicKey{Key: device.PublicKey, KeyType: device.PublicKeyType}
 			},
-			CommitClientPublicKey: func(clientID string, newPublicKey []byte) error {
-				return devices.Get().RenewKey(clientID, newPublicKey)
+			CommitClientPublicKey: func(clientID string, newPublicKey *rootproto.PublicKey) error {
+				return devices.Get().RenewKey(clientID, newPublicKey.Key, newPublicKey.KeyType)
 			},
 		}, persistentReplayStore())
 		if err != nil {

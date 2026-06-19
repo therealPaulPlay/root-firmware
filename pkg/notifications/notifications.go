@@ -164,7 +164,7 @@ func (n *Notifications) SendEventToAll(eventType string, eventID string, preview
 		return
 	}
 
-	productPrivateKey, err := config.Get().GetProductPrivateKey()
+	productPrivateKey, err := config.Get().GetProductPrivateKeyP256()
 	if err != nil {
 		log.Printf("Notifications: Failed to get product private key: %v", err)
 		return
@@ -273,7 +273,7 @@ func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, pro
 // uploadEncryptedPreview encrypts the preview for a specific device and uploads it to the relay
 // Returns the image URL, or empty string on failure
 func (n *Notifications) uploadEncryptedPreview(relayDomain string, productPrivateKey, devicePublicKey, preview []byte) string {
-	session, err := rootproto.DeriveSession(productPrivateKey, devicePublicKey)
+	session, err := rootproto.DeriveSessionP256(productPrivateKey, devicePublicKey)
 	if err != nil {
 		log.Printf("Notifications: Failed to derive session: %v", err)
 		return ""

@@ -61,11 +61,14 @@ func TestInit_CreatesConfigFile(t *testing.T) {
 	if name, ok := cfg.GetKey("bluetoothName"); !ok || name == "" {
 		t.Error("Init() did not set bluetoothName")
 	}
-	if _, ok := cfg.GetKey("productPrivateKey"); !ok {
-		t.Error("Init() did not set productPrivateKey")
+	if _, ok := cfg.GetKey("productPrivateKeyP256"); !ok {
+		t.Error("Init() did not set productPrivateKeyP256")
 	}
-	if _, ok := cfg.GetKey("productPublicKey"); !ok {
-		t.Error("Init() did not set productPublicKey")
+	if _, ok := cfg.GetKey("productPublicKeyP256"); !ok {
+		t.Error("Init() did not set productPublicKeyP256")
+	}
+	if _, ok := cfg.GetKey("fileEncryptionKeyAES256"); !ok {
+		t.Error("Init() did not set fileEncryptionKeyAES256")
 	}
 }
 
@@ -247,7 +250,7 @@ func TestGetKey_NonexistentKey(t *testing.T) {
 	}
 }
 
-func TestGetProductPrivateKey(t *testing.T) {
+func TestGetFileEncryptionKeyAES256(t *testing.T) {
 	cleanup := setupTestConfig(t)
 	defer cleanup()
 
@@ -256,26 +259,22 @@ func TestGetProductPrivateKey(t *testing.T) {
 	}
 
 	cfg := Get()
-	key, err := cfg.GetProductPrivateKey()
+	key, err := cfg.GetFileEncryptionKeyAES256()
 	if err != nil {
-		t.Fatalf("GetProductPrivateKey() error = %v", err)
+		t.Fatalf("GetFileEncryptionKeyAES256() error = %v", err)
 	}
-	if len(key) == 0 {
-		t.Error("GetProductPrivateKey() returned empty key")
-	}
-	// P-256 private key should be 32 bytes
+	// AES-256 key should be 32 bytes
 	if len(key) != 32 {
-		t.Errorf("GetProductPrivateKey() key length = %d, want 32", len(key))
+		t.Errorf("GetFileEncryptionKeyAES256() key length = %d, want 32", len(key))
 	}
 }
 
-func TestGetProductPrivateKey_Errors(t *testing.T) {
+func TestGetFileEncryptionKeyAES256_Errors(t *testing.T) {
 	tests := []struct {
 		name       string
 		configData map[string]any
 	}{
-		{"missing key", map[string]any{"id": "test-id"}},
-		{"invalid type", map[string]any{"id": "test-id", "productPrivateKey": 12345}},
+		{"invalid type", map[string]any{"id": "test-id", "fileEncryptionKeyAES256": 12345}},
 	}
 
 	for _, tt := range tests {
@@ -295,11 +294,41 @@ func TestGetProductPrivateKey_Errors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err := Get().GetProductPrivateKey()
+			_, err := Get().GetFileEncryptionKeyAES256()
 			if err == nil {
-				t.Error("GetProductPrivateKey() should error")
+				t.Error("GetFileEncryptionKeyAES256() should error")
 			}
 		})
+	}
+}
+
+func TestInit_ProvisionsMissingKeys(t *testing.T) {
+	cleanup := setupTestConfig(t)
+	defer cleanup()
+
+	if err := os.MkdirAll(globals.FirmwareDataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed an existing config that has an id but is missing the keys added later
+	data, _ := cbor.Marshal(map[string]any{"id": "existing-id"})
+	if err := os.WriteFile(globals.ConfigPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The pre-existing value is preserved
+	if id, ok := Get().GetKey("id"); !ok || id != "existing-id" {
+		t.Errorf("existing id should be preserved, got %v (ok=%v)", id, ok)
+	}
+	// Missing keys are provisioned
+	if _, ok := Get().GetKey("bluetoothName"); !ok {
+		t.Error("bluetoothName should be provisioned")
+	}
+	if _, err := Get().GetFileEncryptionKeyAES256(); err != nil {
+		t.Errorf("fileEncryptionKeyAES256 should be provisioned: %v", err)
 	}
 }
 

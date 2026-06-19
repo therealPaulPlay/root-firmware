@@ -23,7 +23,7 @@ const (
 
 // encryptFileToPath reads a file, encrypts it, and writes to a destination path
 func encryptFileToPath(srcPath, dstPath string, key []byte) error {
-	session, err := rootproto.SessionFromKey(key)
+	session, err := rootproto.SessionFromKeyAES256GCM(key)
 	if err != nil {
 		return err
 	}
@@ -191,15 +191,15 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 		return err
 	}
 
-	// Get encryption key and create session
-	productPrivateKey, err := config.Get().GetProductPrivateKey()
+	// Get the at-rest file encryption key and create a session
+	fileEncryptionKey, err := config.Get().GetFileEncryptionKeyAES256()
 	if err != nil {
 		return fmt.Errorf("failed to get encryption key: %w", err)
 	}
 
 	// Encrypt and save video from temp to final location
 	finalPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.mp4", eventID))
-	if err := encryptFileToPath(filePath, finalPath, productPrivateKey); err != nil {
+	if err := encryptFileToPath(filePath, finalPath, fileEncryptionKey); err != nil {
 		return fmt.Errorf("failed to encrypt recording: %w", err)
 	}
 	os.Remove(filePath) // Clean up temp file
@@ -208,7 +208,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	audioTempPath := filePath[:len(filePath)-4] + "_audio.m4a"
 	if _, err := os.Stat(audioTempPath); err == nil {
 		audioFinalPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s_audio.m4a", eventID))
-		if err := encryptFileToPath(audioTempPath, audioFinalPath, productPrivateKey); err != nil {
+		if err := encryptFileToPath(audioTempPath, audioFinalPath, fileEncryptionKey); err != nil {
 			log.Printf("Events: Failed to encrypt audio for %s: %v", eventID, err)
 		}
 		os.Remove(audioTempPath) // Clean up temp file
@@ -217,7 +217,7 @@ func (s *Storage) SaveRecording(eventID string, filePath string, duration float6
 	// Encrypt and save preview as thumbnail
 	if preview != nil {
 		thumbnailPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.jpg", eventID))
-		session, err := rootproto.SessionFromKey(productPrivateKey)
+		session, err := rootproto.SessionFromKeyAES256GCM(fileEncryptionKey)
 		if err != nil {
 			log.Printf("Events: Failed to create encryption session for %s: %v", eventID, err)
 		} else if encryptedPreview, err := session.Encrypt(preview, nil); err != nil {

@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 
+	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
 	"root-firmware/pkg/testutil"
@@ -39,7 +41,7 @@ func setupTest(t *testing.T) func() {
 // addPairedDevice is a helper that adds a device to the devices package
 func addPairedDevice(t *testing.T, id, name string) {
 	t.Helper()
-	if err := devices.Get().Add(id, name, []byte{0x01, 0x02}); err != nil {
+	if err := devices.Get().Add(id, name, []byte{0x01, 0x02}, rootproto.KeyTypeP256); err != nil {
 		t.Fatalf("failed to add paired device: %v", err)
 	}
 }
