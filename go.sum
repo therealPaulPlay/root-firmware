@@ -69,6 +69,8 @@ github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.3.0 h1:B5TTl8+vEhhPdL
 github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.3.0/go.mod h1:1LD5Yy5RPx38fumekiOLm+GKkvcQfqOtK+bRIkqWXo4=
 github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.4.0 h1:KmIS+3xETS4CTJMDtdi8s9uNXptCYYwJKRhul9q4PSE=
 github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.4.0/go.mod h1:1LD5Yy5RPx38fumekiOLm+GKkvcQfqOtK+bRIkqWXo4=
+github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.5.0 h1:S0jy3kZVVKfGZXHY8ObpiziCJ6NouFbFwLBthECPhCg=
+github.com/therealPaulPlay/root-e2ee-protocol/go-server v0.5.0/go.mod h1:1LD5Yy5RPx38fumekiOLm+GKkvcQfqOtK+bRIkqWXo4=
 github.com/tklauser/go-sysconf v0.3.12 h1:0QaGUFOdQaIVdPgfITYzaTegZvdCjmYO52cSFAEVmqU=
 github.com/tklauser/go-sysconf v0.3.12/go.mod h1:Ho14jnntGE1fpdOqQEEaiKRpvIavV0hSfmBq8nJbHYI=
 github.com/tklauser/numcpus v0.6.1 h1:ng9scYS7az0Bk4OZLvrNXNSAO2Pxr1XXRAPyjhIx+Fk=
