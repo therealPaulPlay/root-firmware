@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -37,6 +38,17 @@ func TestGenerateRandomSuffix(t *testing.T) {
 	}
 	if secondRandomString6 := generateRandomSuffix(6); secondRandomString6 == randomString6 {
 		t.Fatal("random strings should not be equal")
+	}
+}
+
+func TestGenerateRandomSuffix_NoForbiddenWords(t *testing.T) {
+	for range 10000 {
+		s := generateRandomSuffix(4)
+		for _, w := range forbiddenSuffixWords {
+			if strings.Contains(s, w) {
+				t.Fatalf("suffix %q contains forbidden word %q", s, w)
+			}
+		}
 	}
 }
 
