@@ -32,6 +32,7 @@ const (
 	MsgGetDevices               = "getDevices"
 	MsgRemoveDevice             = "removeDevice"
 	MsgGetEvents                = "getEvents"
+	MsgSetEventDeletion         = "setEventDeletion"
 	MsgGetRecording             = "getRecording"
 	MsgFileChunk                = "fileChunk"
 	MsgGetThumbnail             = "getThumbnail"
@@ -82,6 +83,7 @@ func registerHandlers(s *rootproto.Server) {
 	s.OnRequest(MsgSetProductAlias, handleSetProductAlias)
 
 	s.OnRequest(MsgGetEvents, handleGetEvents)
+	s.OnRequest(MsgSetEventDeletion, handleSetEventDeletion)
 	s.OnRequest(MsgGetRecording, handleGetRecording)
 	s.OnRequest(MsgGetThumbnail, handleGetThumbnail)
 
@@ -168,6 +170,24 @@ func handleGetEvents(clientID string, payload []byte, respond rootproto.RespondF
 		"events":     eventList,
 		"nextCursor": nextCursor,
 		"total":      total,
+	})
+}
+
+func handleSetEventDeletion(clientID string, payload []byte, respond rootproto.RespondFn) any {
+	var req struct {
+		ID                string `cbor:"id"`
+		DeletionScheduled bool   `cbor:"deletionScheduled"`
+	}
+	if err := cbor.Unmarshal(payload, &req); err != nil {
+		return errorReply("Invalid payload")
+	}
+	deletionAt, err := events.Get().SetEventDeletion(req.ID, req.DeletionScheduled)
+	if err != nil {
+		return errorReply(err.Error())
+	}
+	return successReply(map[string]any{
+		"eventId":    req.ID,
+		"deletionAt": deletionAt,
 	})
 }
 

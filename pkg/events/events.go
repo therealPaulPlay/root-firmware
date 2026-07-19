@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/fsutil"
@@ -64,6 +64,7 @@ type Event struct {
 	Timestamp      int64                 `cbor:"timestamp"`
 	Duration       float64               `cbor:"duration"`
 	EventType      string                `cbor:"eventType"`
+	DeletionAt     int64                 `cbor:"deletionAt,omitempty"`
 	VideoDetection *VideoDetectionResult `cbor:"videoDetection,omitempty"`
 	AudioDetection *AudioDetectionResult `cbor:"audioDetection,omitempty"`
 }
@@ -99,6 +100,16 @@ func Init() error {
 	if err := recoverEventLog(); err != nil {
 		return fmt.Errorf("failed to initialize event log: %w", err)
 	}
+
+	// Run overdue scheduled deletions immediately, then check every 30s
+	deletionLoopOnce.Do(func() {
+		go func() {
+			instance.processDueDeletions()
+			for range time.Tick(30 * time.Second) {
+				instance.processDueDeletions()
+			}
+		}()
+	})
 
 	return nil
 }
@@ -383,29 +394,9 @@ func (s *Storage) cleanupForRecording(recordingSize int64) error {
 		}
 
 		// Remove oldest event (first in array)
-		oldest := eventLog.Events[0]
-		videoPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.mp4", oldest.ID))
-		audioPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s_audio.m4a", oldest.ID))
-		thumbnailPath := filepath.Join(globals.RecordingsDir, fmt.Sprintf("%s.jpg", oldest.ID))
-
-		// Ghost entry: video already gone (crash before event log flush) — doesn't free space
-		ghost := false
-		if _, err := os.Stat(videoPath); os.IsNotExist(err) {
-			ghost = true
-		}
-
-		for _, path := range []string{videoPath, audioPath, thumbnailPath} {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				log.Printf("Events: Failed to delete %s: %v", path, err)
-			}
-		}
-
+		deleteEventFiles(eventLog.Events[0].ID)
 		eventLog.Events = eventLog.Events[1:]
-
-		// Ghost entries don't free space, don't count toward the iteration limit
-		if !ghost {
-			deletions++
-		}
+		deletions++
 	}
 
 	flush()
