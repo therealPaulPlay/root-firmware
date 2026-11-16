@@ -118,7 +118,7 @@ ssh observer@ROOT-Observer.local 'sudo mv /tmp/libopenh264-2.5.1-linux-arm64.7.s
 ./deploy.sh
 ```
 
-This script syncs the source to `~/firmware-repository`, builds on the Pi, copies the binary to `~/root-firmware`, and auto-starts the firmware service via systemd.
+This script syncs the source to `~/firmware-repository`, builds on the Pi, copies the binary to `/opt/root-firmware`, and auto-starts the firmware service via systemd.
 
 Check if running:
 
@@ -132,7 +132,6 @@ ssh observer@ROOT-Observer.local 'pgrep -f root-firmware'
 |---------|-------------|
 | Config | Store and persist configuration values at runtime. |
 | Devices | Manage paired devices. |
-| Encryption | Create encryption keys, encrypt and decrypt values, Diffie-Hellman key exchange helpers. |
 | Globals | Constants that are reused across packages. |
 | Logger | Collect logs and store them in a file. |
 | ML | ONNX-based event detection. The object detection pipeline is inspired by [Secluso's](https://github.com/secluso/secluso) implementation. |

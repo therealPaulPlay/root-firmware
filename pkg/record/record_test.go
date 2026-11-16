@@ -1,7 +1,9 @@
 package record
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/testutil"
@@ -136,4 +138,69 @@ func TestMicEnabled_ExplicitlyDisabled(t *testing.T) {
 	if MicEnabled() {
 		t.Error("MicEnabled() should return false when disabled")
 	}
+}
+
+// --- lock ordering tests ---
+
+// lockedWriter mimics the relay's stream manager, whose Write takes its own mutex
+type lockedWriter struct {
+	mu      *sync.Mutex
+	entered chan struct{} // Signalled when Write is about to wait for mu
+}
+
+func (w lockedWriter) Write(p []byte) (int, error) {
+	select {
+	case w.entered <- struct{}{}:
+	default:
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(p), nil
+}
+
+// Regression test for a deadlock between starting a stream and stopping another viewer's audio
+func TestSubscribeVideo_DoesNotHoldLockWhileWriting(t *testing.T) {
+	r := &Recorder{
+		videoBroadcast: &broadcast{latestFrame: makeTestGOP(1)},
+		audioBroadcast: &broadcast{},
+	}
+	audioCh := make(chan []byte, 1)
+	r.audioBroadcast.addConsumer(audioCh)
+
+	var managerMu sync.Mutex
+	managerMu.Lock() // Manager is busy tearing down a previous viewer
+
+	writer := lockedWriter{&managerMu, make(chan struct{}, 1)}
+	subscribed := make(chan struct{})
+	go func() {
+		defer close(subscribed)
+		if _, err := r.SubscribeVideo(writer); err != nil {
+			t.Errorf("SubscribeVideo() error = %v", err)
+		}
+	}()
+	select {
+	case <-writer.entered: // SubscribeVideo has reached the init segment write
+	case <-time.After(2 * time.Second):
+		t.Fatal("SubscribeVideo never wrote the init segment")
+	}
+
+	unsubscribed := make(chan struct{})
+	go func() {
+		defer close(unsubscribed)
+		r.UnsubscribeAudio(audioCh)
+	}()
+
+	select {
+	case <-unsubscribed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("UnsubscribeAudio blocked behind SubscribeVideo's init segment write (deadlock)")
+	}
+
+	managerMu.Unlock()
+	select {
+	case <-subscribed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SubscribeVideo did not finish")
+	}
+	r.UnsubscribeVideo()
 }

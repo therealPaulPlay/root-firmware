@@ -11,7 +11,7 @@
 Pairing is performed over Bluetooth Low Energy (BLE) and requires physical proximity plus human verification.
 
 1. The app connects to the camera's BLE service
-2. Camera generates a unique pairing code (UUID) valid for 15 minutes
+2. Camera generates a random 8-digit pairing code valid for 15 minutes
 3. The app displays this code as a QR code
 4. The user holds their phone in front of the camera
 5. The camera scans and verifies the QR code using its own lens (rate-limited to prevent brute force)

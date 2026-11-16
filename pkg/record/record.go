@@ -368,25 +368,23 @@ func (r *Recorder) audioBroadcastLoop(stdout io.ReadCloser) {
 
 func (r *Recorder) SubscribeVideo(w io.Writer) (done chan struct{}, err error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.videoSubCh != nil {
+		r.mu.Unlock()
 		return nil, fmt.Errorf("video subscription already active") // Only allow one at a time since muxing is expensive
 	}
+	videoCh := make(chan []byte, 50) // Buffer up to 50 chunks (~8s)
+	r.videoSubCh = videoCh
+	r.videoBroadcast.addConsumer(videoCh)
+	r.mu.Unlock()
 
+	// Seed init segment (ftyp+moov) from latest keyframe, chunks queue in videoCh until muxing starts
 	muxer := newFMP4Muxer(w)
-
-	// Seed init segment (ftyp+moov) from latest keyframe before subscribing
 	r.videoBroadcast.frameMu.RLock()
 	keyframe := r.videoBroadcast.latestFrame
 	r.videoBroadcast.frameMu.RUnlock()
 	if len(keyframe) > 0 {
 		muxer.SeedKeyframe(keyframe)
 	}
-
-	videoCh := make(chan []byte, 50) // Buffer up to 50 chunks (~8s)
-	r.videoSubCh = videoCh
-	r.videoBroadcast.addConsumer(videoCh)
 
 	done = make(chan struct{})
 	go func() {

@@ -281,7 +281,7 @@ func handleStartStream(clientID string, payload []byte, respond rootproto.Respon
 	return nil
 }
 
-// If clients do not send this, stream will be stopped after 5s (recommended interval is 2s)
+// If clients do not send this, stream will be stopped after 10s (recommended interval is 2s)
 func handleContinueStream(clientID string, payload []byte, respond rootproto.RespondFn) any {
 	UpdateStreamActivity(clientID)
 	return successReply(nil)
