@@ -103,10 +103,11 @@ func Init() error {
 
 	// Run overdue scheduled deletions immediately, then check every 30s
 	deletionLoopOnce.Do(func() {
+		storage := instance
 		go func() {
-			instance.processDueDeletions()
+			storage.processDueDeletions()
 			for range time.Tick(30 * time.Second) {
-				instance.processDueDeletions()
+				storage.processDueDeletions()
 			}
 		}()
 	})

@@ -35,7 +35,6 @@ Contributions are welcome. For inquiries, please reach out via [email](mailto:pa
 - BlueZ
 - RAUC (only needed for OTA updates)
 - alsa-utils
-- i2c-tools (and ensure I2C is enabled)
 
 Build the firmware:
 

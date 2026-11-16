@@ -9,9 +9,6 @@ arm_64bit=1
 # Camera (set by create-config-variants.sh in build step)
 CAMERA_CONFIG_PLACEHOLDER
 
-# Enable I2C
-dtparam=i2c_arm=on
-
 # Disable splash screen for faster boot
 disable_splash=1
 

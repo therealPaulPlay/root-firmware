@@ -1,6 +1,5 @@
 #!/bin/bash -e
 # ROOT Observer system configuration
-# Note: I2C is enabled via dtparam=i2c_arm=on in config.txt
 
 # Install precompiled libraries (copied to stage dir by CI)
 install -d "${ROOTFS_DIR}/usr/local/lib"
