@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
@@ -30,17 +30,25 @@ type NotificationDevice struct {
 	FCMToken string `cbor:"fcmToken"`
 }
 
+type pendingNotification struct {
+	title, eventID string
+	preview        []byte
+	sending        bool
+}
+
 type Notifications struct {
 	mu             sync.Mutex
 	lastNotifiedAt time.Time
+	pending        map[string]*pendingNotification // Most recent undelivered notification per device
 }
 
 var instance *Notifications
 var once sync.Once
+var httpClient = &http.Client{Timeout: httpTimeout}
 
 func Init() {
 	once.Do(func() {
-		instance = &Notifications{}
+		instance = &Notifications{pending: make(map[string]*pendingNotification)}
 	})
 }
 
@@ -68,25 +76,15 @@ func (n *Notifications) Enable(deviceID, fcmToken string) error {
 		return fmt.Errorf("device not paired: %s", deviceID)
 	}
 
-	entries := n.getEntries()
-
 	// Remove existing entry for this device (will be replaced)
-	filtered := make([]NotificationDevice, 0, len(entries))
-	for _, entry := range entries {
-		if entry.DeviceID != deviceID {
-			filtered = append(filtered, entry)
-		}
-	}
+	filtered := n.entriesWithout(deviceID)
 
 	// Enforce max devices limit
 	if len(filtered) >= MaxNotificationDevices {
 		return fmt.Errorf("maximum of %d notification devices reached", MaxNotificationDevices)
 	}
 
-	filtered = append(filtered, NotificationDevice{
-		DeviceID: deviceID,
-		FCMToken: fcmToken,
-	})
+	filtered = append(filtered, NotificationDevice{DeviceID: deviceID, FCMToken: fcmToken})
 
 	return config.Get().SetKey("notificationDevices", filtered)
 }
@@ -95,7 +93,8 @@ func (n *Notifications) Enable(deviceID, fcmToken string) error {
 func (n *Notifications) Disable(deviceID string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.removeEntry(deviceID)
+	delete(n.pending, deviceID)
+	return config.Get().SetKey("notificationDevices", n.entriesWithout(deviceID))
 }
 
 // IsEnabled returns whether a specific device has notifications enabled
@@ -113,14 +112,8 @@ func (n *Notifications) IsEnabled(deviceID string) bool {
 
 // GetCooldownMinutes returns the configured notification cooldown in minutes (0 = off)
 func (n *Notifications) GetCooldownMinutes() int {
-	val, ok := config.Get().GetKey("notificationCooldownMinutes")
-	if !ok {
-		return 0
-	}
-	v, ok := val.(uint64)
-	if !ok {
-		return 0
-	}
+	val, _ := config.Get().GetKey("notificationCooldownMinutes")
+	v, _ := val.(uint64)
 	return int(v)
 }
 
@@ -132,8 +125,7 @@ func (n *Notifications) SetCooldownMinutes(minutes int) error {
 	return config.Get().SetKey("notificationCooldownMinutes", minutes)
 }
 
-// SendEventToAll sends an event notification to all registered devices,
-// resolving each device's ProductAlias for the notification body
+// SendEventToAll queues an event notification for all registered devices and sends it in the background
 // If preview is non-nil, it is encrypted per-device and uploaded for rich notifications
 func (n *Notifications) SendEventToAll(eventType string, eventID string, preview []byte) {
 	if eventType == "" {
@@ -148,16 +140,19 @@ func (n *Notifications) SendEventToAll(eventType string, eventID string, preview
 		n.mu.Unlock()
 		return
 	}
-	src := n.getEntries()
-	entries := make([]NotificationDevice, len(src))
-	copy(entries, src)
+	title := strings.ToUpper(eventType[:1]) + eventType[1:] + " detected"
+	for _, entry := range n.getEntries() {
+		// One per device so in-flight state isn't shared, replaces any older undelivered notification
+		n.pending[entry.DeviceID] = &pendingNotification{title: title, eventID: eventID, preview: preview}
+	}
 	n.lastNotifiedAt = time.Now()
 	n.mu.Unlock()
 
-	if len(entries) == 0 {
-		return
-	}
+	n.SendPending()
+}
 
+// SendPending asynchronously delivers each device's pending notification (new events and ones that failed earlier)
+func (n *Notifications) SendPending() {
 	relayDomain, productID, err := n.getRelayAndProductID()
 	if err != nil {
 		log.Printf("Notifications: %v", err)
@@ -170,47 +165,50 @@ func (n *Notifications) SendEventToAll(eventType string, eventID string, preview
 		return
 	}
 
-	title := strings.ToUpper(eventType[:1]) + eventType[1:] + " detected"
-
-	for _, entry := range entries {
-		dev, ok := devices.Get().GetByID(entry.DeviceID)
-		if !ok {
-			log.Printf("Notifications: Skipping device %s - not found in paired devices", entry.DeviceID)
+	for _, entry := range n.getEntries() {
+		dev, paired := devices.Get().GetByID(entry.DeviceID)
+		if !paired {
 			continue
 		}
 
-		var imageURL string
-		if preview != nil {
-			imageURL = n.uploadEncryptedPreview(relayDomain, productPrivateKey, dev.PublicKey, preview)
+		n.mu.Lock()
+		p := n.pending[entry.DeviceID]
+		if p == nil || p.sending { // Nothing pending or already in flight
+			n.mu.Unlock()
+			continue
 		}
+		p.sending = true
+		n.mu.Unlock()
 
-		go n.sendNotification(relayDomain, entry.FCMToken, title, dev.ProductAlias, productID, eventID, imageURL)
+		go func() {
+			var imageURL string
+			if p.preview != nil {
+				imageURL = n.uploadEncryptedPreview(relayDomain, productPrivateKey, dev.PublicKey, p.preview)
+			}
+			sent := n.sendNotification(relayDomain, entry.FCMToken, p.title, dev.ProductAlias, productID, p.eventID, imageURL)
+
+			n.mu.Lock()
+			defer n.mu.Unlock()
+			p.sending = false // Unsent notifications stay pending for the next retry
+			if sent && n.pending[entry.DeviceID] == p {
+				delete(n.pending, entry.DeviceID)
+			}
+		}()
 	}
 }
 
 func (n *Notifications) getRelayAndProductID() (string, string, error) {
-	rd, ok := config.Get().GetKey("relayDomain")
-	if !ok {
-		return "", "", fmt.Errorf("relay domain not configured")
+	rd, _ := config.Get().GetKey("relayDomain")
+	pid, _ := config.Get().GetKey("id")
+	relayDomain, _ := rd.(string)
+	productID, _ := pid.(string)
+	if relayDomain == "" || productID == "" {
+		return "", "", fmt.Errorf("relay domain or product ID not configured")
 	}
-	relayDomain, ok := rd.(string)
-	if !ok {
-		return "", "", fmt.Errorf("relay domain has invalid type")
-	}
-
-	pid, ok := config.Get().GetKey("id")
-	if !ok {
-		return "", "", fmt.Errorf("product ID not found in config")
-	}
-	productID, ok := pid.(string)
-	if !ok {
-		return "", "", fmt.Errorf("product ID has invalid type")
-	}
-
 	return relayDomain, productID, nil
 }
 
-func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, productID, eventID, imageURL string) {
+func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, productID, eventID, imageURL string) bool {
 	data := map[string]string{
 		"productId": productID,
 		"eventId":   eventID,
@@ -245,29 +243,19 @@ func (n *Notifications) sendNotification(relayDomain, fcmToken, title, body, pro
 		},
 	}
 
-	payload := map[string]any{
-		"message": message,
-	}
-
-	jsonBody, err := json.Marshal(payload)
+	jsonBody, err := json.Marshal(map[string]any{"message": message})
 	if err != nil {
 		log.Printf("Notifications: Failed to marshal payload: %v", err)
-		return
+		return false
 	}
 
-	url := fmt.Sprintf("https://%s%s", relayDomain, sendEndpoint)
-	client := &http.Client{Timeout: httpTimeout}
-
-	resp, err := client.Post(url, "application/json", bytes.NewReader(jsonBody))
+	resp, err := postToRelay(fmt.Sprintf("https://%s%s", relayDomain, sendEndpoint), "application/json", jsonBody)
 	if err != nil {
-		log.Printf("Notifications: Failed to send to relay: %v", err)
-		return
+		log.Printf("Notifications: Failed to send: %v", err)
+		return false
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Notifications: Relay returned status %d", resp.StatusCode)
-	}
+	resp.Body.Close()
+	return true
 }
 
 // uploadEncryptedPreview encrypts the preview for a specific device and uploads it to the relay
@@ -285,20 +273,12 @@ func (n *Notifications) uploadEncryptedPreview(relayDomain string, productPrivat
 		return ""
 	}
 
-	uploadURL := fmt.Sprintf("https://%s%s", relayDomain, uploadPreviewEndpoint)
-	client := &http.Client{Timeout: httpTimeout}
-
-	resp, err := client.Post(uploadURL, "application/octet-stream", bytes.NewReader(encrypted))
+	resp, err := postToRelay(fmt.Sprintf("https://%s%s", relayDomain, uploadPreviewEndpoint), "application/octet-stream", encrypted)
 	if err != nil {
 		log.Printf("Notifications: Failed to upload preview: %v", err)
 		return ""
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Notifications: Preview upload returned status %d", resp.StatusCode)
-		return ""
-	}
 
 	var result struct {
 		URL string `json:"url"`
@@ -311,15 +291,26 @@ func (n *Notifications) uploadEncryptedPreview(relayDomain string, productPrivat
 	return result.URL
 }
 
-func (n *Notifications) removeEntry(deviceID string) error {
-	entries := n.getEntries()
-	filtered := make([]NotificationDevice, 0, len(entries))
-	for _, entry := range entries {
+func postToRelay(url, contentType string, body []byte) (*http.Response, error) {
+	resp, err := httpClient.Post(url, contentType, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("relay returned status %d", resp.StatusCode) // Non-200 responses count as failures
+	}
+	return resp, nil
+}
+
+func (n *Notifications) entriesWithout(deviceID string) []NotificationDevice {
+	filtered := []NotificationDevice{}
+	for _, entry := range n.getEntries() {
 		if entry.DeviceID != deviceID {
 			filtered = append(filtered, entry)
 		}
 	}
-	return config.Get().SetKey("notificationDevices", filtered)
+	return filtered
 }
 
 func (n *Notifications) getEntries() []NotificationDevice {
@@ -328,14 +319,13 @@ func (n *Notifications) getEntries() []NotificationDevice {
 		return []NotificationDevice{}
 	}
 
-	data, err := cbor.Marshal(val)
-	if err != nil {
-		log.Printf("Notifications: Failed to marshal notification devices: %v", err)
-		return []NotificationDevice{}
-	}
 	var entries []NotificationDevice
-	if err := cbor.Unmarshal(data, &entries); err != nil {
-		log.Printf("Notifications: Failed to unmarshal notification devices: %v", err)
+	data, err := cbor.Marshal(val)
+	if err == nil {
+		err = cbor.Unmarshal(data, &entries)
+	}
+	if err != nil {
+		log.Printf("Notifications: Failed to decode notification devices: %v", err)
 		return []NotificationDevice{}
 	}
 	return entries

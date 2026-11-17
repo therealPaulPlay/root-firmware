@@ -2,8 +2,14 @@ package notifications
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
@@ -33,6 +39,7 @@ func setupTest(t *testing.T) func() {
 	Init()
 
 	return func() {
+		waitUntilIdle(t)
 		cleanupGlobals()
 		resetSingletons()
 	}
@@ -273,5 +280,158 @@ func TestDisable_OnlyRemovesTarget(t *testing.T) {
 	}
 	if !n.IsEnabled("device-2") {
 		t.Error("device-2 should still be enabled")
+	}
+}
+
+// fakeRelay points notifications at a TLS test server responding with the given status, returning received bodies
+func fakeRelay(t *testing.T, status *atomic.Int32) <-chan string {
+	t.Helper()
+	requests := make(chan string, 10)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests <- r.URL.Path + " " + string(body)
+		w.WriteHeader(int(status.Load()))
+	}))
+	t.Cleanup(server.Close)
+	original := httpClient
+	t.Cleanup(func() { httpClient = original })
+	httpClient = server.Client()
+	config.Get().SetKey("relayDomain", strings.TrimPrefix(server.URL, "https://"))
+	return requests
+}
+
+func nextRequest(t *testing.T, requests <-chan string) string {
+	t.Helper()
+	select {
+	case req := <-requests:
+		return req
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for relay request")
+		return ""
+	}
+}
+
+// waitUntilIdle waits for in-flight sends to finish
+func waitUntilIdle(t *testing.T) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		n := Get()
+		n.mu.Lock()
+		busy := false
+		for _, p := range n.pending {
+			busy = busy || p.sending
+		}
+		n.mu.Unlock()
+		if !busy {
+			return
+		}
+	}
+	t.Fatal("sends still in flight")
+}
+
+func TestSendPending_DeliversOnlyMostRecent(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	var status atomic.Int32
+	status.Store(http.StatusServiceUnavailable)
+	requests := fakeRelay(t, &status)
+	addPairedDevice(t, "device-1", "Device")
+	Get().Enable("device-1", "token-1")
+
+	// Both fail while offline
+	Get().SendEventToAll("person", "event-old", nil)
+	nextRequest(t, requests)
+	Get().SendEventToAll("vehicle", "event-new", nil)
+	nextRequest(t, requests)
+	waitUntilIdle(t)
+
+	// Back online: only the most recent is delivered, once
+	status.Store(http.StatusOK)
+	Get().SendPending()
+	if req := nextRequest(t, requests); !strings.Contains(req, "event-new") {
+		t.Errorf("retried request = %s, want event-new", req)
+	}
+	waitUntilIdle(t)
+	Get().SendPending()
+	select {
+	case req := <-requests:
+		t.Errorf("unexpected request after delivery: %s", req)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestDisable_DropsPendingNotification(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	var status atomic.Int32
+	status.Store(http.StatusServiceUnavailable)
+	requests := fakeRelay(t, &status)
+	addPairedDevice(t, "device-1", "Device")
+	Get().Enable("device-1", "token-1")
+
+	Get().SendEventToAll("person", "event-1", nil)
+	nextRequest(t, requests)
+	waitUntilIdle(t)
+
+	Get().Disable("device-1")
+	Get().Enable("device-1", "token-1") // Re-enabling must not resurrect the old notification
+	Get().SendPending()
+	select {
+	case req := <-requests:
+		t.Errorf("unexpected request after re-enabling: %s", req)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestSendPending_NoDuplicateWhileInFlight(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	var status atomic.Int32
+	status.Store(http.StatusOK)
+	requests := fakeRelay(t, &status)
+	release := make(chan struct{})
+	inner := httpClient.Transport
+	httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		<-release // Hold the request in flight
+		return inner.RoundTrip(r)
+	})
+	addPairedDevice(t, "device-1", "Device")
+	Get().Enable("device-1", "token-1")
+
+	Get().SendEventToAll("person", "event-1", nil)
+	Get().SendPending() // Simulated reconnect during the send
+	close(release)
+
+	nextRequest(t, requests)
+	select {
+	case req := <-requests:
+		t.Errorf("duplicate request: %s", req)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSendEventToAll_DeliversToAllDevices(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	var status atomic.Int32
+	status.Store(http.StatusOK)
+	requests := fakeRelay(t, &status)
+	addPairedDevice(t, "device-1", "Device")
+	addPairedDevice(t, "device-2", "Device")
+	Get().Enable("device-1", "token-1")
+	Get().Enable("device-2", "token-2")
+
+	Get().SendEventToAll("person", "event-1", nil)
+	got := nextRequest(t, requests) + nextRequest(t, requests)
+	if !strings.Contains(got, "token-1") || !strings.Contains(got, "token-2") {
+		t.Errorf("expected a send to both devices, got: %s", got)
 	}
 }

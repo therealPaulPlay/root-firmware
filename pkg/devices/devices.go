@@ -148,8 +148,6 @@ func (d *Devices) OnRemove(fn func(deviceID string)) {
 // Remove immediately removes a device and invokes the onRemove callback
 func (d *Devices) Remove(deviceID string) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	devices := d.getDevices()
 	filtered := []Device{}
 	for _, dev := range devices {
@@ -157,11 +155,13 @@ func (d *Devices) Remove(deviceID string) error {
 			filtered = append(filtered, dev)
 		}
 	}
-
-	if err := config.Get().SetKey("connectedDevices", filtered); err != nil {
+	err := config.Get().SetKey("connectedDevices", filtered)
+	d.mu.Unlock()
+	if err != nil {
 		return err
 	}
 
+	// Called without the lock to avoid deadlocks
 	if d.onRemove != nil {
 		d.onRemove(deviceID)
 	}

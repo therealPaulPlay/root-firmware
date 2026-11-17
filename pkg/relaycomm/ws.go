@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/therealPaulPlay/root-e2ee-protocol/go-server"
+	rootproto "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 
 	"root-firmware/pkg/config"
 	"root-firmware/pkg/devices"
+	"root-firmware/pkg/notifications"
 	"root-firmware/pkg/updater"
 )
 
@@ -182,6 +183,7 @@ func (r *RelayComm) run(relayDomain string) {
 		}
 		updater.MarkRelayConnected()
 		markInitialRelayConnect()
+		notifications.Get().SendPending() // Deliver notifications that failed while offline (no-op if none did)
 		r.handleConnection(conn)
 		conn.Close()
 

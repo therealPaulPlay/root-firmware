@@ -293,3 +293,17 @@ func TestRemove_NonexistentDevice(t *testing.T) {
 		t.Errorf("GetAll() = %d devices, want 1", len(devices))
 	}
 }
+
+func TestRemove_CallbackRunsWithoutLock(t *testing.T) {
+	cleanup := setupTestDevices(t)
+	defer cleanup()
+
+	d := Get()
+	d.OnRemove(func(string) {
+		if !d.mu.TryLock() {
+			t.Fatal("onRemove callback ran while holding the lock")
+		}
+		d.mu.Unlock()
+	})
+	d.Remove("device-1")
+}
