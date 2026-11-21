@@ -199,6 +199,9 @@ if file "$INPUT_IMG" | grep -q "boot sector"; then
     echo "  Copying boot partition..."
     cp -a "$MOUNT_BOOT_SRC"/* "$MOUNT_BOOT_DST"/
 
+    # Remove pi-gen's default cmdline.txt, only cmdline_a.txt and cmdline_b.txt are used
+    rm -f "$MOUNT_BOOT_DST/cmdline.txt"
+
     # Copy rootfs to both Root A and Root B
     echo "  Copying rootfs to Root A..."
     cp -a "$MOUNT_ROOT_SRC"/* "$MOUNT_ROOT_A_DST"/

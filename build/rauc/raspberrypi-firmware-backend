@@ -9,7 +9,7 @@
 #
 # Boot partition files:
 #   config.txt      - points to good slot
-#   tryboot.txt     - temporary, points to new slot (only exists during update attempt)
+#   tryboot.txt     - temporary, points to new slot (created for update attempts, only used when rebooting with tryboot flag and otherwise ignored)
 #   cmdline_a.txt   - kernel cmdline with root=/dev/mmcblk0p2
 #   cmdline_b.txt   - kernel cmdline with root=/dev/mmcblk0p3
 
@@ -87,13 +87,14 @@ case "$1" in
         [ "$current" = "unknown" ] && { echo "Cannot determine current slot" >&2; exit 1; }
 
         good=$(config_slot "$CONFIG_FILE")
-        if [ "$current" = "$good" ] && [ ! -f "$TRYBOOT_FILE" ]; then
+        if [ "$current" = "$good" ]; then
             echo "Slot $current already good"
             exit 0
         fi
 
-        if [ -f "$TRYBOOT_FILE" ]; then
-            # Atomic copy: write to temp, sync, rename over config.txt
+        # Only promote tryboot to config if we are in the slot tryboot.txt points to
+        if [ -f "$TRYBOOT_FILE" ] && [ "$(config_slot "$TRYBOOT_FILE")" = "$current" ]; then
+            # Atomically turn the tryboot (which is effectively a "test" config.txt that takes precedence when rebooting with tryboot flag) into the new config.txt
             tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
             cp "$TRYBOOT_FILE" "$tmp"
             sync "$tmp"
@@ -111,7 +112,8 @@ case "$1" in
         # This just logs the current state for diagnostics
         current=$(current_slot)
         good=$(config_slot "$CONFIG_FILE")
-        if [ -f "$TRYBOOT_FILE" ]; then
+        trial=$(config_slot "$TRYBOOT_FILE")
+        if [ -f "$TRYBOOT_FILE" ] && [ "$trial" = "$current" ] && [ "$trial" != "$good" ]; then
             echo "Trying slot $current via tryboot (good=$good)"
         else
             echo "Booted into slot $current (good=$good)"
