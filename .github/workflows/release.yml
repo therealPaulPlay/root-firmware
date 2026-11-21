@@ -12,6 +12,11 @@ on:
 env:
   IS_RELEASE: ${{ github.event_name == 'release' }}
 
+# One run at a time (per channel, dev/release), so overlapping builds upload in the order they were started
+concurrency:
+  group: firmware-${{ github.event_name == 'release' && 'release' || 'dev' }}
+  cancel-in-progress: false
+
 defaults:
   run:
     shell: bash
