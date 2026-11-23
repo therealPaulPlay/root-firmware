@@ -67,8 +67,7 @@ func tryMarkSlotGood() {
 }
 
 // confirmSuccessfulBoot marks the current RAUC slot as good
-// This calls our custom bootloader backend which updates the good-slot marker
-// and clears the trying marker, preventing rollback on next boot
+// Calls our custom bootloader backend to make the booted slot permanent (no rollback on next boot)
 func confirmSuccessfulBoot() error {
 	cmd := exec.Command("/usr/lib/rauc/backend/raspberrypi-firmware", "mark-good")
 	output, err := cmd.CombinedOutput()
@@ -82,7 +81,7 @@ func confirmSuccessfulBoot() error {
 	return nil
 }
 
-// GetCurrentSlot returns the current boot slot ("A" or "B") by reading /proc/cmdline
+// GetCurrentSlot returns the current boot slot ("A" or "B") by reading what partition /proc/cmdline points to
 func GetCurrentSlot() string {
 	data, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
@@ -90,11 +89,11 @@ func GetCurrentSlot() string {
 	}
 	for field := range strings.FieldsSeq(string(data)) {
 		if strings.HasPrefix(field, "root=") {
-			// Handles both root=/dev/mmcblk0p2 and root=PARTUUID=...-02
+			// Handles both root=/dev/mmcblk0p5 and root=PARTUUID=...-05
 			switch field[len(field)-1] {
-			case '2':
+			case '5':
 				return "A"
-			case '3':
+			case '6':
 				return "B"
 			}
 		}

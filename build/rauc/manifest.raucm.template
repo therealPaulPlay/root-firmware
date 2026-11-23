@@ -4,5 +4,12 @@ version=${VERSION}
 description=ROOT Observer Firmware ${VERSION}
 build=${BUILD_DATE}
 
+[hooks]
+filename=hook.sh
+
+[image.boot]
+filename=boot.vfat
+hooks=post-install
+
 [image.rootfs]
-filename=rootfs.img
+filename=rootfs.ext4

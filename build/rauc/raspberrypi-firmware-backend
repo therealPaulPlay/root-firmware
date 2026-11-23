@@ -1,79 +1,94 @@
 #!/bin/bash
-# RAUC bootloader backend for Raspberry Pi using tryboot
+# RAUC bootloader backend for Raspberry Pi using autoboot.txt and tryboot
 #
 # Uses Pi firmware's tryboot mechanism for safe A/B switching:
-# - config.txt points to the good slot via cmdline=cmdline_a.txt or cmdline_b.txt
-# - tryboot.txt is created during updates, pointing to the new slot
-# - Rebooting with "0 tryboot" uses tryboot.txt; any crash/power-loss reverts to config.txt
-# - mark-good promotes tryboot.txt -> config.txt
+# - autoboot.txt [all] points to the good slot
+# - set-primary points [tryboot] to the new slot
+# - Rebooting with "0 tryboot" uses [tryboot]; any crash/power-loss reverts to [all]
+# - mark-good points [all] to the booted slot
 #
-# Boot partition files:
-#   config.txt      - points to good slot
-#   tryboot.txt     - temporary, points to new slot (created for update attempts, only used when rebooting with tryboot flag and otherwise ignored)
-#   cmdline_a.txt   - kernel cmdline with root=/dev/mmcblk0p2
-#   cmdline_b.txt   - kernel cmdline with root=/dev/mmcblk0p3
+# Partitions:
+#   p1      - bootloader (autoboot.txt)
+#   p2, p3  - Boot A, B (config.txt selects the matching root)
+#   p5, p6  - Root A, B
 
 set -e
 
-BOOT_PARTITION="/boot/firmware"
-CONFIG_FILE="$BOOT_PARTITION/config.txt"
-TRYBOOT_FILE="$BOOT_PARTITION/tryboot.txt"
+BOOTLOADER_DIR="/boot/firmware"
+AUTOBOOT_FILE="$BOOTLOADER_DIR/autoboot.txt"
 
-# Resolve slot from a config file's cmdline= directive
-config_slot() {
-    local cmdline=$(grep -o 'cmdline=cmdline_[ab]\.txt' "$1" 2>/dev/null | head -1)
-    case "$cmdline" in
-        *_a.txt) echo "A" ;;
-        *_b.txt) echo "B" ;;
+# boot_partition of an autoboot.txt section
+section_partition() {
+    sed -n "/^\[$1\]$/,/^\[/ s/^boot_partition=//p" "$AUTOBOOT_FILE" | head -1
+}
+
+# Resolve slot from an autoboot.txt section
+autoboot_slot() {
+    case "$(section_partition "$1")" in
+        2) echo "A" ;;
+        3) echo "B" ;;
         *) echo "unknown" ;;
     esac
 }
 
-# Atomically rewrite a config file to point to a different slot's cmdline
-set_config_slot() {
-    local file="$1" slot="$2"
-    local cmdline="cmdline_$(echo "$slot" | tr 'AB' 'ab').txt"
-    local tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
-    sed "s/cmdline=cmdline_[ab]\.txt/cmdline=$cmdline/" "$file" > "$tmp"
+slot_partition() {
+    case "$1" in
+        A) echo "2" ;;
+        B) echo "3" ;;
+        *) echo "Invalid slot: $1" >&2; return 1 ;;
+    esac
+}
+
+# Atomically rewrite autoboot.txt
+# Arguments: <good_slot> <tryboot_slot>
+set_autoboot() {
+    local good_part try_part tmp
+    good_part=$(slot_partition "$1") || exit 1
+    try_part=$(slot_partition "$2") || exit 1
+
+    tmp=$(mktemp "$BOOTLOADER_DIR/.tmp.XXXXXX")
+    cat > "$tmp" << AUTOBOOT
+[all]
+tryboot_a_b=1
+boot_partition=$good_part
+[tryboot]
+boot_partition=$try_part
+AUTOBOOT
     sync "$tmp"
-    mv "$tmp" "$file"
-    sync "$BOOT_PARTITION"
+    mv "$tmp" "$AUTOBOOT_FILE"
+    sync "$BOOTLOADER_DIR"
 }
 
 current_slot() {
-    case "$(grep -o 'root=/dev/mmcblk0p[23]' /proc/cmdline)" in
-        *p2) echo "A" ;;
-        *p3) echo "B" ;;
+    case "$(grep -o 'root=/dev/mmcblk0p[56]' /proc/cmdline)" in
+        *p5) echo "A" ;;
+        *p6) echo "B" ;;
         *) echo "unknown" ;;
     esac
 }
 
 case "$1" in
     get-state)
-        good=$(config_slot "$CONFIG_FILE")
+        good=$(autoboot_slot all)
         [ "$2" = "$good" ] && echo "good" || echo "bad"
         ;;
 
     set-state)
-        [ "$3" = "good" ] && set_config_slot "$CONFIG_FILE" "$2"
-        ;;
-
-    get-primary)
-        if [ -f "$TRYBOOT_FILE" ]; then
-            config_slot "$TRYBOOT_FILE"
-        else
-            config_slot "$CONFIG_FILE"
+        if [ "$3" = "good" ]; then
+            set_autoboot "$2" "$2"
+        # Never tryboot a bad slot
+        elif [ "$(autoboot_slot tryboot)" = "$2" ]; then
+            good=$(autoboot_slot all)
+            set_autoboot "$good" "$good"
         fi
         ;;
 
+    get-primary)
+        autoboot_slot tryboot
+        ;;
+
     set-primary)
-        # Create tryboot.txt pointing to the new slot (atomic write via temp file)
-        cmdline="cmdline_$(echo "$2" | tr 'AB' 'ab').txt"
-        tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
-        sed "s/cmdline=cmdline_[ab]\.txt/cmdline=$cmdline/" "$CONFIG_FILE" > "$tmp"
-        sync "$tmp"
-        mv "$tmp" "$TRYBOOT_FILE"
-        sync "$BOOT_PARTITION"
+        set_autoboot "$(autoboot_slot all)" "$2"
         echo "Tryboot set to slot $2"
         ;;
 
@@ -82,28 +97,17 @@ case "$1" in
         ;;
 
     mark-good)
-        # Promote tryboot.txt -> config.txt, making the switch permanent
+        # Make the booted slot permanent
         current=$(current_slot)
         [ "$current" = "unknown" ] && { echo "Cannot determine current slot" >&2; exit 1; }
 
-        good=$(config_slot "$CONFIG_FILE")
+        good=$(autoboot_slot all)
         if [ "$current" = "$good" ]; then
             echo "Slot $current already good"
             exit 0
         fi
 
-        # Only promote tryboot to config if we are in the slot tryboot.txt points to
-        if [ -f "$TRYBOOT_FILE" ] && [ "$(config_slot "$TRYBOOT_FILE")" = "$current" ]; then
-            # Atomically turn the tryboot (which is effectively a "test" config.txt that takes precedence when rebooting with tryboot flag) into the new config.txt
-            tmp=$(mktemp "$BOOT_PARTITION/.tmp.XXXXXX")
-            cp "$TRYBOOT_FILE" "$tmp"
-            sync "$tmp"
-            mv "$tmp" "$CONFIG_FILE"
-            rm -f "$TRYBOOT_FILE"
-            sync "$BOOT_PARTITION"
-        else
-            set_config_slot "$CONFIG_FILE" "$current"
-        fi
+        set_autoboot "$current" "$current"
         echo "Slot $current marked as good"
         ;;
 
@@ -111,9 +115,8 @@ case "$1" in
         # With tryboot, Pi firmware handles rollback automatically
         # This just logs the current state for diagnostics
         current=$(current_slot)
-        good=$(config_slot "$CONFIG_FILE")
-        trial=$(config_slot "$TRYBOOT_FILE")
-        if [ -f "$TRYBOOT_FILE" ] && [ "$trial" = "$current" ] && [ "$trial" != "$good" ]; then
+        good=$(autoboot_slot all)
+        if [ "$current" != "$good" ]; then
             echo "Trying slot $current via tryboot (good=$good)"
         else
             echo "Booted into slot $current (good=$good)"

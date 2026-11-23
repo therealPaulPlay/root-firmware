@@ -1,0 +1,2 @@
+# Auto-detect variant: any officially supported Pi camera module
+camera_auto_detect=1

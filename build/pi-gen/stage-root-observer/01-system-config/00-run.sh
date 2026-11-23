@@ -36,6 +36,8 @@ install -m 755 "${STAGE_DIR}/raspberrypi-firmware-backend" "${ROOTFS_DIR}/usr/li
 install -m 644 files/boot/config.txt "${ROOTFS_DIR}/boot/firmware/config.txt"
 install -m 644 files/boot/cmdline_a.txt "${ROOTFS_DIR}/boot/firmware/cmdline_a.txt"
 install -m 644 files/boot/cmdline_b.txt "${ROOTFS_DIR}/boot/firmware/cmdline_b.txt"
+install -d "${ROOTFS_DIR}/boot/firmware/variants"
+install -m 644 files/boot/variants/*.txt "${ROOTFS_DIR}/boot/firmware/variants/"
 # The default cmdline.txt is left for pi-gen's export-image stage (otherwise fails), but later removed by repartition-image.sh
 
 # Install systemd services
@@ -123,9 +125,10 @@ TMPFILES
 # Replace fstab — read-only rootfs with overlayfs on /etc, /var/lib, /home,
 # persistent bind mounts from /data for NM connections and timesync
 # Root is not listed since the kernel mounts it as per root= from cmdline_a/b.txt (read-only because ro is in the cmdline)
+# /boot/firmware is the bootloader partition, Boot A/B aren't mounted
 cat > "${ROOTFS_DIR}/etc/fstab" << 'FSTAB'
 /dev/mmcblk0p1  /boot/firmware  vfat       defaults                             0  2
-/dev/mmcblk0p4  /data           ext4       defaults,noatime                     0  2
+/dev/mmcblk0p7  /data           ext4       defaults,noatime                     0  2
 tmpfs           /tmp            tmpfs      nosuid,nodev,size=32M                0  0
 tmpfs           /var/tmp        tmpfs      nosuid,nodev,size=16M                0  0
 tmpfs           /var/log        tmpfs      nosuid,nodev,size=16M                0  0

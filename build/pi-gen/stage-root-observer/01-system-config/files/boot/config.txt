@@ -1,13 +1,14 @@
 # ROOT boot configuration
 
-# A/B slot selection (cmdline_a.txt or cmdline_b.txt)
+# A/B slot selection by boot partition (cmdline_a.txt or cmdline_b.txt)
+[boot_partition=2]
 cmdline=cmdline_a.txt
+[boot_partition=3]
+cmdline=cmdline_b.txt
+[all]
 
 # Enable 64-bit mode
 arm_64bit=1
-
-# Camera (set by create-config-variants.sh in build step)
-CAMERA_CONFIG_PLACEHOLDER
 
 # Disable splash screen for faster boot
 disable_splash=1
@@ -20,3 +21,7 @@ dtparam=audio=on
 
 # Hardware watchdog (bcm2835_wdt), reboots on kernel lockup
 dtparam=watchdog=on
+
+# Hardware variant (set by create-config-variants.sh and the RAUC hook)
+# Keep last, variants may contain sections
+include variant.txt

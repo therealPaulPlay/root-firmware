@@ -3,4 +3,5 @@ rauc
 alsa-utils
 bluez
 parted
+fdisk
 e2fsprogs

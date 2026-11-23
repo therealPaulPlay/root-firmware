@@ -152,30 +152,34 @@ jobs:
 
           sudo ./build/scripts/repartition-image.sh "$INPUT_IMG" "root-observer-${VERSION}.img"
 
-      - name: Extract rootfs and create RAUC bundle
+      - name: Extract rootfs and boot partition and create RAUC bundle
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
 
-          # Extract rootfs partition (partition 2) before creating variants & compression
-          sudo ./build/scripts/extract-rootfs.sh "root-observer-${VERSION}.img" rootfs.img 2
+          # Extract Root A (partition 5) and Boot A (partition 2) before creating variants & compression
+          ./build/scripts/extract-partition.sh "root-observer-${VERSION}.img" rootfs.ext4 5
+          ./build/scripts/extract-partition.sh "root-observer-${VERSION}.img" boot.vfat 2
 
           # Write signing credentials
           echo "${{ secrets.RAUC_SIGNING_KEY }}" > signing.key.pem
           echo "${{ secrets.RAUC_SIGNING_CERT }}" > signing.cert.pem
+          echo "${{ secrets.RAUC_CA_CERT }}" > ca.cert.pem
           chmod 600 signing.key.pem
 
           # Create signed RAUC bundle
           ./build/scripts/build-bundle.sh \
-            rootfs.img \
+            rootfs.ext4 \
+            boot.vfat \
             "$VERSION" \
             signing.key.pem \
             signing.cert.pem \
+            ca.cert.pem \
             "root-observer-update-${VERSION}.raucb"
 
           # Clean up
-          rm -f signing.key.pem signing.cert.pem rootfs.img
+          rm -f signing.key.pem signing.cert.pem ca.cert.pem rootfs.ext4 boot.vfat
 
-      - name: Create config.txt variants
+      - name: Create hardware variant images (config.txt differences)
         run: |
           VERSION="${{ needs.build-firmware.outputs.version }}"
           sudo ./build/scripts/create-config-variants.sh "root-observer-${VERSION}.img" "$VERSION"

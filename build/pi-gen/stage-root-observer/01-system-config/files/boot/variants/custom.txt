@@ -1,0 +1,2 @@
+# Custom variant: ROOT hardware, IMX290 module is not auto-detected
+dtoverlay=imx290

@@ -12,8 +12,16 @@
 set -e
 
 OUTPUT_DIR="${1:-./certificates}"
-VALIDITY_DAYS=3650  # 10 years
+NOT_BEFORE=20250101000000Z    # Device clocks may be unsynced
+CA_NOT_AFTER=99991231235959Z  # No expiry
+SIGNING_VALIDITY_DAYS=3650    # 10 years
 KEY_SIZE=4096
+
+# Check for -not_after support
+if ! openssl req -help 2>&1 | grep -q -- '-not_after'; then
+    echo "Error: OpenSSL 3.4+ required (found: $(openssl version))"
+    exit 1
+fi
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -28,7 +36,8 @@ echo "  Creating CA certificate..."
 openssl req -new -x509 \
     -key "$OUTPUT_DIR/ca.key.pem" \
     -out "$OUTPUT_DIR/ca.cert.pem" \
-    -days $VALIDITY_DAYS \
+    -not_before "$NOT_BEFORE" \
+    -not_after "$CA_NOT_AFTER" \
     -subj "/CN=ROOT Observer CA/O=ROOT Privacy/C=US" \
     -addext "basicConstraints=critical,CA:TRUE" \
     -addext "keyUsage=critical,keyCertSign,cRLSign"
@@ -51,12 +60,13 @@ openssl x509 -req \
     -CAkey "$OUTPUT_DIR/ca.key.pem" \
     -CAcreateserial \
     -out "$OUTPUT_DIR/signing.cert.pem" \
-    -days $VALIDITY_DAYS \
+    -not_before "$NOT_BEFORE" \
+    -days $SIGNING_VALIDITY_DAYS \
     -extfile <(printf "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature") \
     2>/dev/null
 
 # Clean up intermediate files
-rm -f "$OUTPUT_DIR/signing.csr.pem" "$OUTPUT_DIR/ca.srl"
+rm -f "$OUTPUT_DIR/signing.csr.pem" "$OUTPUT_DIR/ca.srl" "$OUTPUT_DIR/ca.cert.srl"
 
 echo ""
 echo "Certificates generated in $OUTPUT_DIR:"

@@ -1,15 +1,18 @@
 #!/bin/bash
-# Repartition a pi-gen image for A/B root partition layout
+# Repartition a pi-gen image for the A/B boot + root partition layout
 #
 # Usage: sudo ./repartition-image.sh <input.img> <output.img>
 #
-# Creates a 4-partition layout:
-#   1. Boot partition (512MB, FAT32)
-#   2. Root A (4GB, ext4)
-#   3. Root B (4GB, ext4)
-#   4. Data (remaining space, ext4)
+# Creates a 7-partition layout (MBR):
+#   1. Bootloader (512MiB, FAT32)
+#   2. Boot A (512MiB, FAT32)
+#   3. Boot B (512MiB, FAT32)
+#   4. Extended partition containing:
+#      5. Root A (5GiB, ext4)
+#      6. Root B (5GiB, ext4)
+#      7. Data (remaining space, ext4)
 #
-# Prerequisites: parted, losetup, kpartx, e2fsprogs
+# Prerequisites: parted, losetup, kpartx, dosfstools, e2fsprogs
 # Note: Requires sudo/root for loop device operations
 
 set -e
@@ -27,52 +30,60 @@ if [ ! -f "$INPUT_IMG" ]; then
     exit 1
 fi
 
+if ! file "$INPUT_IMG" | grep -q "boot sector"; then
+    echo "Error: Input is not a disk image: $INPUT_IMG"
+    exit 1
+fi
+
 if [ "$(id -u)" -ne 0 ]; then
     echo "Error: This script requires root privileges (loop devices)"
     echo "Usage: sudo $0 <input.img> <output.img>"
     exit 1
 fi
 
-# Sizes in MB
+# Sizes in MiB
+# Boot and root sizes are fixed on deployed devices
+BOOTLOADER_SIZE_MB=512
 BOOT_SIZE_MB=512
 ROOT_SIZE_MB=5120
 DATA_MIN_SIZE_MB=5120
+# Each logical partition is preceded by its EBR
+EBR_GAP_MB=1
 
-# Calculate total size needed
-TOTAL_SIZE_MB=$((BOOT_SIZE_MB + ROOT_SIZE_MB * 2 + DATA_MIN_SIZE_MB))
+# Partition boundaries in MiB
+P1_START=1
+P2_START=$((P1_START + BOOTLOADER_SIZE_MB))
+P3_START=$((P2_START + BOOT_SIZE_MB))
+EXT_START=$((P3_START + BOOT_SIZE_MB))
+P5_START=$((EXT_START + EBR_GAP_MB))
+P5_END=$((P5_START + ROOT_SIZE_MB))
+P6_START=$((P5_END + EBR_GAP_MB))
+P6_END=$((P6_START + ROOT_SIZE_MB))
+P7_START=$((P6_END + EBR_GAP_MB))
+TOTAL_SIZE_MB=$((P7_START + DATA_MIN_SIZE_MB))
 
 echo "Creating A/B partition image..."
-echo "  Boot:   ${BOOT_SIZE_MB}MB"
-echo "  Root A: ${ROOT_SIZE_MB}MB"
-echo "  Root B: ${ROOT_SIZE_MB}MB"
-echo "  Data:   ${DATA_MIN_SIZE_MB}MB+ (expands on first boot)"
-echo "  Total:  ${TOTAL_SIZE_MB}MB minimum"
+echo "  Bootloader: ${BOOTLOADER_SIZE_MB}MiB"
+echo "  Boot A/B:   ${BOOT_SIZE_MB}MiB each"
+echo "  Root A/B:   ${ROOT_SIZE_MB}MiB each"
+echo "  Data:       ${DATA_MIN_SIZE_MB}MiB+ (expands on first boot)"
+echo "  Total:      ${TOTAL_SIZE_MB}MiB minimum"
 
 # Track resources for cleanup
 LOOP_DEV=""
 INPUT_LOOP=""
-MOUNT_BOOT_SRC=""
-MOUNT_BOOT_DST=""
-MOUNT_ROOT_SRC=""
-MOUNT_ROOT_A_DST=""
-MOUNT_ROOT_B_DST=""
+MOUNTS=()
 
 cleanup() {
     local exit_code=$?
+    local dir
     echo "Cleaning up..."
     # Unmount any mounted filesystems (|| true ensures cleanup never fails the script)
-    [ -n "$MOUNT_BOOT_SRC" ] && mountpoint -q "$MOUNT_BOOT_SRC" && umount "$MOUNT_BOOT_SRC" 2>/dev/null || true
-    [ -n "$MOUNT_BOOT_DST" ] && mountpoint -q "$MOUNT_BOOT_DST" && umount "$MOUNT_BOOT_DST" 2>/dev/null || true
-    [ -n "$MOUNT_ROOT_SRC" ] && mountpoint -q "$MOUNT_ROOT_SRC" && umount "$MOUNT_ROOT_SRC" 2>/dev/null || true
-    [ -n "$MOUNT_ROOT_A_DST" ] && mountpoint -q "$MOUNT_ROOT_A_DST" && umount "$MOUNT_ROOT_A_DST" 2>/dev/null || true
-    [ -n "$MOUNT_ROOT_B_DST" ] && mountpoint -q "$MOUNT_ROOT_B_DST" && umount "$MOUNT_ROOT_B_DST" 2>/dev/null || true
-
-    # Remove mount directories
-    [ -n "$MOUNT_BOOT_SRC" ] && rm -rf "$MOUNT_BOOT_SRC" 2>/dev/null || true
-    [ -n "$MOUNT_BOOT_DST" ] && rm -rf "$MOUNT_BOOT_DST" 2>/dev/null || true
-    [ -n "$MOUNT_ROOT_SRC" ] && rm -rf "$MOUNT_ROOT_SRC" 2>/dev/null || true
-    [ -n "$MOUNT_ROOT_A_DST" ] && rm -rf "$MOUNT_ROOT_A_DST" 2>/dev/null || true
-    [ -n "$MOUNT_ROOT_B_DST" ] && rm -rf "$MOUNT_ROOT_B_DST" 2>/dev/null || true
+    for dir in "${MOUNTS[@]}"; do
+        mountpoint -q "$dir" && umount "$dir" 2>/dev/null || true
+        # rmdir keeps files if still mounted
+        rmdir "$dir" 2>/dev/null || true
+    done
 
     # Clean up loop devices
     [ -n "$INPUT_LOOP" ] && kpartx -d "$INPUT_LOOP" 2>/dev/null || true
@@ -84,6 +95,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+all_exist() {
+    local dev
+    for dev in "$@"; do
+        [ -e "$dev" ] || return 1
+    done
+}
+
+# Wait for devices to appear
+wait_for_partitions() {
+    for _ in {1..10}; do
+        all_exist "$@" && return 0
+        sleep 1
+    done
+    echo "Error: Partition devices did not appear: $*"
+    exit 1
+}
+
 # Create output image with required size
 echo ""
 echo "Creating image file..."
@@ -93,149 +121,110 @@ truncate -s ${TOTAL_SIZE_MB}M "$OUTPUT_IMG"
 echo "Creating partition table..."
 parted -s "$OUTPUT_IMG" mklabel msdos
 
-# Create partitions
-# Partition 1: Boot (FAT32)
-parted -s "$OUTPUT_IMG" mkpart primary fat32 1MiB ${BOOT_SIZE_MB}MiB
+# Partition 1: Bootloader (FAT32)
+parted -s "$OUTPUT_IMG" mkpart primary fat32 ${P1_START}MiB ${P2_START}MiB
 parted -s "$OUTPUT_IMG" set 1 boot on
 
-# Partition 2: Root A (ext4)
-parted -s "$OUTPUT_IMG" mkpart primary ext4 ${BOOT_SIZE_MB}MiB $((BOOT_SIZE_MB + ROOT_SIZE_MB))MiB
+# Partition 2 and 3: Boot A and B (FAT32)
+parted -s "$OUTPUT_IMG" mkpart primary fat32 ${P2_START}MiB ${P3_START}MiB
+parted -s "$OUTPUT_IMG" mkpart primary fat32 ${P3_START}MiB ${EXT_START}MiB
 
-# Partition 3: Root B (ext4)
-parted -s "$OUTPUT_IMG" mkpart primary ext4 $((BOOT_SIZE_MB + ROOT_SIZE_MB))MiB $((BOOT_SIZE_MB + ROOT_SIZE_MB * 2))MiB
+# Partition 4: Extended (uses remaining space)
+parted -s "$OUTPUT_IMG" mkpart extended ${EXT_START}MiB 100%
 
-# Partition 4: Data (ext4, uses remaining space)
-parted -s "$OUTPUT_IMG" mkpart primary ext4 $((BOOT_SIZE_MB + ROOT_SIZE_MB * 2))MiB 100%
+# Partition 5 and 6: Root A and B (ext4)
+parted -s "$OUTPUT_IMG" mkpart logical ext4 ${P5_START}MiB ${P5_END}MiB
+parted -s "$OUTPUT_IMG" mkpart logical ext4 ${P6_START}MiB ${P6_END}MiB
+
+# Partition 7: Data (ext4, uses remaining space)
+parted -s "$OUTPUT_IMG" mkpart logical ext4 ${P7_START}MiB 100%
 
 echo ""
 echo "Partition layout:"
 parted -s "$OUTPUT_IMG" print
 
+# Set up loop devices
 echo ""
-echo "Setting up loop device for output image..."
-
-# Set up loop device for output
+echo "Setting up loop devices..."
 LOOP_DEV=$(losetup -f --show "$OUTPUT_IMG")
-echo "  Loop device: $LOOP_DEV"
-
-# Create device mappings
 kpartx -av "$LOOP_DEV"
-sleep 1
+OUT="/dev/mapper/$(basename "$LOOP_DEV")"
+BOOTLOADER_PART="${OUT}p1"
+BOOT_A_PART="${OUT}p2"
+BOOT_B_PART="${OUT}p3"
+ROOT_A_PART="${OUT}p5"
+ROOT_B_PART="${OUT}p6"
+DATA_PART="${OUT}p7"
+wait_for_partitions "$BOOTLOADER_PART" "$BOOT_A_PART" "$BOOT_B_PART" "$ROOT_A_PART" "$ROOT_B_PART" "$DATA_PART"
 
-# Get mapper device names
-MAPPER_BASE=$(basename "$LOOP_DEV")
-BOOT_PART="/dev/mapper/${MAPPER_BASE}p1"
-ROOT_A_PART="/dev/mapper/${MAPPER_BASE}p2"
-ROOT_B_PART="/dev/mapper/${MAPPER_BASE}p3"
-DATA_PART="/dev/mapper/${MAPPER_BASE}p4"
-
-# Wait for devices to appear
-echo "Waiting for partition devices..."
-for i in {1..10}; do
-    if [ -e "$BOOT_PART" ] && [ -e "$ROOT_A_PART" ] && [ -e "$ROOT_B_PART" ] && [ -e "$DATA_PART" ]; then
-        break
-    fi
-    sleep 1
-done
-
-if [ ! -e "$BOOT_PART" ]; then
-    echo "Error: Partition devices did not appear"
-    exit 1
-fi
+INPUT_LOOP=$(losetup -f --show -r "$INPUT_IMG")
+kpartx -av "$INPUT_LOOP"
+IN="/dev/mapper/$(basename "$INPUT_LOOP")"
+wait_for_partitions "${IN}p1" "${IN}p2"
 
 # Format partitions
 echo ""
 echo "Formatting partitions..."
-echo "  Formatting boot partition (FAT32)..."
-mkfs.vfat -F 32 -n "boot" "$BOOT_PART"
-
-echo "  Formatting Root A (ext4)..."
-mkfs.ext4 -L "rootfs-a" -q "$ROOT_A_PART"
-
-echo "  Formatting Root B (ext4)..."
-mkfs.ext4 -L "rootfs-b" -q "$ROOT_B_PART"
-
-echo "  Formatting Data partition (ext4)..."
+mkfs.vfat -F 32 -n "BOOTLOADER" "$BOOTLOADER_PART"
+# Same labels, updates copy A to B
+mkfs.vfat -F 32 -n "boot" "$BOOT_A_PART"
+mkfs.vfat -F 32 -n "boot" "$BOOT_B_PART"
+mkfs.ext4 -L "rootfs" -q "$ROOT_A_PART"
+mkfs.ext4 -L "rootfs" -q "$ROOT_B_PART"
 mkfs.ext4 -L "data" -q "$DATA_PART"
 
-# Copy content from input image if it exists and is a valid image
-if file "$INPUT_IMG" | grep -q "boot sector"; then
-    echo ""
-    echo "Copying content from source image..."
+# Create mount points
+SRC_BOOT=$(mktemp -d)
+SRC_ROOT=$(mktemp -d)
+DST_BOOTLOADER=$(mktemp -d)
+DST_BOOT_A=$(mktemp -d)
+DST_BOOT_B=$(mktemp -d)
+DST_ROOT_A=$(mktemp -d)
+DST_ROOT_B=$(mktemp -d)
+MOUNTS=("$SRC_BOOT" "$SRC_ROOT" "$DST_BOOTLOADER" "$DST_BOOT_A" "$DST_BOOT_B" "$DST_ROOT_A" "$DST_ROOT_B")
 
-    # Set up loop device for input image
-    INPUT_LOOP=$(losetup -f --show -r "$INPUT_IMG")
-    kpartx -av "$INPUT_LOOP"
-    sleep 1
+# Mount all partitions
+echo ""
+echo "Mounting partitions..."
+mount -o ro "${IN}p1" "$SRC_BOOT"
+mount -o ro "${IN}p2" "$SRC_ROOT"
+mount "$BOOTLOADER_PART" "$DST_BOOTLOADER"
+mount "$BOOT_A_PART" "$DST_BOOT_A"
+mount "$BOOT_B_PART" "$DST_BOOT_B"
+mount "$ROOT_A_PART" "$DST_ROOT_A"
+mount "$ROOT_B_PART" "$DST_ROOT_B"
 
-    INPUT_MAPPER_BASE=$(basename "$INPUT_LOOP")
-    INPUT_BOOT="/dev/mapper/${INPUT_MAPPER_BASE}p1"
-    INPUT_ROOT="/dev/mapper/${INPUT_MAPPER_BASE}p2"
+# Firmware needed to read autoboot.txt
+echo "  Populating bootloader partition..."
+cp "$SRC_BOOT"/{bootcode.bin,start.elf,fixup.dat} "$DST_BOOTLOADER"/
 
-    # Wait for input devices
-    for i in {1..10}; do
-        if [ -e "$INPUT_BOOT" ] && [ -e "$INPUT_ROOT" ]; then
-            break
-        fi
-        sleep 1
-    done
+# Start on Boot A
+cat > "$DST_BOOTLOADER/autoboot.txt" << 'AUTOBOOT'
+[all]
+tryboot_a_b=1
+boot_partition=2
+[tryboot]
+boot_partition=2
+AUTOBOOT
 
-    # Create mount points
-    MOUNT_BOOT_SRC=$(mktemp -d)
-    MOUNT_BOOT_DST=$(mktemp -d)
-    MOUNT_ROOT_SRC=$(mktemp -d)
-    MOUNT_ROOT_A_DST=$(mktemp -d)
-    MOUNT_ROOT_B_DST=$(mktemp -d)
-
-    # Mount all partitions
-    echo "  Mounting partitions..."
-    mount -o ro "$INPUT_BOOT" "$MOUNT_BOOT_SRC"
-    mount "$BOOT_PART" "$MOUNT_BOOT_DST"
-    mount -o ro "$INPUT_ROOT" "$MOUNT_ROOT_SRC"
-    mount "$ROOT_A_PART" "$MOUNT_ROOT_A_DST"
-    mount "$ROOT_B_PART" "$MOUNT_ROOT_B_DST"
-
-    # Copy boot partition
-    echo "  Copying boot partition..."
-    cp -a "$MOUNT_BOOT_SRC"/* "$MOUNT_BOOT_DST"/
-
+# Copy boot partition to both Boot A and Boot B
+echo "  Copying boot files to Boot A and Boot B..."
+for dst in "$DST_BOOT_A" "$DST_BOOT_B"; do
+    cp -a "$SRC_BOOT"/* "$dst"/
     # Remove pi-gen's default cmdline.txt, only cmdline_a.txt and cmdline_b.txt are used
-    rm -f "$MOUNT_BOOT_DST/cmdline.txt"
+    rm -f "$dst/cmdline.txt"
+done
 
-    # Copy rootfs to both Root A and Root B
-    echo "  Copying rootfs to Root A..."
-    cp -a "$MOUNT_ROOT_SRC"/* "$MOUNT_ROOT_A_DST"/
+# Copy rootfs to both Root A and Root B
+echo "  Copying rootfs to Root A and Root B..."
+for dst in "$DST_ROOT_A" "$DST_ROOT_B"; do
+    cp -a "$SRC_ROOT"/* "$dst"/
+done
 
-    echo "  Copying rootfs to Root B..."
-    cp -a "$MOUNT_ROOT_SRC"/* "$MOUNT_ROOT_B_DST"/
-
-    # Unmount (cleanup will handle this, but do it explicitly for sync)
-    sync
-    echo "  Unmounting..."
-    umount "$MOUNT_ROOT_B_DST"
-    umount "$MOUNT_ROOT_A_DST"
-    umount "$MOUNT_ROOT_SRC"
-    umount "$MOUNT_BOOT_DST"
-    umount "$MOUNT_BOOT_SRC"
-
-    # Clean up input image loop device
-    kpartx -d "$INPUT_LOOP"
-    losetup -d "$INPUT_LOOP"
-    INPUT_LOOP=""
-
-    # Clean up mount directories
-    rm -rf "$MOUNT_BOOT_SRC" "$MOUNT_BOOT_DST" "$MOUNT_ROOT_SRC" "$MOUNT_ROOT_A_DST" "$MOUNT_ROOT_B_DST"
-    MOUNT_BOOT_SRC=""
-    MOUNT_BOOT_DST=""
-    MOUNT_ROOT_SRC=""
-    MOUNT_ROOT_A_DST=""
-    MOUNT_ROOT_B_DST=""
-fi
-
-# Clean up output image loop device (|| true in case already released)
-kpartx -d "$LOOP_DEV" || true
-losetup -d "$LOOP_DEV" || true
-LOOP_DEV=""
+# Unmount explicitly so failures fail the build
+sync
+echo "  Unmounting..."
+umount "${MOUNTS[@]}"
 
 echo ""
 echo "Image created successfully: $OUTPUT_IMG"
