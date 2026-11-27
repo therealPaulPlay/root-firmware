@@ -68,6 +68,7 @@ systemctl mask avahi-daemon.service || true
 systemctl mask avahi-daemon.socket || true
 systemctl disable apt-daily.timer || true
 systemctl disable apt-daily-upgrade.timer || true
+systemctl disable dpkg-db-backup.timer || true
 systemctl mask systemd-growfs-root.service || true
 systemctl mask rpi-resize.service || true
 systemctl mask rpi-resize-swap-file.service || true
