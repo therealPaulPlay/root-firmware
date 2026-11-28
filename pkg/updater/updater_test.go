@@ -318,7 +318,12 @@ func TestBootConfirmFlow(t *testing.T) {
 	healthMu.Unlock()
 
 	// Add relay connected - still not enough
-	MarkRelayConnected()
+	if !MarkRelayConnected() {
+		t.Error("first relay connection should return true")
+	}
+	if MarkRelayConnected() {
+		t.Error("later relay connections should return false")
+	}
 	healthMu.Lock()
 	if slotMarkedGood {
 		t.Error("slotMarkedGood should be false without updateCheckSuccess")

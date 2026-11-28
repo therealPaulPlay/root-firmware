@@ -181,7 +181,9 @@ func (r *RelayComm) run(relayDomain string) {
 		for len(r.lowPrioSendChan) > 0 {
 			<-r.lowPrioSendChan
 		}
-		updater.MarkRelayConnected()
+		if updater.MarkRelayConnected() {
+			go updater.Get().CheckForUpdates()
+		}
 		markInitialRelayConnect()
 		notifications.Get().SendPending() // Deliver notifications that failed while offline (no-op if none did)
 		r.handleConnection(conn)

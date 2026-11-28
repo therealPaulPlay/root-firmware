@@ -30,18 +30,20 @@ func MarkInitComplete() {
 }
 
 // MarkRelayConnected signals that relay connection was established
-func MarkRelayConnected() {
+// Returns true on the first connection since boot
+func MarkRelayConnected() bool {
 	healthMu.Lock()
 	defer healthMu.Unlock()
 	if relayConnected {
-		return
+		return false
 	}
 	relayConnected = true
 	log.Println("Updater: Relay connected successfully")
 	tryMarkSlotGood()
+	return true
 }
 
-// markUpdateCheckSuccessful is called after a successful update check.
+// markUpdateCheckSuccessful is called after a successful update check
 func markUpdateCheckSuccessful() {
 	healthMu.Lock()
 	defer healthMu.Unlock()
@@ -53,8 +55,8 @@ func markUpdateCheckSuccessful() {
 	tryMarkSlotGood()
 }
 
-// tryMarkSlotGood marks the slot as good if all conditions are met.
-// Must be called while holding healthMu.
+// tryMarkSlotGood marks the slot as good if all conditions are met
+// Must be called while holding healthMu
 func tryMarkSlotGood() {
 	if slotMarkedGood || !initComplete || !relayConnected || !updateCheckSuccess {
 		return

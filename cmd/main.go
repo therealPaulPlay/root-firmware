@@ -92,10 +92,8 @@ func main() {
 	// Start relay connection (if relay domain configured)
 	relaycomm.Get().Start()
 
-	// Check for updates after 5s, then every 15 minutes
+	// Check for updates every 15 minutes (first check is triggered by initial relay connect)
 	go func() {
-		time.Sleep(5 * time.Second)
-		updater.Get().CheckForUpdates()
 		for range time.Tick(15 * time.Minute) {
 			updater.Get().CheckForUpdates()
 		}

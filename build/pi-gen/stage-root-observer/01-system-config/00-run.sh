@@ -100,11 +100,11 @@ BRCMFMAC
 install -d "${ROOTFS_DIR}/etc/cloud"
 touch "${ROOTFS_DIR}/etc/cloud/cloud-init.disabled"
 
-# Configure hardware watchdog — systemd pets it, reboot on 15s timeout
+# Configure hardware watchdog — systemd pets it, reboot on 90s timeout (updates can sometimes stall systemd for up to ~30s)
 install -d "${ROOTFS_DIR}/etc/systemd/system.conf.d"
 cat > "${ROOTFS_DIR}/etc/systemd/system.conf.d/watchdog.conf" << 'WATCHDOG'
 [Manager]
-RuntimeWatchdogSec=15
+RuntimeWatchdogSec=90
 WATCHDOG
 
 # Configure journald for volatile storage
